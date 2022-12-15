@@ -1,7 +1,6 @@
 package me.lucasskywalker.listeners;
 
 import me.lucasskywalker.BotMain;
-import net.dv8tion.jda.api.entities.Role;
 import net.dv8tion.jda.api.events.message.react.MessageReactionAddEvent;
 import net.dv8tion.jda.api.events.message.react.MessageReactionRemoveEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
@@ -40,15 +39,15 @@ public class ReactionRoleManager extends ListenerAdapter {
             for(CSVRecord record : csvIterable) {
                 messageId.add(record.get("messageId"));
                 roleId.add(Long.valueOf(record.get("roleId")));
-                emoji.add(record.get("emoji"));
+                emoji.add(record.get("emoji").replace("<", "").replace(">", "")
+                        .replaceFirst(":", ""));
             }
-
 
             for(int i = 0; i < messageId.size(); i++) {
                 if(messageId.get(i).equals(event.getMessageId())
-                        && emoji.get(i).equals(event.getEmoji().getAsReactionCode())) {
-                    Role role = new RoleImpl(roleId.get(i), event.getGuild());
-                    event.getGuild().addRoleToMember(event.getMember(), role).queue();
+                        && emoji.get(i).equals(event.getEmoji().getAsReactionCode()) && !event.getUser().isBot()) {
+                    event.getGuild().addRoleToMember(event.getMember(), new RoleImpl(roleId.get(i), event.getGuild()))
+                            .queue();
                 }
             }
         } catch (URISyntaxException | IOException e) {
@@ -77,15 +76,15 @@ public class ReactionRoleManager extends ListenerAdapter {
             for (CSVRecord record : csvIterable) {
                 messageId.add(record.get("messageId"));
                 roleId.add(Long.valueOf(record.get("roleId")));
-                emoji.add(record.get("emoji"));
+                emoji.add(record.get("emoji").replace("<", "").replace(">", "")
+                        .replaceFirst(":", ""));
             }
-
 
             for (int i = 0; i < messageId.size(); i++) {
                 if (messageId.get(i).equals(event.getMessageId())
-                        && emoji.get(i).equals(event.getEmoji().getAsReactionCode())) {
-                    Role role = new RoleImpl(roleId.get(i), event.getGuild());
-                    event.getGuild().removeRoleFromMember(event.getMember(), role).queue();
+                        && emoji.get(i).equals(event.getEmoji().getAsReactionCode()) && !event.getUser().isBot()) {
+                    event.getGuild().removeRoleFromMember(event.getMember(),
+                            new RoleImpl(roleId.get(i), event.getGuild())).queue();
                 }
             }
         } catch (URISyntaxException | IOException e) {

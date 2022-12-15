@@ -28,20 +28,13 @@ public class SlashCommandManager extends ListenerAdapter {
             case "addreactionrole" -> {
                 /*
                 Add a reaction to a message which can be used by members to assign a role to themselves
-                Command: /addReactionRole <channelid> <messageid> <roleid> <emoji>
+                Command: /addreactionrole <channel> <messageid> <roleid> <emoji>
                 */
                 String emoji = event.getOption("emoji").getAsString();
                 try {
-                    if (emoji.endsWith(">")) {
-                        long emojiId = Long.parseLong(emoji.substring(emoji.lastIndexOf(":") + 1, emoji.length() - 1));
-                        event.getGuild().getTextChannelById(event.getOption("channelid").getAsLong())
-                                .addReactionById(event.getOption("messageid").getAsLong(),
-                                        event.getGuild().getEmojiById(emojiId)).queue();
-
-                    } else
-                        event.getGuild().getTextChannelById(event.getOption("channelid").getAsLong())
-                                .addReactionById(event.getOption("messageid").getAsLong(),
-                                        Emoji.fromFormatted(emoji)).queue();
+                    event.getGuild().getTextChannelById(event.getOption("channel").getAsChannel().getId())
+                            .addReactionById(event.getOption("messageid").getAsLong(),
+                                    Emoji.fromFormatted(emoji)).queue();
 
                     File filePath = new File(new File(BotMain.class.getProtectionDomain().getCodeSource().getLocation().toURI())
                             .getParentFile().getPath() + "/reaction-roles.csv");
