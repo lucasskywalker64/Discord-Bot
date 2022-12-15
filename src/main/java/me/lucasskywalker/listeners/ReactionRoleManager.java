@@ -38,7 +38,12 @@ public class ReactionRoleManager extends ListenerAdapter {
 
             for(CSVRecord record : csvIterable) {
                 messageId.add(record.get("messageId"));
-                roleId.add(Long.valueOf(record.get("roleId")));
+                if(!record.get("roleId").contains("@"))
+                    roleId.add(Long.valueOf(record.get("roleId")));
+                else
+                    roleId.add(Long.valueOf(record.get("roleId")
+                            .substring(3, record.get("roleId").lastIndexOf(">"))));
+
                 emoji.add(record.get("emoji").replace("<", "").replace(">", "")
                         .replaceFirst(":", ""));
             }
@@ -75,7 +80,11 @@ public class ReactionRoleManager extends ListenerAdapter {
 
             for (CSVRecord record : csvIterable) {
                 messageId.add(record.get("messageId"));
-                roleId.add(Long.valueOf(record.get("roleId")));
+                if(!record.get("roleId").contains("@"))
+                    roleId.add(Long.valueOf(record.get("roleId")));
+                else
+                    roleId.add(Long.valueOf(record.get("roleId")
+                            .substring(3, record.get("roleId").lastIndexOf(">"))));
                 emoji.add(record.get("emoji").replace("<", "").replace(">", "")
                         .replaceFirst(":", ""));
             }
