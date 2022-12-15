@@ -37,15 +37,14 @@ public class ReactionRoleManager extends ListenerAdapter {
             List<String> emoji = new ArrayList<>();
 
             for(CSVRecord record : csvIterable) {
-                messageId.add(record.get("messageId"));
+                messageId.add(record.get("messageId").strip());
                 if(!record.get("roleId").contains("@"))
-                    roleId.add(Long.valueOf(record.get("roleId")));
+                    roleId.add(Long.valueOf(record.get("roleId").strip()));
                 else
                     roleId.add(Long.valueOf(record.get("roleId")
-                            .substring(3, record.get("roleId").lastIndexOf(">"))));
-
+                            .substring(record.get("roleId").indexOf("&") + 1, record.get("roleId").lastIndexOf(">"))));
                 emoji.add(record.get("emoji").replace("<", "").replace(">", "")
-                        .replaceFirst(":", ""));
+                        .replaceFirst(":", "").strip());
             }
 
             for(int i = 0; i < messageId.size(); i++) {
@@ -78,15 +77,15 @@ public class ReactionRoleManager extends ListenerAdapter {
             List<Long> roleId = new ArrayList<>();
             List<String> emoji = new ArrayList<>();
 
-            for (CSVRecord record : csvIterable) {
-                messageId.add(record.get("messageId"));
+            for(CSVRecord record : csvIterable) {
+                messageId.add(record.get("messageId").strip());
                 if(!record.get("roleId").contains("@"))
-                    roleId.add(Long.valueOf(record.get("roleId")));
+                    roleId.add(Long.valueOf(record.get("roleId").strip()));
                 else
                     roleId.add(Long.valueOf(record.get("roleId")
-                            .substring(3, record.get("roleId").lastIndexOf(">"))));
+                            .substring(record.get("roleId").indexOf("&") + 1, record.get("roleId").lastIndexOf(">"))));
                 emoji.add(record.get("emoji").replace("<", "").replace(">", "")
-                        .replaceFirst(":", ""));
+                        .replaceFirst(":", "").strip());
             }
 
             for (int i = 0; i < messageId.size(); i++) {
