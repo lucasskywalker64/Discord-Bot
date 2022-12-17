@@ -37,14 +37,14 @@ public class ReactionRoleManager extends ListenerAdapter {
             List<String> emoji = new ArrayList<>();
 
             for(CSVRecord record : csvIterable) {
-                messageId.add(record.get("messageId").strip());
+                messageId.add(record.get("messageId"));
                 if(!record.get("roleId").contains("@"))
-                    roleId.add(Long.valueOf(record.get("roleId").strip()));
+                    roleId.add(Long.valueOf(record.get("roleId")));
                 else
                     roleId.add(Long.valueOf(record.get("roleId")
                             .substring(record.get("roleId").indexOf("&") + 1, record.get("roleId").lastIndexOf(">"))));
                 emoji.add(record.get("emoji").replace("<", "").replace(">", "")
-                        .replaceFirst(":", "").strip());
+                        .replaceFirst(":", ""));
             }
 
             for(int i = 0; i < messageId.size(); i++) {
@@ -78,14 +78,14 @@ public class ReactionRoleManager extends ListenerAdapter {
             List<String> emoji = new ArrayList<>();
 
             for(CSVRecord record : csvIterable) {
-                messageId.add(record.get("messageId").strip());
+                messageId.add(record.get("messageId"));
                 if(!record.get("roleId").contains("@"))
-                    roleId.add(Long.valueOf(record.get("roleId").strip()));
+                    roleId.add(Long.valueOf(record.get("roleId")));
                 else
                     roleId.add(Long.valueOf(record.get("roleId")
                             .substring(record.get("roleId").indexOf("&") + 1, record.get("roleId").lastIndexOf(">"))));
                 emoji.add(record.get("emoji").replace("<", "").replace(">", "")
-                        .replaceFirst(":", "").strip());
+                        .replaceFirst(":", ""));
             }
 
             for (int i = 0; i < messageId.size(); i++) {
