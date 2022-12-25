@@ -1,9 +1,10 @@
-package me.lucasskywalker;
+package me.lucasskywalker.apis;
 
 import com.twitter.clientlib.TwitterCredentialsBearer;
 import com.twitter.clientlib.ApiException;
 import com.twitter.clientlib.api.TwitterApi;
 import com.twitter.clientlib.model.*;
+import me.lucasskywalker.BotMain;
 
 import java.util.HashSet;
 

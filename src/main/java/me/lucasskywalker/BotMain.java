@@ -1,6 +1,7 @@
 package me.lucasskywalker;
 
 import io.github.cdimascio.dotenv.Dotenv;
+import me.lucasskywalker.apis.YoutubeImpl;
 import me.lucasskywalker.commands.SlashCommandManager;
 import me.lucasskywalker.listeners.ReactionRoleManager;
 import net.dv8tion.jda.api.JDA;
@@ -15,25 +16,28 @@ public class BotMain {
 
     public static Dotenv getConfig() { return CONFIG; }
 
-    private static JDA bot;
+    private static JDA discordAPI;
 
-    public BotMain() throws InvalidTokenException {
-        bot = JDABuilder.createDefault(CONFIG.get("BOT_TOKEN"))
+    private static void init() throws InvalidTokenException {
+        discordAPI = JDABuilder.createDefault(CONFIG.get("BOT_TOKEN"))
                 .setActivity(Activity.streaming("test","https://www.twitch.tv/elinovavt"))
                 .enableIntents(GatewayIntent.GUILD_EMOJIS_AND_STICKERS)
                 .build();
-        bot.addEventListener(new ReactionRoleManager(), new SlashCommandManager());
+        discordAPI.addEventListener(new ReactionRoleManager(), new SlashCommandManager());
     }
 
     public static void main(String[] args) throws InterruptedException {
 
         try {
-            new BotMain();
-            bot.awaitReady();
+            init();
+            discordAPI.awaitReady();
         } catch (InvalidTokenException e) {
             System.out.println("Invalid bot token!");
         }
-        //me.lucasskywalker.TwitterImpl twitter = new me.lucasskywalker.TwitterImpl();
+
+        new YoutubeImpl(discordAPI);
+
+        //me.lucasskywalker.apis.TwitterImpl twitter = new me.lucasskywalker.apis.TwitterImpl();
         //twitter.getLatestTweet();
     }
 }

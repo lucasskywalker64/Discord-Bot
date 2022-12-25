@@ -1,6 +1,5 @@
 package me.lucasskywalker.listeners;
 
-import me.lucasskywalker.BotMain;
 import net.dv8tion.jda.api.events.message.react.MessageReactionAddEvent;
 import net.dv8tion.jda.api.events.message.react.MessageReactionRemoveEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
@@ -21,8 +20,8 @@ public class ReactionRoleManager extends ListenerAdapter {
     @Override
     public void onMessageReactionAdd(@NotNull MessageReactionAddEvent event) {
         try {
-            FileReader fileReader = new FileReader(new File(BotMain.class.getProtectionDomain().getCodeSource().getLocation().toURI())
-                    .getParentFile().getPath() + "/reaction-roles.csv");
+            FileReader fileReader = new FileReader(new File(ReactionRoleManager.class.getProtectionDomain()
+                    .getCodeSource().getLocation().toURI()).getParentFile().getPath() + "/reaction-roles.csv");
 
             CSVFormat csvFormat = CSVFormat.Builder.create(CSVFormat.DEFAULT)
                     .setDelimiter(";")
@@ -42,7 +41,8 @@ public class ReactionRoleManager extends ListenerAdapter {
                     roleId.add(Long.valueOf(record.get("roleId")));
                 else
                     roleId.add(Long.valueOf(record.get("roleId")
-                            .substring(record.get("roleId").indexOf("&") + 1, record.get("roleId").lastIndexOf(">"))));
+                            .substring(record.get("roleId").indexOf("&") + 1, record.get("roleId")
+                                    .lastIndexOf(">"))));
                 emoji.add(record.get("emoji").replace("<", "").replace(">", "")
                         .replaceFirst(":", ""));
             }
@@ -62,8 +62,8 @@ public class ReactionRoleManager extends ListenerAdapter {
     @Override
     public void onMessageReactionRemove(@NotNull MessageReactionRemoveEvent event) {
         try {
-            FileReader fileReader = new FileReader(new File(BotMain.class.getProtectionDomain().getCodeSource().getLocation().toURI())
-                    .getParentFile().getPath() + "/reaction-roles.csv");
+            FileReader fileReader = new FileReader(new File(ReactionRoleManager.class.getProtectionDomain()
+                    .getCodeSource().getLocation().toURI()).getParentFile().getPath() + "/reaction-roles.csv");
 
             CSVFormat csvFormat = CSVFormat.Builder.create(CSVFormat.DEFAULT)
                     .setDelimiter(";")
@@ -82,8 +82,8 @@ public class ReactionRoleManager extends ListenerAdapter {
                 if(!record.get("roleId").contains("@"))
                     roleId.add(Long.valueOf(record.get("roleId")));
                 else
-                    roleId.add(Long.valueOf(record.get("roleId")
-                            .substring(record.get("roleId").indexOf("&") + 1, record.get("roleId").lastIndexOf(">"))));
+                    roleId.add(Long.valueOf(record.get("roleId").substring(record.get("roleId").indexOf("&") + 1,
+                            record.get("roleId").lastIndexOf(">"))));
                 emoji.add(record.get("emoji").replace("<", "").replace(">", "")
                         .replaceFirst(":", ""));
             }

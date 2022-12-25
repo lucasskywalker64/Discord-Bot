@@ -1,6 +1,5 @@
 package me.lucasskywalker.commands;
 
-import me.lucasskywalker.BotMain;
 import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.entities.channel.ChannelType;
 import net.dv8tion.jda.api.entities.emoji.Emoji;
@@ -29,19 +28,20 @@ public class SlashCommandManager extends ListenerAdapter {
     @Override
     public void onSlashCommandInteraction(@NotNull SlashCommandInteractionEvent event) {
         switch (event.getName()) {
+            /*
+            Add a reaction to a message which can be used by members to assign a role to themselves
+            Command: /addreactionrole <channel> <messageid> <roleid> <emoji>
+             */
             case "addreactionrole" -> {
-                /*
-                Add a reaction to a message which can be used by members to assign a role to themselves
-                Command: /addreactionrole <channel> <messageid> <roleid> <emoji>
-                */
-                String emoji = event.getOption("emoji").getAsString();
                 try {
+                    String emoji = event.getOption("emoji").getAsString();
+
                     event.getGuild().getTextChannelById(event.getOption("channel").getAsChannel().getId())
                             .addReactionById(event.getOption("messageid").getAsLong(),
                                     Emoji.fromFormatted(emoji)).complete();
 
-                    File filePath = new File(new File(BotMain.class.getProtectionDomain().getCodeSource().getLocation().toURI())
-                            .getParentFile().getPath() + "/reaction-roles.csv");
+                    File filePath = new File(new File(SlashCommandManager.class.getProtectionDomain()
+                            .getCodeSource().getLocation().toURI()).getParentFile().getPath() + "/reaction-roles.csv");
 
                     CSVFormat csvFormat;
                     if (filePath.createNewFile()) {
@@ -73,11 +73,12 @@ public class SlashCommandManager extends ListenerAdapter {
                     throw new RuntimeException(e);
                 }
             }
+
+            /*
+            Create a new embed or message in the given channel with optional roles and emojis to add reaction roles
+            Command: /createractionmessage <channel, message, embed:true/false> [title, roles, emojis]
+             */
             case "createreactionmessage" -> {
-                /*
-                Create a new embed or message in the given channel with optional roles and emojis to add reaction roles
-                Command: /createractionmessage <channel, message, embed:true/false> [title, roles, emojis]
-                 */
                 EmbedBuilder embedBuilder = new EmbedBuilder();
                 if (event.getOption("title") != null)
                     embedBuilder.setTitle(event.getOption("title").getAsString());
@@ -108,21 +109,22 @@ public class SlashCommandManager extends ListenerAdapter {
 
                             String messageId;
                             if (event.getOption("embed").getAsBoolean()) {
-                                messageId = event.getGuild().getTextChannelById(event.getOption("channel").getAsChannel().getId())
-                                        .sendMessageEmbeds(embedBuilder.build()).complete().getId();
+                                messageId = event.getGuild().getTextChannelById(event.getOption("channel")
+                                        .getAsChannel().getId()).sendMessageEmbeds(embedBuilder.build()).complete()
+                                        .getId();
                                 event.reply("Embed created in " + event.getOption("channel").getAsChannel()
                                         .getAsMention()).queue();
                             } else {
-                                messageId = event.getGuild().getTextChannelById(event.getOption("channel").getAsChannel().getId())
-                                        .sendMessage(message).complete().getId();
+                                messageId = event.getGuild().getTextChannelById(event.getOption("channel")
+                                        .getAsChannel().getId()).sendMessage(message).complete().getId();
                                 event.reply("Message sent in " + event.getOption("channel").getAsChannel()
                                         .getAsMention()).queue();
                             }
 
 
-                            File filePath = new File(new File(BotMain.class.getProtectionDomain()
-                                    .getCodeSource().getLocation().toURI())
-                                    .getParentFile().getPath() + "/reaction-roles.csv");
+                            File filePath = new File(new File(SlashCommandManager.class.getProtectionDomain()
+                                    .getCodeSource().getLocation().toURI()).getParentFile().getPath()
+                                    + "/reaction-roles.csv");
 
                             CSVFormat csvFormat;
                             if (filePath.createNewFile()) {
@@ -171,6 +173,42 @@ public class SlashCommandManager extends ListenerAdapter {
                     }
                 }
             }
+
+            /*
+            Add a YouTube notification output to a specific channel
+            Command: /addyoutubenotif <channel, message, ytchannelid, role>
+             */
+            case "addyoutubenotif" -> {
+                try {
+                    File filePath = new File(new File(SlashCommandManager.class.getProtectionDomain()
+                            .getCodeSource().getLocation().toURI()).getParentFile().getPath() + "/youtube.csv");
+
+                    CSVFormat csvFormat;
+                    if (filePath.createNewFile()) {
+                        csvFormat = CSVFormat.Builder.create(CSVFormat.DEFAULT)
+                                .setDelimiter(";")
+                                .setHeader("guildid", "channel", "message", "ytchannelid", "role", "videoid")
+                                .build();
+                    } else
+                        csvFormat = CSVFormat.Builder.create(CSVFormat.DEFAULT)
+                                .setDelimiter(";").build();
+
+                    FileWriter fileWriter = new FileWriter(filePath, true);
+
+                    CSVPrinter csvPrinter = new CSVPrinter(fileWriter, csvFormat);
+                    csvPrinter.printRecord(
+                            event.getGuild().getId(),
+                            event.getOption("channel").getAsString(),
+                            event.getOption("message").getAsString(),
+                            event.getOption("ytchannelid").getAsString(),
+                            event.getOption("role").getAsString(),
+                            "null");
+                    csvPrinter.close(true);
+                    event.reply("Youtube notification added").queue();
+                } catch (URISyntaxException | IOException e) {
+                    throw new RuntimeException(e);
+                }
+            }
         }
     }
 
@@ -209,6 +247,19 @@ public class SlashCommandManager extends ListenerAdapter {
                         new OptionData(OptionType.STRING, "emojis",
                                 "Emojis separated by ; in the same order as roles " +
                                         "(custom emojis only from this server)")));
+
+        // Command: /addyoutubenotif <channel, message, ytchannelid, role>
+        commandDataList.add(Commands.slash("addyoutubenotif",
+                "Add a YouTube notification output to a specific channel").addOptions(
+                        new OptionData(OptionType.CHANNEL, "channel",
+                                "The channel that the notification should be posted to", true)
+                                .setChannelTypes(ChannelType.TEXT, ChannelType.NEWS, ChannelType.GUILD_PUBLIC_THREAD),
+                        new OptionData(OptionType.STRING, "message",
+                                "The message sent with the notification", true),
+                        new OptionData(OptionType.STRING, "ytchannelid",
+                                "The ID of the YouTube channel", true),
+                        new OptionData(OptionType.ROLE, "role",
+                                "The role that will be pinged with the notification", true)));
 
         event.getGuild().updateCommands().addCommands(commandDataList).queue();
     }
