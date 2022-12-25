@@ -187,7 +187,7 @@ public class SlashCommandManager extends ListenerAdapter {
                     if (filePath.createNewFile()) {
                         csvFormat = CSVFormat.Builder.create(CSVFormat.DEFAULT)
                                 .setDelimiter(";")
-                                .setHeader("guildid", "channel", "message", "ytchannelid", "role", "videoid")
+                                .setHeader("channel", "message", "ytchannelid", "role", "videoid")
                                 .build();
                     } else
                         csvFormat = CSVFormat.Builder.create(CSVFormat.DEFAULT)
@@ -197,7 +197,6 @@ public class SlashCommandManager extends ListenerAdapter {
 
                     CSVPrinter csvPrinter = new CSVPrinter(fileWriter, csvFormat);
                     csvPrinter.printRecord(
-                            event.getGuild().getId(),
                             event.getOption("channel").getAsString(),
                             event.getOption("message").getAsString(),
                             event.getOption("ytchannelid").getAsString(),

@@ -33,8 +33,6 @@ public class YoutubeImpl {
 
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
 
-    private final List<String> guildid = new ArrayList<>();
-
     private final List<String> channel = new ArrayList<>();
 
     private final List<String> message = new ArrayList<>();
@@ -51,7 +49,6 @@ public class YoutubeImpl {
 
     private void readCSV() {
         try {
-            guildid.clear();
             channel.clear();
             message.clear();
             ytchannelid.clear();
@@ -63,14 +60,13 @@ public class YoutubeImpl {
 
             CSVFormat csvFormat = CSVFormat.Builder.create(CSVFormat.DEFAULT)
                     .setDelimiter(";")
-                    .setHeader("guildid", "channel", "message", "ytchannelid", "role", "videoid")
+                    .setHeader("channel", "message", "ytchannelid", "role", "videoid")
                     .setSkipHeaderRecord(true)
                     .build();
 
             Iterable<CSVRecord> csvIterable = csvFormat.parse(fileReader);
 
             for(CSVRecord record : csvIterable) {
-                guildid.add(record.get("guildid"));
                 channel.add(record.get("channel"));
                 message.add(record.get("message"));
                 ytchannelid.add(record.get("ytchannelid"));
@@ -95,15 +91,14 @@ public class YoutubeImpl {
 
             CSVFormat csvFormat = CSVFormat.Builder.create(CSVFormat.DEFAULT)
                     .setDelimiter(";")
-                    .setHeader("guildid", "channel", "message", "ytchannelid", "role", "videoid")
+                    .setHeader("channel", "message", "ytchannelid", "role", "videoid")
                     .build();
 
             FileWriter fileWriter = new FileWriter(filePath, false);
 
             CSVPrinter csvPrinter = new CSVPrinter(fileWriter, csvFormat);
-            for(int i = 0; i < guildid.size(); i++) {
+            for(int i = 0; i < channel.size(); i++) {
                 csvPrinter.printRecord(
-                        guildid.get(i),
                         channel.get(i),
                         message.get(i),
                         ytchannelid.get(i),
