@@ -77,10 +77,12 @@ public class SlashCommandManager extends ListenerAdapter {
 
             /*
             Create a new embed or message in the given channel with optional roles and emojis to add reaction roles
-            Command: /createractionmessage <channel, message, embed:true/false> [title, roles, emojis]
+            Command: /createractionmessage <channel, message, embed:true/false> [title, roles, emojis, image]
              */
             case "createreactionmessage" -> {
                 EmbedBuilder embedBuilder = new EmbedBuilder();
+                if(event.getOption("image") != null)
+                    embedBuilder.setThumbnail(event.getOption("image").getAsString());
                 if (event.getOption("title") != null)
                     embedBuilder.setTitle(event.getOption("title").getAsString());
                 String message = event.getOption("message").getAsString()
@@ -241,7 +243,7 @@ public class SlashCommandManager extends ListenerAdapter {
                         new OptionData(OptionType.STRING, "emoji",
                                 "The emoji that should be used.", true)));
 
-        // Command: /createractionmessage <channel, message, embed:true/false> [title, roles, emojis]
+        // Command: /createractionmessage <channel, message, embed:true/false> [title, roles, emojis, image]
         commandDataList.add(Commands.slash("createreactionmessage",
                 "Create a new message or embed for adding reaction roles.").addOptions(
                         new OptionData(OptionType.CHANNEL, "channel",
@@ -258,7 +260,9 @@ public class SlashCommandManager extends ListenerAdapter {
                                 "Roles separated by ; in the same order as emojis."),
                         new OptionData(OptionType.STRING, "emojis",
                                 "Emojis separated by ; in the same order as roles " +
-                                        "(custom emojis only from this server).")));
+                                        "(custom emojis only from this server)."),
+                        new OptionData(OptionType.STRING, "image",
+                                "Optional image that is added to the embed")));
 
         // Command: /addyoutubenotif <channel, message, ytchannelid, role>
         commandDataList.add(Commands.slash("addyoutubenotif",
