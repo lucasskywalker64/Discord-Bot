@@ -1,5 +1,6 @@
 package me.lucasskywalker.listeners;
 
+import net.dv8tion.jda.api.entities.User;
 import net.dv8tion.jda.api.events.message.react.MessageReactionAddEvent;
 import net.dv8tion.jda.api.events.message.react.MessageReactionRemoveEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
@@ -52,6 +53,12 @@ public class ReactionRoleManager extends ListenerAdapter {
                         && emoji.get(i).equals(event.getEmoji().getAsReactionCode()) && !event.getUser().isBot()) {
                     event.getGuild().addRoleToMember(event.getMember(), new RoleImpl(roleId.get(i), event.getGuild()))
                             .queue();
+                    int finalI = i;
+                    event.getUser().openPrivateChannel()
+                            .flatMap(privateChannel -> privateChannel
+                                    .sendMessage("You have received the following role: "
+                                            + event.getGuild().getRoleById(roleId.get(finalI)).getName()))
+                            .queue();
                 }
             }
         } catch (URISyntaxException | IOException e) {
@@ -88,11 +95,20 @@ public class ReactionRoleManager extends ListenerAdapter {
                         .replaceFirst(":", ""));
             }
 
+            User user = event.retrieveUser().complete();
+
             for (int i = 0; i < messageId.size(); i++) {
                 if (messageId.get(i).equals(event.getMessageId())
-                        && emoji.get(i).equals(event.getEmoji().getAsReactionCode()) && !event.getUser().isBot()) {
-                    event.getGuild().removeRoleFromMember(event.getMember(),
+                        && emoji.get(i).equals(event.getEmoji().getAsReactionCode())
+                        && !user.isBot()) {
+                    event.getGuild().removeRoleFromMember(user,
                             new RoleImpl(roleId.get(i), event.getGuild())).queue();
+                    int finalI = i;
+                    user.openPrivateChannel()
+                            .flatMap(privateChannel -> privateChannel
+                                    .sendMessage("The following role has been removed: "
+                                            + event.getGuild().getRoleById(roleId.get(finalI)).getName()))
+                            .queue();
                 }
             }
         } catch (URISyntaxException | IOException e) {
