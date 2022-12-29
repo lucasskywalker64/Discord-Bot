@@ -22,7 +22,8 @@ public class ReactionRoleManager extends ListenerAdapter {
     public void onMessageReactionAdd(@NotNull MessageReactionAddEvent event) {
         try {
             FileReader fileReader = new FileReader(new File(ReactionRoleManager.class.getProtectionDomain()
-                    .getCodeSource().getLocation().toURI()).getParentFile().getPath() + "/reaction-roles.csv");
+                    .getCodeSource().getLocation().toURI()).getParentFile().getPath()
+                    + "/bot_files/reaction-roles.csv");
 
             CSVFormat csvFormat = CSVFormat.Builder.create(CSVFormat.DEFAULT)
                     .setDelimiter(";")
@@ -56,8 +57,9 @@ public class ReactionRoleManager extends ListenerAdapter {
                     int finalI = i;
                     event.getUser().openPrivateChannel()
                             .flatMap(privateChannel -> privateChannel
-                                    .sendMessage("You have received the following role: "
-                                            + event.getGuild().getRoleById(roleId.get(finalI)).getName()))
+                                    .sendMessage("The role "
+                                            + event.getGuild().getRoleById(roleId.get(finalI)).getName()
+                                            + " has been successfully added to you!"))
                             .queue();
                 }
             }
@@ -70,7 +72,8 @@ public class ReactionRoleManager extends ListenerAdapter {
     public void onMessageReactionRemove(@NotNull MessageReactionRemoveEvent event) {
         try {
             FileReader fileReader = new FileReader(new File(ReactionRoleManager.class.getProtectionDomain()
-                    .getCodeSource().getLocation().toURI()).getParentFile().getPath() + "/reaction-roles.csv");
+                    .getCodeSource().getLocation().toURI()).getParentFile().getPath()
+                    + "/bot_files/reaction-roles.csv");
 
             CSVFormat csvFormat = CSVFormat.Builder.create(CSVFormat.DEFAULT)
                     .setDelimiter(";")
@@ -106,8 +109,9 @@ public class ReactionRoleManager extends ListenerAdapter {
                     int finalI = i;
                     user.openPrivateChannel()
                             .flatMap(privateChannel -> privateChannel
-                                    .sendMessage("The following role has been removed: "
-                                            + event.getGuild().getRoleById(roleId.get(finalI)).getName()))
+                                    .sendMessage("The role "
+                                            + event.getGuild().getRoleById(roleId.get(finalI)).getName()
+                                            + " has been successfully removed from you!"))
                             .queue();
                 }
             }

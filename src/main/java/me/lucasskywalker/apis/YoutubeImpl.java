@@ -45,8 +45,11 @@ public class YoutubeImpl {
 
     private final JDA discordAPI;
 
-    private final YouTube.Activities.List request;
+    private YouTube.Activities.List request;
 
+    /**
+     * Read the YouTube CSV file and populate local lists.
+     */
     private void readCSV() {
         try {
             channel.clear();
@@ -56,7 +59,8 @@ public class YoutubeImpl {
             videoid.clear();
 
             FileReader fileReader = new FileReader(new File(YoutubeImpl.class.getProtectionDomain()
-                    .getCodeSource().getLocation().toURI()).getParentFile().getPath() + "/youtube.csv");
+                    .getCodeSource().getLocation().toURI()).getParentFile().getPath()
+                    + "/bot_files/youtube.csv");
 
             CSVFormat csvFormat = CSVFormat.Builder.create(CSVFormat.DEFAULT)
                     .setDelimiter(";")
@@ -84,10 +88,14 @@ public class YoutubeImpl {
         }
     }
 
+    /**
+     * Update the CSV that stores YouTube data with the new video ID.
+     */
     private void updateCSV() {
         try {
             File filePath = new File(new File(YoutubeImpl.class.getProtectionDomain()
-                    .getCodeSource().getLocation().toURI()).getParentFile().getPath() + "/youtube.csv");
+                    .getCodeSource().getLocation().toURI()).getParentFile().getPath()
+                    + "/bot_files/youtube.csv");
 
             CSVFormat csvFormat = CSVFormat.Builder.create(CSVFormat.DEFAULT)
                     .setDelimiter(";")
@@ -112,18 +120,11 @@ public class YoutubeImpl {
     }
 
     /**
-     * Build and return an authorized API client service.
-     *
-     * @return an authorized API client service
-     * @throws GeneralSecurityException, IOException
+     * Make a YouTube API call to check if there has been a new upload on the stored channels since the last call.
+     * Calls {@link #readCSV()} to check for channel IDs and last video ID.
+     * @param request The YouTube API reference that the request is sent to.
+     * @throws IOException
      */
-    private YouTube getService() throws GeneralSecurityException, IOException {
-        final NetHttpTransport httpTransport = GoogleNetHttpTransport.newTrustedTransport();
-        return new YouTube.Builder(httpTransport, JSON_FACTORY, null)
-                .setApplicationName("YoutubeToDiscord")
-                .build();
-    }
-
     private void checkForNewVideo(YouTube.Activities.List request) throws IOException {
         readCSV();
         for (int i = 0; i < ytchannelid.size(); i++) {
@@ -133,7 +134,7 @@ public class YoutubeImpl {
                 videoid.set(i, videoID);
                 discordAPI.getTextChannelById(channel.get(i))
                         .sendMessage(discordAPI.getRoleById(role.get(i))
-                                .getAsMention() + " " + message.get(i) + "\n"
+                                .getAsMention() + " " + message.get(i).replace("\\n", "\n") + "\n"
                                 + "https://www.youtube.com/watch?v=" + videoID)
                         .queue();
             }
@@ -142,6 +143,9 @@ public class YoutubeImpl {
             updateCSV();
     }
 
+    /**
+     * Scheduler to periodically call {@link #checkForNewVideo(YouTube.Activities.List)}.
+     */
     public void scheduleVideoCheck() {
         scheduler.scheduleAtFixedRate(() -> {
             try {
@@ -152,14 +156,27 @@ public class YoutubeImpl {
         }, 0, 1, TimeUnit.MINUTES);
     }
 
-    public YoutubeImpl(JDA discordAPI) {
-        this.discordAPI = discordAPI;
+    /**
+     * Initialize a new instance of the YouTube API and start the video check scheduler ({@link #scheduleVideoCheck()}).
+     */
+    private void init() {
         try {
-            YouTube youTube = getService();
+            final NetHttpTransport httpTransport = GoogleNetHttpTransport.newTrustedTransport();
+            YouTube youTube = new YouTube.Builder(httpTransport, JSON_FACTORY, null)
+                    .setApplicationName("YoutubeToDiscord")
+                    .build();
             request = youTube.activities().list(Collections.singletonList("contentDetails"));
             scheduleVideoCheck();
         } catch (GeneralSecurityException | IOException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    /**
+     * Create new YoutubeImpl
+     */
+    public YoutubeImpl(JDA discordAPI) {
+        this.discordAPI = discordAPI;
+        init();
     }
 }

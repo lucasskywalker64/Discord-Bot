@@ -41,7 +41,8 @@ public class SlashCommandManager extends ListenerAdapter {
                                     Emoji.fromFormatted(emoji)).complete();
 
                     File filePath = new File(new File(SlashCommandManager.class.getProtectionDomain()
-                            .getCodeSource().getLocation().toURI()).getParentFile().getPath() + "/reaction-roles.csv");
+                            .getCodeSource().getLocation().toURI()).getParentFile().getPath()
+                            + "/bot_files/reaction-roles.csv");
 
                     CSVFormat csvFormat;
                     if (filePath.createNewFile()) {
@@ -121,10 +122,9 @@ public class SlashCommandManager extends ListenerAdapter {
                                         .getAsMention()).queue();
                             }
 
-
                             File filePath = new File(new File(SlashCommandManager.class.getProtectionDomain()
                                     .getCodeSource().getLocation().toURI()).getParentFile().getPath()
-                                    + "/reaction-roles.csv");
+                                    + "/bot_files/reaction-roles.csv");
 
                             CSVFormat csvFormat;
                             if (filePath.createNewFile()) {
@@ -181,7 +181,8 @@ public class SlashCommandManager extends ListenerAdapter {
             case "addyoutubenotif" -> {
                 try {
                     File filePath = new File(new File(SlashCommandManager.class.getProtectionDomain()
-                            .getCodeSource().getLocation().toURI()).getParentFile().getPath() + "/youtube.csv");
+                            .getCodeSource().getLocation().toURI()).getParentFile().getPath()
+                            + "/bot_files/youtube.csv");
 
                     CSVFormat csvFormat;
                     if (filePath.createNewFile()) {
@@ -208,6 +209,17 @@ public class SlashCommandManager extends ListenerAdapter {
                     throw new RuntimeException(e);
                 }
             }
+
+            /*
+            Simple ping to check if the bot is responding
+            Command: /ping
+             */
+            case "ping" -> {
+                Long restPing = event.getJDA().getRestPing().complete();
+                Long gatewayPing = event.getJDA().getGatewayPing();
+                event.reply("Rest ping: " + restPing + "\n"
+                        + "Gateway ping: " + gatewayPing).queue();
+            }
         }
     }
 
@@ -219,46 +231,51 @@ public class SlashCommandManager extends ListenerAdapter {
         commandDataList.add(Commands.slash("addreactionrole", "Add a new reaction that assigns a role")
                 .addOptions(
                         new OptionData(OptionType.CHANNEL, "channel",
-                                "The ID of the channel that the message is in", true)
+                                "The ID of the channel that the message is in.", true)
                                 .setChannelTypes(ChannelType.TEXT, ChannelType.NEWS, ChannelType.GUILD_PUBLIC_THREAD),
                         new OptionData(OptionType.STRING, "messageid",
-                                "The ID of the message that this reaction should be added to", true),
+                                "The ID of the message that this reaction should be added to.",
+                                true),
                         new OptionData(OptionType.ROLE, "role",
-                                "The role that this reaction should give", true),
+                                "The role that this reaction should give.", true),
                         new OptionData(OptionType.STRING, "emoji",
-                                "The emoji that should be used", true)));
+                                "The emoji that should be used.", true)));
 
         // Command: /createractionmessage <channel, message, embed:true/false> [title, roles, emojis]
         commandDataList.add(Commands.slash("createreactionmessage",
-                "Create a new message or embed for adding reaction roles").addOptions(
+                "Create a new message or embed for adding reaction roles.").addOptions(
                         new OptionData(OptionType.CHANNEL, "channel",
                                 "The channel that this message should be sent in", true)
                                 .setChannelTypes(ChannelType.TEXT, ChannelType.NEWS, ChannelType.GUILD_PUBLIC_THREAD),
                         new OptionData(OptionType.STRING, "message",
                                 "The text that should be displayed in the message or embed. " +
-                                        "Insert a \\n for a new line", true),
+                                        "Insert a \\n for a new line.", true),
                         new OptionData(OptionType.BOOLEAN, "embed",
-                                "Whether the message should be an embed or not", true),
+                                "Whether the message should be an embed or not.", true),
                         new OptionData(OptionType.STRING, "title",
-                                "Optional title for the embed"),
+                                "Optional title for the embed."),
                         new OptionData(OptionType.STRING, "roles",
-                                "Roles separated by ; in the same order as emojis"),
+                                "Roles separated by ; in the same order as emojis."),
                         new OptionData(OptionType.STRING, "emojis",
                                 "Emojis separated by ; in the same order as roles " +
-                                        "(custom emojis only from this server)")));
+                                        "(custom emojis only from this server).")));
 
         // Command: /addyoutubenotif <channel, message, ytchannelid, role>
         commandDataList.add(Commands.slash("addyoutubenotif",
                 "Add a YouTube notification output to a specific channel").addOptions(
                         new OptionData(OptionType.CHANNEL, "channel",
-                                "The channel that the notification should be posted to", true)
+                                "The channel that the notification should be posted to.", true)
                                 .setChannelTypes(ChannelType.TEXT, ChannelType.NEWS, ChannelType.GUILD_PUBLIC_THREAD),
                         new OptionData(OptionType.STRING, "message",
-                                "The message sent with the notification", true),
+                                "The message sent with the notification. Insert a \\n for a new line.",
+                                true),
                         new OptionData(OptionType.STRING, "ytchannelid",
-                                "The ID of the YouTube channel", true),
+                                "The ID of the YouTube channel.", true),
                         new OptionData(OptionType.ROLE, "role",
-                                "The role that will be pinged with the notification", true)));
+                                "The role that will be pinged with the notification.", true)));
+
+        // Command: /ping
+        commandDataList.add(Commands.slash("ping", "Simple ping to check if the bot is responding."));
 
         event.getGuild().updateCommands().addCommands(commandDataList).queue();
     }
