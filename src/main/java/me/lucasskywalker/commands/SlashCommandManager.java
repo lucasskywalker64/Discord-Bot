@@ -147,9 +147,7 @@ public class SlashCommandManager extends ListenerAdapter {
 
                                 event.getGuild().getTextChannelById(event.getOption("channel").getAsChannel()
                                         .getId()).addReactionById(messageId,
-                                        Emoji.fromFormatted(emojiList.get(i).replace("<", "")
-                                                .replace(">", "")
-                                                .replaceFirst(":", "").strip())).complete();
+                                        Emoji.fromFormatted(emojiList.get(i).strip())).complete();
                             }
                             csvPrinter.close(true);
                         } catch (URISyntaxException | IOException e) {
@@ -217,8 +215,8 @@ public class SlashCommandManager extends ListenerAdapter {
             Command: /ping
              */
             case "ping" -> {
-                Long restPing = event.getJDA().getRestPing().complete();
-                Long gatewayPing = event.getJDA().getGatewayPing();
+                long restPing = event.getJDA().getRestPing().complete();
+                long gatewayPing = event.getJDA().getGatewayPing();
                 event.reply("Rest ping: " + restPing + "\n"
                         + "Gateway ping: " + gatewayPing).queue();
             }

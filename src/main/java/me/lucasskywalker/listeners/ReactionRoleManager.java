@@ -45,13 +45,12 @@ public class ReactionRoleManager extends ListenerAdapter {
                     roleId.add(Long.valueOf(record.get("roleId")
                             .substring(record.get("roleId").indexOf("&") + 1, record.get("roleId")
                                     .lastIndexOf(">"))));
-                emoji.add(record.get("emoji").replace("<", "").replace(">", "")
-                        .replaceFirst(":", ""));
+                emoji.add(record.get("emoji"));
             }
 
             for(int i = 0; i < messageId.size(); i++) {
                 if(messageId.get(i).equals(event.getMessageId())
-                        && emoji.get(i).equals(event.getEmoji().getAsReactionCode()) && !event.getUser().isBot()) {
+                        && emoji.get(i).equals(event.getEmoji().getFormatted()) && !event.getUser().isBot()) {
                     event.getGuild().addRoleToMember(event.getMember(), new RoleImpl(roleId.get(i), event.getGuild()))
                             .queue();
                     int finalI = i;
@@ -94,15 +93,14 @@ public class ReactionRoleManager extends ListenerAdapter {
                 else
                     roleId.add(Long.valueOf(record.get("roleId").substring(record.get("roleId").indexOf("&") + 1,
                             record.get("roleId").lastIndexOf(">"))));
-                emoji.add(record.get("emoji").replace("<", "").replace(">", "")
-                        .replaceFirst(":", ""));
+                emoji.add(record.get("emoji"));
             }
 
             User user = event.retrieveUser().complete();
 
             for (int i = 0; i < messageId.size(); i++) {
                 if (messageId.get(i).equals(event.getMessageId())
-                        && emoji.get(i).equals(event.getEmoji().getAsReactionCode())
+                        && emoji.get(i).replaceFirst("a", "").equals(event.getEmoji().getFormatted())
                         && !user.isBot()) {
                     event.getGuild().removeRoleFromMember(user,
                             new RoleImpl(roleId.get(i), event.getGuild())).queue();
