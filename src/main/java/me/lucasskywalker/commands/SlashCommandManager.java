@@ -2,6 +2,7 @@ package me.lucasskywalker.commands;
 
 import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.entities.channel.ChannelType;
+import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
 import net.dv8tion.jda.api.entities.emoji.Emoji;
 import net.dv8tion.jda.api.events.guild.GuildReadyEvent;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
@@ -211,6 +212,34 @@ public class SlashCommandManager extends ListenerAdapter {
             }
 
             /*
+            Edit message command
+            Command: /editmessage <channel, messageid, message, embed:true/false> [title, image]
+             */
+            case "editmessage" -> {
+                TextChannel channel = event.getGuild().getTextChannelById(
+                        event.getOption("channel").getAsChannel().getId());
+
+                String message = event.getOption("message").getAsString()
+                        .replace("\\n", "\n");
+
+                String messageid = event.getOption("messageid").getAsString();
+
+                if(event.getOption("embed").getAsBoolean()) {
+                    EmbedBuilder embedBuilder = new EmbedBuilder();
+                    if(event.getOption("image") != null)
+                        embedBuilder.setThumbnail(event.getOption("image").getAsString());
+                    if (event.getOption("title") != null)
+                        embedBuilder.setTitle(event.getOption("title").getAsString());
+                    embedBuilder.setDescription(message);
+                    channel.editMessageEmbedsById(messageid, embedBuilder.build()).complete();
+                    event.reply("Embed edited.").queue();
+                } else {
+                    channel.editMessageById(messageid, message).complete();
+                    event.reply("Message edited.").queue();
+                }
+            }
+
+            /*
             Simple ping to check if the bot is responding
             Command: /ping
              */
@@ -275,6 +304,25 @@ public class SlashCommandManager extends ListenerAdapter {
                                 "The ID of the YouTube channel.", true),
                         new OptionData(OptionType.ROLE, "role",
                                 "The role that will be pinged with the notification.", true)));
+
+        // Command: /editmessage <channel, messageid, message, embed:true/false> [title, image]
+        commandDataList.add(Commands.slash("editmessage",
+                "Edit the text of a specific message or embed").addOptions(
+                        new OptionData(OptionType.CHANNEL, "channel",
+                                "The channel that the message/embed is in.", true)
+                                .setChannelTypes(ChannelType.TEXT, ChannelType.NEWS, ChannelType.GUILD_PUBLIC_THREAD),
+                        new OptionData(OptionType.STRING, "messageid",
+                                "The id of the message/embed that should be edited.", true),
+                        new OptionData(OptionType.STRING, "message",
+                                "The new message that should replace the old one. " +
+                                        "Insert a \\n for a new line.", true),
+                        new OptionData(OptionType.BOOLEAN, "embed",
+                                "Whether the message should be an embed or not.", true),
+                        new OptionData(OptionType.STRING, "title",
+                                "Optional title for the embed."),
+                        new OptionData(OptionType.STRING, "image",
+                                "Optional image that is added to the embed")
+        ));
 
         // Command: /ping
         commandDataList.add(Commands.slash("ping", "Simple ping to check if the bot is responding."));
