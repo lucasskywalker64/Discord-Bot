@@ -1,6 +1,7 @@
 package me.lucasskywalker.commands;
 
 import net.dv8tion.jda.api.EmbedBuilder;
+import net.dv8tion.jda.api.entities.Message;
 import net.dv8tion.jda.api.entities.channel.ChannelType;
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
 import net.dv8tion.jda.api.entities.emoji.Emoji;
@@ -213,29 +214,37 @@ public class SlashCommandManager extends ListenerAdapter {
 
             /*
             Edit message command
-            Command: /editmessage <channel, messageid, message, embed:true/false> [title, image]
+            Command: /editmessage <channel, messageid, embed:true/false> [message, title, image]
              */
             case "editmessage" -> {
                 TextChannel channel = event.getGuild().getTextChannelById(
                         event.getOption("channel").getAsChannel().getId());
 
-                String message = event.getOption("message").getAsString()
-                        .replace("\\n", "\n");
-
                 String messageid = event.getOption("messageid").getAsString();
 
                 if(event.getOption("embed").getAsBoolean()) {
+                    Message oldEmbed = channel.retrieveMessageById(messageid).complete();
                     EmbedBuilder embedBuilder = new EmbedBuilder();
                     if(event.getOption("image") != null)
                         embedBuilder.setThumbnail(event.getOption("image").getAsString());
                     if (event.getOption("title") != null)
                         embedBuilder.setTitle(event.getOption("title").getAsString());
-                    embedBuilder.setDescription(message);
-                    channel.editMessageEmbedsById(messageid, embedBuilder.build()).complete();
-                    event.reply("Embed edited.").queue();
+                    if(event.getOption("message") != null)
+                        embedBuilder.setDescription(event.getOption("message").getAsString()
+                                .replace("\\n", "\n"));
+                    else embedBuilder.setDescription(oldEmbed.getEmbeds().get(0).getDescription());
+                    if(event.getOption("image") != null || event.getOption("title") != null ||
+                            event.getOption("message") != null) {
+                        channel.editMessageEmbedsById(messageid, embedBuilder.build()).complete();
+                        event.reply("Embed edited.").queue();
+                    } else event.reply("Can't edit embed without at least one of the following: " +
+                            "message, title, image").queue();
                 } else {
-                    channel.editMessageById(messageid, message).complete();
-                    event.reply("Message edited.").queue();
+                    if(event.getOption("message") != null) {
+                        channel.editMessageById(messageid, event.getOption("message").getAsString()
+                                .replace("\\n", "\n")).complete();
+                        event.reply("Message edited.").queue();
+                    } else event.reply("Can't edit message without message content").queue();
                 }
             }
 
@@ -313,11 +322,12 @@ public class SlashCommandManager extends ListenerAdapter {
                                 .setChannelTypes(ChannelType.TEXT, ChannelType.NEWS, ChannelType.GUILD_PUBLIC_THREAD),
                         new OptionData(OptionType.STRING, "messageid",
                                 "The id of the message/embed that should be edited.", true),
-                        new OptionData(OptionType.STRING, "message",
-                                "The new message that should replace the old one. " +
-                                        "Insert a \\n for a new line.", true),
                         new OptionData(OptionType.BOOLEAN, "embed",
-                                "Whether the message should be an embed or not.", true),
+                                "Whether the message that should be edited is an embed or not.",
+                                true),
+                        new OptionData(OptionType.STRING, "message",
+                            "The new message that replaces the old one. Old message if empty. " +
+                                    "Insert a \\n for a new line."),
                         new OptionData(OptionType.STRING, "title",
                                 "Optional title for the embed."),
                         new OptionData(OptionType.STRING, "image",
