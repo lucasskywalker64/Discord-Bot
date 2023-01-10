@@ -1,6 +1,7 @@
 package me.lucasskywalker;
 
 import io.github.cdimascio.dotenv.Dotenv;
+import me.lucasskywalker.apis.TwitchImpl;
 import me.lucasskywalker.apis.YoutubeImpl;
 import me.lucasskywalker.commands.SlashCommandManager;
 import me.lucasskywalker.listeners.ReactionRoleManager;
@@ -19,6 +20,8 @@ public class BotMain {
     public static Dotenv getConfig() { return CONFIG; }
 
     private static JDA discordAPI;
+
+    public static TwitchImpl twitch;
 
     private static boolean init() throws InvalidTokenException, URISyntaxException {
         discordAPI = JDABuilder.createDefault(CONFIG.get("BOT_TOKEN"))
@@ -47,6 +50,7 @@ public class BotMain {
         }
 
         new YoutubeImpl(discordAPI);
+        twitch = new TwitchImpl(discordAPI);
 
         //me.lucasskywalker.apis.TwitterImpl twitter = new me.lucasskywalker.apis.TwitterImpl();
         //twitter.getLatestTweet();

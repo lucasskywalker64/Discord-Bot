@@ -1,5 +1,6 @@
 package me.lucasskywalker.commands;
 
+import me.lucasskywalker.BotMain;
 import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.entities.Message;
 import net.dv8tion.jda.api.entities.channel.ChannelType;
@@ -249,6 +250,46 @@ public class SlashCommandManager extends ListenerAdapter {
             }
 
             /*
+            Add a YouTube notification output to a specific channel
+            Command: /addyoutubenotif <channel, message, username, role>
+             */
+            case "addtwitchnotif" -> {
+                try {
+                    File filePath = new File(new File(SlashCommandManager.class.getProtectionDomain()
+                            .getCodeSource().getLocation().toURI()).getParentFile().getPath()
+                            + "/bot_files/twitch.csv");
+
+                    CSVFormat csvFormat;
+                    if (filePath.createNewFile()) {
+                        csvFormat = CSVFormat.Builder.create(CSVFormat.DEFAULT)
+                                .setDelimiter(";")
+                                .setHeader("channel", "message", "username", "role")
+                                .build();
+                    } else
+                        csvFormat = CSVFormat.Builder.create(CSVFormat.DEFAULT)
+                                .setDelimiter(";").build();
+
+                    FileWriter fileWriter = new FileWriter(filePath, true);
+
+                    String role = event.getOption("role") != null ?
+                            event.getOption("role").getAsString()
+                            : "";
+
+                    CSVPrinter csvPrinter = new CSVPrinter(fileWriter, csvFormat);
+                    csvPrinter.printRecord(
+                            event.getOption("channel").getAsString(),
+                            event.getOption("message").getAsString(),
+                            event.getOption("username").getAsString().toLowerCase(),
+                            role);
+                    csvPrinter.close(true);
+                    BotMain.twitch.updateLists();
+                    event.reply("Twitch notification added").queue();
+                } catch (URISyntaxException | IOException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+
+            /*
             Simple ping to check if the bot is responding
             Command: /ping
              */
@@ -331,8 +372,21 @@ public class SlashCommandManager extends ListenerAdapter {
                         new OptionData(OptionType.STRING, "title",
                                 "Optional title for the embed."),
                         new OptionData(OptionType.STRING, "image",
-                                "Optional image that is added to the embed")
-        ));
+                                "Optional image that is added to the embed")));
+
+        // Command: /addtwitchnotif <channel, message, username, role>
+        commandDataList.add(Commands.slash("addtwitchnotif",
+                "Add a Twitch notification output to a specific channel").addOptions(
+                new OptionData(OptionType.CHANNEL, "channel",
+                        "The channel that the notification should be posted to.", true)
+                        .setChannelTypes(ChannelType.TEXT, ChannelType.NEWS, ChannelType.GUILD_PUBLIC_THREAD),
+                new OptionData(OptionType.STRING, "message",
+                        "The message sent with the notification. Insert a \\n for a new line.",
+                        true),
+                new OptionData(OptionType.STRING, "username",
+                        "The username of the Twitch channel.", true),
+                new OptionData(OptionType.ROLE, "role",
+                        "The role that will be pinged with the notification.")));
 
         // Command: /ping
         commandDataList.add(Commands.slash("ping", "Simple ping to check if the bot is responding."));
