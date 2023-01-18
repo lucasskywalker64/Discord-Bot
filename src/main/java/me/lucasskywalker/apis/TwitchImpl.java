@@ -18,17 +18,18 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 public class TwitchImpl {
 
     private final List<String> channel = new ArrayList<>();
-
     private final List<String> message = new ArrayList<>();
-
     private final List<String> username = new ArrayList<>();
     private final List<String> role = new ArrayList<>();
-
     private final TwitchClient twitchClient;
+    private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
 
 
     public void updateLists() {
@@ -64,13 +65,16 @@ public class TwitchImpl {
 
             twitchClient.getClientHelper().disableStreamEventListener(username);
             twitchClient.getClientHelper().enableStreamEventListener(username);
-        } catch (IOException | URISyntaxException e) {
-            System.out.println(e.getMessage());
+        } catch (IOException | URISyntaxException ignored) {
         }
     }
 
+    public void scheduleUpdateLists() {
+        scheduler.scheduleAtFixedRate(this::updateLists, 0, 1, TimeUnit.DAYS);
+    }
+
     public TwitchImpl(JDA discordAPI) {
-        System.out.println("Starting twitch api...");
+        System.out.println("Starting Twitch api...");
 
         twitchClient = TwitchClientBuilder.builder()
                 .withClientId(BotMain.getConfig().get("TWITCH_CLIENT_ID"))
@@ -78,20 +82,20 @@ public class TwitchImpl {
                 .withEnableHelix(true)
                 .build();
 
-        updateLists();
+        scheduleUpdateLists();
 
         twitchClient.getEventManager().onEvent(ChannelGoLiveEvent.class, event -> {
             int index = username.indexOf(event.getChannel().getName());
 
             EmbedBuilder embedBuilder = new EmbedBuilder();
             embedBuilder.addField("Game", event.getStream().getGameName(), false);
-            embedBuilder.setAuthor(username.get(index) + " is now streaming", "https://twitch.tv/"
-                    + username.get(index), twitchClient.getHelix().getUsers(null,
+            embedBuilder.setAuthor(event.getChannel().getName() + " is now streaming", "https://twitch.tv/"
+                    + event.getChannel().getName(), twitchClient.getHelix().getUsers(null,
                     Collections.singletonList(event.getChannel().getId()),
                     Collections.singletonList(event.getChannel().getName())).execute().getUsers().get(0)
                     .getProfileImageUrl());
-            embedBuilder.setTitle(event.getStream().getTitle(), "https://twitch.tv/" + username.get(index));
-            embedBuilder.setImage(event.getStream().getThumbnailUrl(1920, 1080));
+            embedBuilder.setTitle(event.getStream().getTitle(), "https://twitch.tv/" + event.getChannel().getName());
+            embedBuilder.setImage(event.getStream().getThumbnailUrl(852, 480));
             embedBuilder.setFooter(discordAPI.getSelfUser().getName());
             embedBuilder.setTimestamp(Instant.now());
 
@@ -100,14 +104,14 @@ public class TwitchImpl {
                     .replace("\\n", "\n")
                     + messagePart2;
 
-            if(!role.get(index).isBlank())
+            if(role.size() >= 1 && !role.get(index).isBlank())
                 discordAPI.getTextChannelById(channel.get(index)).sendMessage(
                     discordAPI.getRoleById(role.get(index)).getAsMention() + " " + message)
                     .addEmbeds(embedBuilder.build())
                         .addActionRow(Button.link("https://twitch.tv/" + username.get(index), "Watch Stream"))
                         .queue();
             else discordAPI.getTextChannelById(channel.get(index)).sendMessage(message)
-                    .addEmbeds(embedBuilder.build()).addEmbeds(embedBuilder.build())
+                    .addEmbeds(embedBuilder.build())
                     .addActionRow(Button.link("https://twitch.tv/" + username.get(index), "Watch Stream"))
                     .queue();
         });
