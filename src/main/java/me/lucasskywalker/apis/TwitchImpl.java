@@ -2,6 +2,7 @@ package me.lucasskywalker.apis;
 
 import com.github.twitch4j.TwitchClient;
 import com.github.twitch4j.TwitchClientBuilder;
+import com.github.twitch4j.common.util.CryptoUtils;
 import com.github.twitch4j.events.ChannelGoLiveEvent;
 import me.lucasskywalker.BotMain;
 import net.dv8tion.jda.api.EmbedBuilder;
@@ -15,9 +16,7 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.net.URISyntaxException;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -70,8 +69,7 @@ public class TwitchImpl {
     }
 
     public void scheduleUpdateLists() {
-        scheduler.scheduleAtFixedRate(this::updateLists, 0, 1, TimeUnit.DAYS);
-    }
+        scheduler.scheduleAtFixedRate(this::updateLists, 0, 1, TimeUnit.DAYS); }
 
     public TwitchImpl(JDA discordAPI) {
         System.out.println("Starting Twitch api...");
@@ -85,35 +83,42 @@ public class TwitchImpl {
         scheduleUpdateLists();
 
         twitchClient.getEventManager().onEvent(ChannelGoLiveEvent.class, event -> {
-            int index = username.indexOf(event.getChannel().getName());
+            Timer timer = new Timer();
+            timer.schedule(new TimerTask() {
+                @Override
+                public void run() {
+                    int index = username.indexOf(event.getChannel().getName());
 
-            EmbedBuilder embedBuilder = new EmbedBuilder();
-            embedBuilder.addField("Game", event.getStream().getGameName(), false);
-            embedBuilder.setAuthor(event.getChannel().getName() + " is now streaming", "https://twitch.tv/"
-                    + event.getChannel().getName(), twitchClient.getHelix().getUsers(null,
-                    Collections.singletonList(event.getChannel().getId()),
-                    Collections.singletonList(event.getChannel().getName())).execute().getUsers().get(0)
-                    .getProfileImageUrl());
-            embedBuilder.setTitle(event.getStream().getTitle(), "https://twitch.tv/" + event.getChannel().getName());
-            embedBuilder.setImage(event.getStream().getThumbnailUrl(852, 480));
-            embedBuilder.setFooter(discordAPI.getSelfUser().getName());
-            embedBuilder.setTimestamp(Instant.now());
+                    EmbedBuilder embedBuilder = new EmbedBuilder();
+                    embedBuilder.addField("Game", event.getStream().getGameName(), false);
+                    embedBuilder.setAuthor(event.getChannel().getName() + " is now streaming", "https://twitch.tv/"
+                            + event.getChannel().getName(), twitchClient.getHelix().getUsers(null,
+                                    Collections.singletonList(event.getChannel().getId()),
+                                    Collections.singletonList(event.getChannel().getName())).execute().getUsers().get(0)
+                            .getProfileImageUrl());
+                    embedBuilder.setTitle(event.getStream().getTitle(), "https://twitch.tv/" + event.getChannel().getName());
+                    embedBuilder.setImage(event.getStream().getThumbnailUrl(852, 480)
+                            + "?t=" + CryptoUtils.generateNonce(4));
+                    embedBuilder.setFooter(discordAPI.getSelfUser().getName());
+                    embedBuilder.setTimestamp(Instant.now());
 
-            String messagePart2 = message.get(index).substring(message.get(index).indexOf("\\n") + 2).strip();
-            String message = this.message.get(index).substring(0, this.message.get(index).lastIndexOf("\\n") + 2)
-                    .replace("\\n", "\n")
-                    + messagePart2;
+                    String messagePart2 = message.get(index).substring(message.get(index).indexOf("\\n") + 2).strip();
+                    String tempMessage = message.get(index).substring(0, message.get(index).lastIndexOf("\\n") + 2)
+                            .replace("\\n", "\n")
+                            + messagePart2;
 
-            if(role.size() >= 1 && !role.get(index).isBlank())
-                discordAPI.getTextChannelById(channel.get(index)).sendMessage(
-                    discordAPI.getRoleById(role.get(index)).getAsMention() + " " + message)
-                    .addEmbeds(embedBuilder.build())
-                        .addActionRow(Button.link("https://twitch.tv/" + username.get(index), "Watch Stream"))
-                        .queue();
-            else discordAPI.getTextChannelById(channel.get(index)).sendMessage(message)
-                    .addEmbeds(embedBuilder.build())
-                    .addActionRow(Button.link("https://twitch.tv/" + username.get(index), "Watch Stream"))
-                    .queue();
+                    if(role.size() >= 1 && !role.get(index).isBlank())
+                        discordAPI.getTextChannelById(channel.get(index)).sendMessage(
+                                        discordAPI.getRoleById(role.get(index)).getAsMention() + " " + tempMessage)
+                                .addEmbeds(embedBuilder.build())
+                                .addActionRow(Button.link("https://twitch.tv/" + username.get(index), "Watch Stream"))
+                                .queue();
+                    else discordAPI.getTextChannelById(channel.get(index)).sendMessage(tempMessage)
+                            .addEmbeds(embedBuilder.build())
+                            .addActionRow(Button.link("https://twitch.tv/" + username.get(index), "Watch Stream"))
+                            .queue();
+                }
+            }, 120000);
         });
     }
 }

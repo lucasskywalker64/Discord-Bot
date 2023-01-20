@@ -83,8 +83,7 @@ public class YoutubeImpl {
                 if(!record.get("videoid").isBlank())
                     videoid.add(record.get("videoid"));
             }
-        } catch (IOException | URISyntaxException e) {
-            System.out.println(e.getMessage());
+        } catch (IOException | URISyntaxException ignored) {
         }
     }
 
@@ -176,6 +175,7 @@ public class YoutubeImpl {
      * Create new YoutubeImpl
      */
     public YoutubeImpl(JDA discordAPI) {
+        System.out.println("Starting YouTube API...");
         this.discordAPI = discordAPI;
         init();
     }
