@@ -6,7 +6,7 @@
 
     <groupId>org.example</groupId>
     <artifactId>DiscordBot</artifactId>
-    <version>1.2</version>
+    <version>1.4</version>
 
     <properties>
         <maven.compiler.source>14</maven.compiler.source>
@@ -53,7 +53,7 @@
         <dependency>
             <groupId>com.github.twitch4j</groupId>
             <artifactId>twitch4j</artifactId>
-            <version>1.13.0</version>
+            <version>1.14.0</version>
         </dependency>
     </dependencies>
 
