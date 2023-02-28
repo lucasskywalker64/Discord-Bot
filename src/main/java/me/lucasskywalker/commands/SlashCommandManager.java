@@ -22,6 +22,7 @@ import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.net.URISyntaxException;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -290,6 +291,185 @@ public class SlashCommandManager extends ListenerAdapter {
             }
 
             /*
+            Add a tweet output to a channel
+            Command: /addtwitter <username, channel, message>
+             */
+            case "addtwitter" -> {
+                try {
+                    File filePath = new File(new File(SlashCommandManager.class.getProtectionDomain()
+                            .getCodeSource().getLocation().toURI()).getParentFile().getPath()
+                            + "/bot_files/twitter_data.csv");
+
+                    CSVFormat csvFormat;
+                    if (filePath.createNewFile()) {
+                        csvFormat = CSVFormat.Builder.create(CSVFormat.DEFAULT)
+                                .setDelimiter(";")
+                                .setHeader("username", "tweetID", "channel", "message", "keyword")
+                                .build();
+                    } else
+                        csvFormat = CSVFormat.Builder.create(CSVFormat.DEFAULT)
+                                .setDelimiter(";").build();
+
+                    FileWriter fileWriter = new FileWriter(filePath, true);
+
+                    CSVPrinter csvPrinter = new CSVPrinter(fileWriter, csvFormat);
+                    csvPrinter.printRecord(
+                            event.getOption("username").getAsString(),
+                            OffsetDateTime.now(),
+                            event.getOption("channel").getAsString(),
+                            event.getOption("message").getAsString());
+                    csvPrinter.close(true);
+
+                    filePath = new File(new File(SlashCommandManager.class.getProtectionDomain()
+                            .getCodeSource().getLocation().toURI()).getParentFile().getPath()
+                            + "/bot_files/twitter_names.csv");
+
+                    if (filePath.createNewFile()) {
+                        csvFormat = CSVFormat.Builder.create(CSVFormat.DEFAULT)
+                                .setDelimiter(";")
+                                .setHeader("username")
+                                .build();
+                    } else
+                        csvFormat = CSVFormat.Builder.create(CSVFormat.DEFAULT)
+                                .setDelimiter(";").build();
+
+                    fileWriter = new FileWriter(filePath, true);
+
+                    csvPrinter = new CSVPrinter(fileWriter, csvFormat);
+                    csvPrinter.printRecord(event.getOption("username").getAsString());
+                    csvPrinter.close(true);
+
+                    BotMain.twitter.readCSV();
+                    BotMain.twitter.getUserID();
+                    event.reply("Twitter output added").queue();
+                } catch (URISyntaxException | IOException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+
+            /*
+            Add users to be shouted out on Twitch
+            Command: /addshoutout <username>
+             */
+            case "addshoutout" -> {
+                List<String> usernameList = new ArrayList<>(Arrays.asList(event.getOption("username")
+                        .getAsString().split(";")));
+
+                try {
+                    File filePath = new File(new File(SlashCommandManager.class.getProtectionDomain()
+                            .getCodeSource().getLocation().toURI()).getParentFile().getPath()
+                            + "/bot_files/shoutout.csv");
+
+                    CSVFormat csvFormat;
+                    if (filePath.createNewFile()) {
+                        csvFormat = CSVFormat.Builder.create(CSVFormat.DEFAULT)
+                                .setHeader("username")
+                                .build();
+                    } else
+                        csvFormat = CSVFormat.Builder.create(CSVFormat.DEFAULT)
+                                .setDelimiter(";").build();
+
+                    FileWriter fileWriter = new FileWriter(filePath, true);
+
+                    CSVPrinter csvPrinter = new CSVPrinter(fileWriter, csvFormat);
+
+                    for (String s : usernameList) {
+                        csvPrinter.printRecord(s.strip().toLowerCase());
+                    }
+                    csvPrinter.close(true);
+
+                    BotMain.twitch.updateLists();
+                    event.reply("Shout out added").queue();
+                } catch (URISyntaxException | IOException e) {
+                    e.printStackTrace();
+                }
+            }
+
+            /*
+            Displays all usernames from the shoutout list
+            Command: /displayshoutout
+             */
+            case "displayshoutout" -> {
+                StringBuilder message = new StringBuilder();
+                for(String s : BotMain.twitch.getShoutoutNames())
+                    message.append(s).append("\n");
+                event.reply(message.toString()).setEphemeral(true).queue();
+            }
+
+            /*
+            Removes a user from the shoutout list
+            Command: /removeshoutout <username>
+             */
+            case "removeshoutout" -> {
+                List<String> usernames = BotMain.twitch.getShoutoutNames();
+                System.out.println(usernames);
+                if(usernames.contains(event.getOption("username").getAsString())) {
+                    usernames.remove(event.getOption("username").getAsString());
+                    System.out.println(usernames);
+                    try {
+                        File filePath = new File(new File(SlashCommandManager.class.getProtectionDomain()
+                                .getCodeSource().getLocation().toURI()).getParentFile().getPath()
+                                + "/bot_files/shoutout.csv");
+
+                        CSVFormat csvFormat = CSVFormat.Builder.create(CSVFormat.DEFAULT)
+                                    .setHeader("username")
+                                    .build();
+
+                        FileWriter fileWriter = new FileWriter(filePath);
+
+                        CSVPrinter csvPrinter = new CSVPrinter(fileWriter, csvFormat);
+
+                        for (String s : usernames) {
+                            csvPrinter.printRecord(s);
+                        }
+                        csvPrinter.close(true);
+
+                        BotMain.twitch.updateLists();
+
+                        event.reply("User has successfully been removed!").queue();
+                    } catch (URISyntaxException | IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                } else event.reply("Provided username is not in the list! " +
+                        "(use /displayshoutout to see all usernames)").queue();
+            }
+
+            /*
+            Add a member count
+            Command: /addmembercount <channel>
+             */
+            case "addmembercount" -> {
+                try {
+                    File filePath = new File(new File(SlashCommandManager.class.getProtectionDomain()
+                            .getCodeSource().getLocation().toURI()).getParentFile().getPath()
+                            + "/bot_files/membercount.txt");
+
+                    FileWriter fileWriter;
+                    if (filePath.createNewFile()) {
+                        fileWriter = new FileWriter(filePath);
+                    } else {
+                        event.reply("Member count already added please remove it first before adding a new one.")
+                                .queue();
+                        return;
+                    }
+
+                    fileWriter.write(event.getOption("channel").getAsChannel().getId());
+                    fileWriter.close();
+
+                    BotMain.scheduleUpdateMemberCount();
+
+                    event.reply("Member count successfully added!").queue();
+                } catch (URISyntaxException | IOException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+
+            /*case "teststream" -> {
+                BotMain.twitch.testStream();
+                event.reply("test notif sent").queue();
+            }*/
+
+            /*
             Simple ping to check if the bot is responding
             Command: /ping
              */
@@ -387,6 +567,39 @@ public class SlashCommandManager extends ListenerAdapter {
                         "The username of the Twitch channel.", true),
                 new OptionData(OptionType.ROLE, "role",
                         "The role that will be pinged with the notification.")));
+
+        // Command: /addtwitter <username, channel, message>
+        commandDataList.add(Commands.slash("addtwitter", "Add a tweet output").addOptions(
+                new OptionData(OptionType.STRING, "username",
+                        "Twitter username without @.", true),
+                new OptionData(OptionType.CHANNEL, "channel",
+                        "The channel the tweet should be posted to.", true),
+                new OptionData(OptionType.STRING, "message",
+                        "The message that should be sent with the tweet. Insert a \\n for a new line.",
+                        true)));
+
+        // Command: /addshoutout <username>
+        commandDataList.add(Commands.slash("addshoutout",
+                "Add users to be shouted out on Twitch").addOptions(
+                        new OptionData(OptionType.STRING, "username",
+                                "Usernames separated by ;", true)));
+
+        // Command: /displayshoutout
+        commandDataList.add(Commands.slash("displayshoutout",
+                "Displays all usernames from the shoutout list"));
+
+        // Command: /removeshoutout
+        commandDataList.add(Commands.slash("removeshoutout", "Removes a user from the shoutout list")
+                .addOptions(new OptionData(OptionType.STRING, "username",
+                        "The username to be removed", true)));
+
+        // Command: /addmembercount
+        commandDataList.add(Commands.slash("addmembercount", "Add a member count")
+                .addOptions(new OptionData(OptionType.CHANNEL, "channel",
+                        "The locked vc that displays the member count", true)
+                        .setChannelTypes(ChannelType.VOICE)));
+
+        //commandDataList.add(Commands.slash("teststream", "test"));
 
         // Command: /ping
         commandDataList.add(Commands.slash("ping", "Simple ping to check if the bot is responding."));
