@@ -30,6 +30,7 @@ import net.dv8tion.jda.api.interactions.commands.build.Commands;
 import net.dv8tion.jda.api.interactions.commands.build.OptionData;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVPrinter;
+import org.apache.commons.csv.CSVRecord;
 import org.jetbrains.annotations.NotNull;
 import org.tinylog.Logger;
 
@@ -373,23 +374,40 @@ public class SlashCommandManager extends ListenerAdapter {
     List<String> usernameList =
         new ArrayList<>(Arrays.asList(event.getOption("username").getAsString().split(";")));
 
-    try (BufferedReader br = new BufferedReader(new FileReader(shoutoutFile))) {
-      CSVFormat csvFormat;
-      if (br.readLine() == null) {
-        csvFormat = CSVFormat.Builder.create(CSVFormat.DEFAULT).setHeader("username").build();
-      } else {
-        csvFormat = CSVFormat.Builder.create(CSVFormat.DEFAULT).setDelimiter(";").build();
+    try (BufferedReader br = new BufferedReader(new FileReader(shoutoutFile));
+         BufferedReader br2 = new BufferedReader(new FileReader(shoutoutFile))) {
+      CSVFormat csvFormat = CSVFormat.Builder.create(CSVFormat.DEFAULT)
+          .setHeader("username")
+          .setSkipHeaderRecord(true)
+          .build();
+      List<String> names = new ArrayList<>();
+      for (CSVRecord csvRecord : csvFormat.parse(br)) {
+        names.add(csvRecord.get("username"));
       }
-
-      try (FileWriter fileWriter = new FileWriter(shoutoutFile, true);
-           CSVPrinter csvPrinter = new CSVPrinter(fileWriter, csvFormat)) {
-        for (String s : usernameList) {
-          csvPrinter.printRecord(s.strip().toLowerCase());
+      boolean contains = false;
+      for (String name : usernameList) {
+        contains = names.contains(name.strip().toLowerCase());
+        if (contains)
+          break;
+      }
+      if (!contains) {
+        if (br2.readLine() == null) {
+          csvFormat = CSVFormat.Builder.create(CSVFormat.DEFAULT).setHeader("username").build();
+        } else {
+          csvFormat = CSVFormat.Builder.create(CSVFormat.DEFAULT).setDelimiter(";").build();
         }
-      }
 
-      twitch.updateLists();
-      event.reply("Shout out added").queue();
+        try (FileWriter fileWriter = new FileWriter(shoutoutFile, true);
+             CSVPrinter csvPrinter = new CSVPrinter(fileWriter, csvFormat)) {
+          for (String s : usernameList) {
+            csvPrinter.printRecord(s.strip().toLowerCase());
+          }
+        }
+
+        twitch.updateLists();
+        event.reply("Shout out added").queue();
+      } else event.reply("One or more names are already in the shoutout list, please check your " +
+          "input and try again.").setEphemeral(true).queue();
     } catch (IOException e) {
       Logger.error(e);
     }
