@@ -10,9 +10,9 @@ import com.github.twitch4j.common.util.CryptoUtils;
 import com.github.twitch4j.events.ChannelGoLiveEvent;
 import com.github.twitch4j.events.ChannelGoOfflineEvent;
 import com.github.twitch4j.helix.domain.Game;
-import com.github.twitch4j.helix.domain.User;
 import com.github.twitch4j.helix.domain.Video;
 import com.github.twitch4j.pubsub.events.RewardRedeemedEvent;
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
@@ -41,6 +41,7 @@ public class TwitchImpl {
 
   private static final File twitchFile = BotMain.getTwitchFile();
   private static final File shoutoutFile = BotMain.getShoutoutFile();
+  private static final File moderatorFile = BotMain.getModeratorFile();
   private final List<String> channel = new ArrayList<>();
   private final List<String> message = new ArrayList<>();
   private final List<String> username = new ArrayList<>();
@@ -56,6 +57,7 @@ public class TwitchImpl {
   private Long shoutoutTimestamp = 0L;
   private Game lastPlayedGame;
   private String streamerId;
+  private String moderatorName;
   private String moderatorId;
 
   public List<String> getShoutoutNames() {
@@ -65,7 +67,8 @@ public class TwitchImpl {
   public void updateLists() {
     Logger.info("Setting up the lists...");
     try (FileReader fileReaderTwitch = new FileReader(twitchFile);
-         FileReader fileReaderShoutout = new FileReader(shoutoutFile)) {
+         FileReader fileReaderShoutout = new FileReader(shoutoutFile);
+         BufferedReader fileReaderModerator = new BufferedReader(new FileReader(moderatorFile))) {
       channel.clear();
       message.clear();
       username.clear();
@@ -115,6 +118,8 @@ public class TwitchImpl {
               lastAnnouncementMessageId.put(s, null);
           }
       }
+
+      moderatorName = fileReaderModerator.readLine();
 
       Logger.info("Lists updated");
 
@@ -322,14 +327,10 @@ public class TwitchImpl {
           .execute().getUsers().get(0).getId();
       Logger.info("Streamer ID setup");
 
-      List<User> moderatorList = twitchClient.getHelix().getUsers(null, null,
-          List.of("Smolelibot", "Sirwibby")).execute().getUsers();
-      Logger.info("Moderator list setup");
-
-      moderatorId = username.get(0).equals("elinovavt")
-                    ? moderatorList.get(0).getId()
-                    : moderatorList.get(1).getId();
+      moderatorId = twitchClient.getHelix().getUsers(null, null,
+          List.of(moderatorName)).execute().getUsers().get(0).getId();
       Logger.info("Current moderator ID setup");
+
       twitchClient.getChat().joinChannel(username.get(0));
       twitchClient.getPubSub().listenForChannelPointsRedemptionEvents(null, streamerId);
     }

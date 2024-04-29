@@ -38,6 +38,7 @@ public class BotMain {
   private static File youtubeFile;
   private static File twitchFile;
   private static File shoutoutFile;
+  private static File moderatorFile;
   private static File memberCountFile;
   private static JDA discordAPI;
   private static TwitchImpl twitch;
@@ -63,6 +64,10 @@ public class BotMain {
 
   public static File getShoutoutFile() {
     return shoutoutFile;
+  }
+
+  public static File getModeratorFile() {
+    return moderatorFile;
   }
 
   public static File getMemberCountFile() {
@@ -103,29 +108,33 @@ public class BotMain {
     File botFiles = new File(new File(BotMain.class.getProtectionDomain()
         .getCodeSource().getLocation().toURI()).getParentFile().getPath()
         + "/bot_files");
-      if (!botFiles.exists()) {
-          botFiles.mkdir();
-      }
+    if (!botFiles.exists()) {
+      botFiles.mkdir();
+    }
     reactionRolesFile = new File(botFiles + "/reaction-roles.csv");
-      if (!reactionRolesFile.exists()) {
-          reactionRolesFile.createNewFile();
-      }
+    if (!reactionRolesFile.exists()) {
+      reactionRolesFile.createNewFile();
+    }
     youtubeFile = new File(botFiles + "/youtube.csv");
-      if (!youtubeFile.exists()) {
-          youtubeFile.createNewFile();
-      }
+    if (!youtubeFile.exists()) {
+      youtubeFile.createNewFile();
+    }
     twitchFile = new File(botFiles + "/twitch.csv");
-      if (!twitchFile.exists()) {
-          twitchFile.createNewFile();
-      }
+    if (!twitchFile.exists()) {
+      twitchFile.createNewFile();
+    }
     shoutoutFile = new File(botFiles + "/shoutout.csv");
-      if (!shoutoutFile.exists()) {
-          shoutoutFile.createNewFile();
-      }
+    if (!shoutoutFile.exists()) {
+      shoutoutFile.createNewFile();
+    }
+    moderatorFile = new File(botFiles + "/moderator.csv");
+    if (!moderatorFile.exists()) {
+      moderatorFile.createNewFile();
+    }
     memberCountFile = new File(botFiles + "/membercount.txt");
-      if (!memberCountFile.exists()) {
-          memberCountFile.createNewFile();
-      }
+    if (!memberCountFile.exists()) {
+      memberCountFile.createNewFile();
+    }
     Logger.info("File path to bot files setup");
     youtube = new YoutubeImpl(discordAPI);
     twitch = new TwitchImpl(discordAPI);
