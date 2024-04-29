@@ -28,7 +28,11 @@ import org.tinylog.Logger;
 
 public class BotMain {
 
-  private static final Dotenv CONFIG = Dotenv.configure().load();
+  private static final File botFile = new File(BotMain.class.getProtectionDomain()
+      .getCodeSource()
+      .getLocation().getPath());
+  private static final Dotenv CONFIG =
+      Dotenv.configure().directory(botFile.getParentFile().getAbsolutePath()).load();
   private static final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2);
   private static File reactionRolesFile;
   private static File youtubeFile;
@@ -166,9 +170,6 @@ public class BotMain {
       youtube.cleanUp();
       reactionRoleManager.cleanUp();
       discordAPI.shutdown();
-      File botFile = new File(BotMain.class.getProtectionDomain()
-          .getCodeSource()
-          .getLocation().getPath());
       ProcessBuilder restartBuilder = new ProcessBuilder("bash", "-c", "sleep 10 && "
           + "nohup java -jar " + botFile.getName() + " > nohup.out 2>&1");
       restartBuilder.directory(botFile.getParentFile());
