@@ -83,9 +83,7 @@ public class TwitchImpl {
           .setSkipHeaderRecord(true)
           .build();
 
-      Iterable<CSVRecord> csvIterable = csvFormat.parse(fileReaderTwitch);
-
-      for (CSVRecord csvRecord : csvIterable) {
+      for (CSVRecord csvRecord : csvFormat.parse(fileReaderTwitch)) {
         channel.add(csvRecord.get("channel"));
         message.add(csvRecord.get("message"));
         username.add(csvRecord.get("username"));
@@ -107,9 +105,7 @@ public class TwitchImpl {
           .setSkipHeaderRecord(true)
           .build();
 
-      csvIterable = csvFormat.parse(fileReaderShoutout);
-
-      for (CSVRecord csvRecord : csvIterable) {
+      for (CSVRecord csvRecord : csvFormat.parse(fileReaderShoutout)) {
         shoutoutNames.add(csvRecord.get("username"));
       }
 
