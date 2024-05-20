@@ -10,10 +10,12 @@ import java.io.File;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.net.HttpURLConnection;
 import java.security.GeneralSecurityException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -23,6 +25,10 @@ import net.dv8tion.jda.api.entities.channel.middleman.MessageChannel;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVPrinter;
 import org.apache.commons.csv.CSVRecord;
+import org.apache.http.client.methods.CloseableHttpResponse;
+import org.apache.http.client.methods.HttpHead;
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.impl.client.HttpClientBuilder;
 import org.tinylog.Logger;
 
 @SuppressWarnings("java:S1192")
@@ -124,16 +130,30 @@ public class YoutubeImpl {
       String videoID = response.getItems().get(0).getContentDetails().getUpload().getVideoId();
       if (!videoID.equals(videoid.get(i))) {
         videoid.set(i, videoID);
-        discordAPI.getChannelById(MessageChannel.class, channel.get(i))
-            .sendMessage(discordAPI.getRoleById(role.get(i))
+        Objects.requireNonNull(discordAPI.getChannelById(MessageChannel.class, channel.get(i)))
+            .sendMessage(Objects.requireNonNull(discordAPI.getRoleById(role.get(i)))
                 .getAsMention() + " " + message.get(i).replace("\\n", "\n") + "\n"
-                + "https://www.youtube.com/watch?v=" + videoID)
+                + getUrl(videoID))
             .queue();
       }
     }
-      if (!ytchannelid.isEmpty()) {
-          updateCSV();
-      }
+    if (!ytchannelid.isEmpty()) {
+      updateCSV();
+    }
+  }
+
+  private static String getUrl(String videoID) throws IOException {
+    CloseableHttpClient client = HttpClientBuilder.create().disableRedirectHandling().build();
+    HttpHead head = new HttpHead("https://www.youtube.com/shorts/" + videoID);
+    String url;
+    try (CloseableHttpResponse httpResponse = client.execute(head)) {
+      int statusCode = httpResponse.getStatusLine().getStatusCode();
+      if (statusCode == HttpURLConnection.HTTP_OK) {
+        url = "https://www.youtube.com/shorts/" + videoID;
+      } else url = "https://www.youtube.com/watch?v=" + videoID;
+      client.close();
+    }
+    return url;
   }
 
   /**
