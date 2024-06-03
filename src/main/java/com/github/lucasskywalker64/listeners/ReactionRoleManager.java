@@ -144,7 +144,7 @@ public class ReactionRoleManager extends ListenerAdapter {
                               }
                           });
                   } else {
-                      Logger.error("Could not add role because: {}", roleError.getMessage());
+                      Logger.error("Could not remove role because: {}", roleError.getMessage());
                   }
               });
         }
