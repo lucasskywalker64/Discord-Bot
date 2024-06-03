@@ -86,7 +86,7 @@ public class YoutubeImpl {
           }
           if (!csvRecord.get("videoid").isBlank()) {
               videoid.add(csvRecord.get("videoid"));
-          }
+          } else videoid.add("");
       }
     } catch (IOException e) {
       Logger.error(e);
