@@ -1,6 +1,7 @@
 package com.github.lucasskywalker64.api.twitch;
 
 import com.github.lucasskywalker64.BotMain;
+import com.github.lucasskywalker64.persistence.PersistenceUtil;
 import com.github.lucasskywalker64.persistence.data.ShoutoutData;
 import com.github.lucasskywalker64.persistence.data.TwitchData;
 import com.github.lucasskywalker64.persistence.repository.TwitchRepository;
@@ -15,6 +16,7 @@ import com.github.twitch4j.events.ChannelGoOfflineEvent;
 import com.github.twitch4j.helix.domain.Game;
 import com.github.twitch4j.helix.domain.Video;
 
+import java.io.IOException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -56,6 +58,13 @@ public class TwitchImpl {
         twitchDataList.addAll(twitchRepo.loadAll());
         shoutoutNames.clear();
         shoutoutNames.addAll(twitchRepo.loadAllShoutout());
+        shoutedoutNames.clear();
+        try {
+            shoutedoutNames.addAll(Arrays.asList(
+                    PersistenceUtil.readFileAsString(BotMain.getShoutedOutFile().toPath()).split(";")));
+        } catch (IOException e) {
+            Logger.error("Failed to read shoutedout file.");
+        }
 
         moderatorName = twitchRepo.readModeratorName();
 
@@ -86,6 +95,11 @@ public class TwitchImpl {
                     .execute().getGames().getFirst());
             if (index == 0) {
                 shoutedoutNames.clear();
+                try {
+                    PersistenceUtil.writeStringAsFile(BotMain.getShoutedOutFile().toPath(), "");
+                } catch (IOException e) {
+                    Logger.error("Failed to write shoutedout file.");
+                }
             }
         }
     }
@@ -270,8 +284,12 @@ public class TwitchImpl {
         }
     }
 
-    public void cleanUp() throws InterruptedException {
+    public void cleanUp() throws InterruptedException, IOException {
         twitchClient.close();
+        twitchRepo.saveAll(twitchDataList, false);
+        PersistenceUtil.writeStringAsFile(BotMain.getShoutedOutFile().toPath(),
+                String.join(";", shoutedoutNames));
+
         scheduler.awaitTermination(10, TimeUnit.SECONDS);
     }
 

@@ -51,6 +51,7 @@ public class BotMain {
     private static File youTubeFile;
     private static File twitchFile;
     private static File shoutoutFile;
+    private static File shoutedOutFile;
     private static File moderatorFile;
     private static File memberCountFile;
     private static JDA discordAPI;
@@ -77,6 +78,10 @@ public class BotMain {
 
     public static File getShoutoutFile() {
         return shoutoutFile;
+    }
+
+    public static File getShoutedOutFile() {
+        return shoutedOutFile;
     }
 
     public static File getModeratorFile() {
@@ -145,6 +150,10 @@ public class BotMain {
         shoutoutFile = new File(botFiles + "/shoutout.csv");
         if (!shoutoutFile.exists()) {
             shoutoutFile.createNewFile();
+        }
+        shoutedOutFile = new File(botFiles + "/shoutedout.csv");
+        if (!shoutedOutFile.exists()) {
+            shoutedOutFile.createNewFile();
         }
         moderatorFile = new File(botFiles + "/moderator.csv");
         if (!moderatorFile.exists()) {
