@@ -258,6 +258,10 @@ public class SlashCommandManager extends ListenerAdapter {
 
     private void displayReactionRoles(SlashCommandInteractionEvent event) {
         List<ReactionRoleData> reactionRoleDataList = reactionRoleRepo.loadAll();
+        if (reactionRoleDataList.isEmpty()) {
+            event.reply("No reaction roles.").setEphemeral(true).queue();
+            return;
+        }
         EmbedBuilder embed = new EmbedBuilder();
         addFieldSafe(embed, "Role Name", reactionRoleDataList.stream()
                 .map(ReactionRoleData::roleName)
