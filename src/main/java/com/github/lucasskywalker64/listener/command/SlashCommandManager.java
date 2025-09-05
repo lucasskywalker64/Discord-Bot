@@ -424,6 +424,7 @@ public class SlashCommandManager extends ListenerAdapter {
     }
 
     private void addYoutubeNotification(SlashCommandInteractionEvent event) {
+        event.deferReply(true).queue();
         try {
             YouTubeData data = new YouTubeData(
                     event.getOption("channel").getAsString(),
@@ -436,26 +437,28 @@ public class SlashCommandManager extends ListenerAdapter {
             );
             if (!youTubeRepo.loadAll().contains(data)) {
                 youTubeRepo.saveAll(Collections.singletonList(data));
-                event.reply("Youtube notification added.").setEphemeral(true).queue();
-            } else event.replyFormat("The user %s is already in the list.", event.getOption("name").getAsString())
-                    .setEphemeral(true).queue();
+                event.getHook().sendMessage("Youtube notification added.").queue();
+            } else event.getHook().sendMessage(
+                    String.format("The user %s is already in the list.", event.getOption("name").getAsString()))
+                    .queue();
         } catch (InvalidParameterException e) {
-            event.replyFormat("ERROR: Failed to find upload playlist for channel: %s.",
-                    event.getOption("name").getAsString()).setEphemeral(true).queue();
+            event.getHook().sendMessage(String.format("ERROR: Failed to find upload playlist for channel: %s.",
+                    event.getOption("name").getAsString())).queue();
             if (e.getCause() != null)
                 Logger.error(e.getCause());
         } catch (IOException e) {
             Logger.error(e);
-            event.replyFormat("ERROR: Failed to add Youtube notification. Please contact the developer.")
-                    .setEphemeral(true).queue();
+            event.getHook().sendMessage("ERROR: Failed to add Youtube notification. " +
+                            "Please contact the developer.").queue();
         }
     }
 
     private void editYoutubeNotification(SlashCommandInteractionEvent event) {
+        event.deferReply(true).queue();
         try {
             List<YouTubeData> youTubeDataList = youTubeRepo.loadAll();
             if (youTubeDataList.isEmpty()) {
-                event.reply("There are no YouTube notifications.").setEphemeral(true).queue();
+                event.getHook().sendMessage("There are no YouTube notifications.").queue();
                 return;
             }
             int index = IntStream.range(0, youTubeDataList.size())
@@ -464,22 +467,23 @@ public class SlashCommandManager extends ListenerAdapter {
                     .findFirst()
                     .orElse(-1);
             if (index == -1) {
-                event.replyFormat("There is no notification for the user %s", event.getOption("username")
-                        .getAsString()).setEphemeral(true).queue();
+                event.getHook().sendMessage(String.format("There is no notification for the user %s",
+                        event.getOption("username").getAsString())).queue();
                 return;
             }
             YouTubeData data = youTubeDataList.get(index);
             data.updateList(event, youTubeDataList, index);
             youTubeRepo.saveAll(youTubeDataList, false);
-            event.reply("YouTube notification edited.").setEphemeral(true).queue();
+            event.getHook().sendMessage("YouTube notification edited.").queue();
         } catch (IOException e) {
             Logger.error(e);
-            event.reply("ERROR: Failed to edit YouTube notification. Please contact the developer.")
-                    .setEphemeral(true).queue();
+            event.getHook().sendMessage("ERROR: Failed to edit YouTube notification. " +
+                            "Please contact the developer.").queue();
         }
     }
 
     private void removeYoutubeNotification(SlashCommandInteractionEvent event) {
+        event.deferReply(true).queue();
         List<YouTubeData> youTubeDataList = youTubeRepo.loadAll();
         Optional<YouTubeData> toBeRemoved = youTubeDataList.stream()
                 .filter(data -> data.name().equalsIgnoreCase(event.getOption("name").getAsString()))
@@ -490,13 +494,13 @@ public class SlashCommandManager extends ListenerAdapter {
                 youTubeRepo.saveAll(youTubeDataList, false);
             } catch (IOException e) {
                 Logger.error(e);
-                event.reply("ERROR: Failed to remove Youtube notification. Please contact the developer.")
-                        .setEphemeral(true).queue();
+                event.getHook().sendMessage("ERROR: Failed to remove Youtube notification. " +
+                                "Please contact the developer.").queue();
             }
-            event.replyFormat("Youtube notification for %s removed.", event.getOption("name").getAsString())
-                    .setEphemeral(true).queue();
-        } else event.replyFormat("The user %s is not in the list.", event.getOption("name").getAsString())
-                .setEphemeral(true).queue();
+            event.getHook().sendMessage(String.format("Youtube notification for %s removed.",
+                            event.getOption("name").getAsString())).queue();
+        } else event.getHook().sendMessage(String.format("The user %s is not in the list.",
+                        event.getOption("name").getAsString())).queue();
     }
 
     private void displayYouTubeNotification(SlashCommandInteractionEvent event) {
@@ -517,6 +521,7 @@ public class SlashCommandManager extends ListenerAdapter {
     }
 
     private void addTwitchNotification(@NotNull SlashCommandInteractionEvent event) {
+        event.deferReply(true).queue();
         try {
             String role = "";
             if (event.getOption("role") != null) {
@@ -535,21 +540,22 @@ public class SlashCommandManager extends ListenerAdapter {
             if (!twitchRepo.loadAll().contains(data)) {
                 twitchRepo.saveAll(Collections.singletonList(data));
                 twitch.load();
-                event.reply("Twitch notification added.").setEphemeral(true).queue();
-            } else event.replyFormat("The user %s is already in the list.",
-                    event.getOption("username").getAsString()).setEphemeral(true).queue();
+                event.getHook().sendMessage("Twitch notification added.").queue();
+            } else event.getHook().sendMessage(String.format("The user %s is already in the list.",
+                    event.getOption("username").getAsString())).queue();
         } catch (IOException e) {
             Logger.error(e);
-            event.reply("ERROR: Failed to add Twitch notification. Please contact the developer.")
-                    .setEphemeral(true).queue();
+            event.getHook().sendMessage("ERROR: Failed to add Twitch notification. Please contact the developer.")
+                    .queue();
         }
     }
 
     private void editTwitchNotification(SlashCommandInteractionEvent event) {
+        event.deferReply(true).queue();
         try {
             List<TwitchData> twitchDataList = twitchRepo.loadAll();
             if (twitchDataList.isEmpty()) {
-                event.reply("There are no Twitch notifications.").setEphemeral(true).queue();
+                event.getHook().sendMessage("There are no Twitch notifications.").queue();
                 return;
             }
             int index = IntStream.range(0, twitchDataList.size())
@@ -558,23 +564,24 @@ public class SlashCommandManager extends ListenerAdapter {
                     .findFirst()
                     .orElse(-1);
             if (index == -1) {
-                event.replyFormat("There is no notification for the user %s", event.getOption("username")
-                        .getAsString()).setEphemeral(true).queue();
+                event.getHook().sendMessage(String.format("There is no notification for the user %s",
+                        event.getOption("username").getAsString())).queue();
                 return;
             }
             TwitchData data = twitchDataList.get(index);
             data.updateList(event, twitchDataList, index);
             twitchRepo.saveAll(twitchDataList, false);
             twitch.load();
-            event.reply("Twitch notification edited.").setEphemeral(true).queue();
+            event.getHook().sendMessage("Twitch notification edited.").queue();
         } catch (IOException e) {
             Logger.error(e);
-            event.reply("ERROR: Failed to edit Twitch notification. Please contact the developer.")
-                    .setEphemeral(true).queue();
+            event.getHook().sendMessage("ERROR: Failed to edit Twitch notification. " +
+                            "Please contact the developer.").queue();
         }
     }
 
     private void removeTwitchNotification(SlashCommandInteractionEvent event) {
+        event.deferReply(true).queue();
         List<TwitchData> twitchDataList = twitchRepo.loadAll();
         Optional<TwitchData> toBeRemoved = twitchDataList.stream()
                 .filter(data -> data.username().equalsIgnoreCase(event.getOption("username")
@@ -587,13 +594,13 @@ public class SlashCommandManager extends ListenerAdapter {
                 twitch.load();
             } catch (IOException e) {
                 Logger.error(e);
-                event.reply("ERROR: Failed to remove Twitch notification. Please contact the developer.")
-                        .setEphemeral(true).queue();
+                event.getHook().sendMessage("ERROR: Failed to remove Twitch notification. " +
+                                "Please contact the developer.").queue();
             }
-            event.replyFormat("Twitch notification for %s removed.", event.getOption("username").getAsString())
-                    .setEphemeral(true).queue();
-        } else event.replyFormat("The user %s is not in the list.", event.getOption("username").getAsString())
-                .setEphemeral(true).queue();
+            event.getHook().sendMessage(String.format("Twitch notification for %s removed.",
+                            event.getOption("username").getAsString())).queue();
+        } else event.getHook().sendMessage(String.format("The user %s is not in the list.",
+                        event.getOption("username").getAsString())).queue();
     }
 
     private void displayTwitchNotification(SlashCommandInteractionEvent event) {
