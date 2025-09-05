@@ -502,7 +502,7 @@ public class SlashCommandManager extends ListenerAdapter {
     private void displayYouTubeNotification(SlashCommandInteractionEvent event) {
         List<YouTubeData> youTubeDataList = youTubeRepo.loadAll();
         if (youTubeDataList.isEmpty()) {
-            event.reply("No YouTube notifications").queue();
+            event.reply("No YouTube notifications").setEphemeral(true).queue();
             return;
         }
         EmbedBuilder embed = new EmbedBuilder();
@@ -599,7 +599,7 @@ public class SlashCommandManager extends ListenerAdapter {
     private void displayTwitchNotification(SlashCommandInteractionEvent event) {
         List<TwitchData> twitchDataList = twitchRepo.loadAll();
         if (twitchDataList.isEmpty()) {
-            event.reply("No Twitch notifications.").queue();
+            event.reply("No Twitch notifications.").setEphemeral(true).queue();
             return;
         }
         EmbedBuilder embed = new EmbedBuilder();
@@ -639,7 +639,7 @@ public class SlashCommandManager extends ListenerAdapter {
     private static void displayShoutout(@NotNull SlashCommandInteractionEvent event) {
         List<ShoutoutData> shoutoutData = twitchRepo.loadAllShoutout();
         if (shoutoutData.isEmpty()) {
-            event.reply("No shoutout notifications.").queue();
+            event.reply("No shoutout notifications.").setEphemeral(true).queue();
             return;
         }
         StringBuilder message = new StringBuilder();
