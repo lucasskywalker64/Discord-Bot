@@ -5,7 +5,7 @@ public record YouTubeData(
         String message,
         String name,
         String playlistId,
-        String role,
+        String roleId,
         String videoId,
         String streamId) implements Data<YouTubeData> {
     @Override
@@ -14,17 +14,17 @@ public record YouTubeData(
     }
 
     public YouTubeData withVideoId(String videoId) {
-        return new YouTubeData(channel, message, name, playlistId, role, videoId, streamId);
+        return new YouTubeData(channel, message, name, playlistId, roleId, videoId, streamId);
     }
     public YouTubeData withStreamId(String streamId) {
-        return new YouTubeData(channel, message, name, playlistId, role, videoId, streamId);
+        return new YouTubeData(channel, message, name, playlistId, roleId, videoId, streamId);
     }
     @Override
     public YouTubeData withMessage(String message) {
-        return new YouTubeData(channel, message, name, playlistId, role, videoId, streamId);
+        return new YouTubeData(channel, message, name, playlistId, roleId, videoId, streamId);
     }
     @Override
-    public YouTubeData withRole(String role) {
-        return new YouTubeData(channel, message, name, playlistId, role, videoId, streamId);
+    public YouTubeData withRoleId(String roleId) {
+        return new YouTubeData(channel, message, name, playlistId, roleId, videoId, streamId);
     }
 }

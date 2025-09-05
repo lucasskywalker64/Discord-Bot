@@ -15,7 +15,7 @@ public class YouTubeRepository {
 
     private static final Path FILE_PATH = BotMain.getYouTubeFile().toPath();
     private static final String[] HEADERS = {
-            "channel", "message", "name", "playlistId", "role", "videoId", "streamId"
+            "channel", "message", "name", "playlistId", "roleId", "videoId", "streamId"
     };
     private final List<YouTubeData> localYouTubeData;
 
@@ -34,7 +34,7 @@ public class YouTubeRepository {
                     d.message(),
                     d.name(),
                     d.playlistId(),
-                    d.role(),
+                    d.roleId(),
                     d.videoId(),
                     d.streamId()
             }, append, HEADERS);
@@ -51,10 +51,7 @@ public class YouTubeRepository {
                 record.get("message"),
                 record.get("name"),
                 record.get("playlistId"),
-                record.get("role").contains("@") ?
-                        record.get("role").substring(record.get("role").indexOf("&") + 1,
-                                record.get("role").lastIndexOf(">"))
-                        : record.get("role"),
+                record.get("roleId"),
                 record.get("videoId"),
                 record.get("streamId")), HEADERS);
         Logger.info("YouTube data loaded.");

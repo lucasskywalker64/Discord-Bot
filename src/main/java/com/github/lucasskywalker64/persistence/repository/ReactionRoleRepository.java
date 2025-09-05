@@ -15,7 +15,7 @@ public class ReactionRoleRepository {
 
     private static final Path FILE_PATH = BotMain.getReactionRolesFile().toPath();
     private static final String[] HEADERS = {
-            "messageId", "role", "emoji"
+            "channelId", "messageId", "roleId", "roleName", "emoji"
     };
     private final List<ReactionRoleData> localReactionRoleData;
     
@@ -30,8 +30,10 @@ public class ReactionRoleRepository {
     public void saveAll(List<ReactionRoleData> reactionRoleData, boolean append) throws IOException {
         if (!localReactionRoleData.equals(reactionRoleData)) {
             PersistenceUtil.writeCsv(FILE_PATH, reactionRoleData, d -> new String[]{
+                    d.channelId(),
                     d.messageId(),
-                    String.valueOf(d.role()),
+                    d.roleId(),
+                    d.roleName(),
                     d.emoji()
             }, append, HEADERS);
             if (!append)
@@ -43,8 +45,10 @@ public class ReactionRoleRepository {
     
     private ReactionRoleRepository() throws IOException {
         localReactionRoleData = PersistenceUtil.readCsv(FILE_PATH, (CSVRecord record) -> new ReactionRoleData(
+                record.get("channelId"),
                 record.get("messageId"),
-                Long.parseLong(record.get("role")),
+                record.get("roleId"),
+                record.get("roleName"),
                 record.get("emoji")
         ));
         Logger.info("Reaction role data loaded.");

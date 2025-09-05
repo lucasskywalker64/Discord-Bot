@@ -19,23 +19,13 @@ import org.tinylog.Logger;
 @SuppressWarnings({"java:S1192", "DataFlowIssue"})
 public class ReactionRoleManager extends ListenerAdapter {
 
-    private static final List<String> messageIds = new ArrayList<>();
-    private static final List<Long> roles = new ArrayList<>();
-    private static final List<String> emojis = new ArrayList<>();
+    private static final List<ReactionRoleData> reactionRoleDataList = new ArrayList<>();
     private static final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
     private final ReactionRoleRepository repository = ReactionRoleRepository.getInstance();
 
     public void load() {
-        List<ReactionRoleData> allData = repository.loadAll();
-        messageIds.clear();
-        roles.clear();
-        emojis.clear();
-
-        for (ReactionRoleData data : allData) {
-            messageIds.add(data.messageId());
-            roles.add(data.role());
-            emojis.add(data.emoji());
-        }
+        reactionRoleDataList.clear();
+        reactionRoleDataList.addAll(repository.loadAll());
     }
 
     public void scheduleLoad() {
@@ -50,22 +40,22 @@ public class ReactionRoleManager extends ListenerAdapter {
         try {
             User user = event.retrieveUser().complete();
 
-            for (int i = 0; i < messageIds.size(); i++) {
-                if (messageIds.get(i).equals(event.getMessageId()) &&
-                        emojis.get(i).equals(event.getEmoji().getFormatted())
+            for (ReactionRoleData data : reactionRoleDataList) {
+                if (data.messageId().equals(event.getMessageId()) &&
+                        data.emoji().equals(event.getEmoji().getFormatted())
                         && !user.isBot()) {
                     Logger.info("Reaction equals reaction role");
-                    int finalI = i;
-                    event.getGuild().addRoleToMember(user, new RoleImpl(roles.get(i), event.getGuild()))
+                    event.getGuild().addRoleToMember(user, new RoleImpl(
+                            Long.parseLong(data.roleId()), event.getGuild()))
                             .submit()
                             .whenComplete((unused, roleError) -> {
                                 if (roleError == null) {
                                     Logger.info("Role {} added to {}", event.getGuild()
-                                            .getRoleById(roles.get(finalI)).getName(), user.getName());
+                                            .getRoleById(data.roleId()).getName(), user.getName());
                                     user.openPrivateChannel().submit()
                                             .thenCompose(privateChannel -> privateChannel
                                                     .sendMessage("The role " + event.getGuild()
-                                                                    .getRoleById(roles.get(finalI)).getName()
+                                                                    .getRoleById(data.roleId()).getName()
                                                             + " has been successfully added to you!").submit())
                                             .whenComplete((unused2, messageError) -> {
                                                 if (messageError != null) {
@@ -92,22 +82,22 @@ public class ReactionRoleManager extends ListenerAdapter {
         try {
             User user = event.retrieveUser().complete();
 
-            for (int i = 0; i < messageIds.size(); i++) {
-                if (messageIds.get(i).equals(event.getMessageId()) &&
-                        emojis.get(i).equals(event.getEmoji().getFormatted())
+            for (ReactionRoleData data : reactionRoleDataList) {
+                if (data.messageId().equals(event.getMessageId()) &&
+                        data.emoji().equals(event.getEmoji().getFormatted())
                         && !user.isBot()) {
                     Logger.info("Reaction equals reaction role");
-                    int finalI = i;
-                    event.getGuild().removeRoleFromMember(user, new RoleImpl(roles.get(i), event.getGuild()))
+                    event.getGuild().removeRoleFromMember(user, new RoleImpl(
+                            Long.parseLong(data.roleId()), event.getGuild()))
                             .submit()
                             .whenComplete((unused, roleError) -> {
                                 if (roleError == null) {
                                     Logger.info("Role {} removed from {}", event.getGuild()
-                                            .getRoleById(roles.get(finalI)).getName(), user.getName());
+                                            .getRoleById(data.roleId()).getName(), user.getName());
                                     user.openPrivateChannel().submit()
                                             .thenCompose(privateChannel -> privateChannel
                                                     .sendMessage("The role " + event.getGuild()
-                                                                    .getRoleById(roles.get(finalI)).getName()
+                                                                    .getRoleById(data.roleId()).getName()
                                                             + " has been successfully removed from you!").submit())
                                             .whenComplete((unused2, messageError) -> {
                                                 if (messageError != null) {

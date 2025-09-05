@@ -2,11 +2,15 @@ package com.github.lucasskywalker64.persistence.data;
 
 /**
  *
+ * @param channelId
  * @param messageId
- * @param role 0 = @everyone, 1 = @here
+ * @param roleId
+ * @param roleName
  * @param emoji
  */
 public record ReactionRoleData(
+        String channelId,
         String messageId,
-        Long role,
+        String roleId,
+        String roleName,
         String emoji) {}

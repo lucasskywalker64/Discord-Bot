@@ -18,7 +18,7 @@ public class TwitchRepository {
     private static final Path SHOUTOUT_FILE_PATH = BotMain.getShoutoutFile().toPath();
     private static final Path MODERATOR_FILE_PATH = BotMain.getModeratorFile().toPath();
     private static final String[] HEADERS = {
-            "channel", "message", "username", "role", "announcementId", "timestamp"
+            "channel", "message", "username", "roleId", "announcementId", "timestamp", "gameName", "boxArtUrl"
     };
     private final List<TwitchData> localTwitchData;
     private final List<ShoutoutData> localShoutoutData;
@@ -37,9 +37,11 @@ public class TwitchRepository {
                     d.channel(),
                     d.message(),
                     d.username().toLowerCase(),
-                    d.role(),
+                    d.roleId(),
                     d.announcementId(),
-                    String.valueOf(d.timestamp())
+                    String.valueOf(d.timestamp()),
+                    d.gameName(),
+                    d.boxArtUrl()
             }, append, HEADERS);
             if (!append)
                 localTwitchData.clear();
@@ -81,12 +83,11 @@ public class TwitchRepository {
                 record.get("channel"),
                 record.get("message"),
                 record.get("username"),
-                record.get("role").contains("@") ?
-                        record.get("role").substring(record.get("role").indexOf("&") + 1,
-                                record.get("role").lastIndexOf(">"))
-                        : record.get("role"),
-                null,
-                0L), HEADERS);
+                record.get("roleId"),
+                record.get("announcementId"),
+                Long.parseLong(record.get("timestamp")),
+                record.get("gameName"),
+                record.get("boxArtUrl")), HEADERS);
         localShoutoutData = PersistenceUtil.readCsv(SHOUTOUT_FILE_PATH, (CSVRecord record) -> new ShoutoutData(
                 record.get("username")
         ), "username");

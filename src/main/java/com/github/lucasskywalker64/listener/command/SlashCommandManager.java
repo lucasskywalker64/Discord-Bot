@@ -8,9 +8,13 @@ import com.github.lucasskywalker64.persistence.data.ReactionRoleData;
 import com.github.lucasskywalker64.persistence.data.TwitchData;
 import com.github.lucasskywalker64.api.twitch.TwitchImpl;
 
+import java.awt.*;
 import java.io.File;
 import java.io.IOException;
 import java.util.*;
+import java.util.List;
+import java.util.Map.Entry;
+import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import com.github.lucasskywalker64.persistence.data.YouTubeData;
@@ -20,18 +24,24 @@ import com.github.lucasskywalker64.persistence.repository.ReactionRoleRepository
 import com.github.lucasskywalker64.persistence.repository.TwitchRepository;
 import com.github.lucasskywalker64.persistence.repository.YouTubeRepository;
 import net.dv8tion.jda.api.EmbedBuilder;
+import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.Message;
+import net.dv8tion.jda.api.entities.Role;
 import net.dv8tion.jda.api.entities.channel.ChannelType;
-import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
 import net.dv8tion.jda.api.entities.channel.middleman.GuildMessageChannel;
 import net.dv8tion.jda.api.entities.channel.middleman.MessageChannel;
+import net.dv8tion.jda.api.entities.channel.middleman.StandardGuildMessageChannel;
+import net.dv8tion.jda.api.entities.emoji.CustomEmoji;
 import net.dv8tion.jda.api.entities.emoji.Emoji;
+import net.dv8tion.jda.api.entities.emoji.Emoji.Type;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
 import net.dv8tion.jda.api.exceptions.ErrorResponseException;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
+import net.dv8tion.jda.api.interactions.commands.Command;
 import net.dv8tion.jda.api.interactions.commands.build.CommandData;
 import net.dv8tion.jda.api.interactions.commands.build.Commands;
 import net.dv8tion.jda.api.interactions.commands.build.OptionData;
+import org.apache.commons.collections4.CollectionUtils;
 import org.jetbrains.annotations.NotNull;
 import org.tinylog.Logger;
 
@@ -56,6 +66,18 @@ public class SlashCommandManager extends ListenerAdapter {
             Command: /addreactionrole <channel> <messageid> <role> <emoji>
              */
             case "addreactionrole" -> addReactionRole(event);
+
+            /*
+            Display all reaction roles.
+            Command: /displayreactionroles
+             */
+            case "displayreactionroles" -> displayReactionRoles(event);
+
+            /*
+            Remove reaction role from a message.
+            Command: /removereactionrole <channel> <messageid> <role>
+             */
+            case "removereactionrole" -> removeReactionRole(event);
 
             /*
             Create a new embed or message in the given channel with optional roles and emojis to add reaction roles.
@@ -160,82 +182,125 @@ public class SlashCommandManager extends ListenerAdapter {
 
     private void addReactionRole(SlashCommandInteractionEvent event) {
         try {
-            validateRoles(event, Collections.singletonList(event.getOption("role").getAsString()));
-            handleReactionRoles(
+            event.deferReply(true).queue();
+            if (!handleReactionRoles(
                     event.getOption("messageid").getAsString(),
-                    Collections.singletonList(event.getOption("role").getAsString()),
-                    Collections.singletonList(event.getOption("emoji").getAsString()),
-                    event.getGuild().getTextChannelById(event.getOption("channel").getAsChannel().getId()));
-            event.reply("Reaction role has been added.").setEphemeral(true).queue();
+                    Collections.singletonList(event.getOption("role").getAsRole()),
+                    Collections.singletonList(Emoji.fromFormatted(event.getOption("emoji").getAsString())),
+                    event.getOption("channel").getAsChannel().asStandardGuildMessageChannel()))
+                event.getHook().sendMessage("One or more roles are already in the list.").queue();
+            else
+                event.getHook().sendMessage("Reaction role has been added.").queue();
         } catch (ErrorResponseException e) {
             if (e.getErrorCode() == 10014) {
                 Logger.error(e);
-                event.reply("ERROR: Unknown Emoji. Can only use emojis that are either default " +
-                        "or have been added to the server!").setEphemeral(true).queue();
+                event.getHook().sendMessage("ERROR: Unknown Emoji. Can only use emojis that are either " +
+                        "default or have been added to the server!").queue();
             } else {
                 Logger.error(e);
-                event.reply("ERROR: Unknown message. Make sure the message is actually " +
-                        "in the provided channel.").setEphemeral(true).queue();
+                event.getHook().sendMessage("ERROR: Unknown message. Make sure the message is actually " +
+                        "in the provided channel.").queue();
             }
-        } catch (InvalidParameterException e) {
-            throw new RuntimeException(e);
         } catch (IOException e) {
             Logger.error(e);
-            event.reply("ERROR: Failed to add reaction role. If this error persists please contact the developer.")
+            event.getHook().sendMessage("ERROR: Failed to add reaction role. Please contact the developer.")
+                    .queue();
+        }
+    }
+
+    private void displayReactionRoles(SlashCommandInteractionEvent event) {
+        List<ReactionRoleData> reactionRoleDataList = reactionRoleRepo.loadAll();
+        EmbedBuilder embed = new EmbedBuilder();
+        addFieldSafe(embed, "Role Name", reactionRoleDataList.stream()
+                .map(ReactionRoleData::roleName)
+                .toList(), true);
+        addFieldSafe(embed, "Emoji", reactionRoleDataList.stream()
+                .map(ReactionRoleData::emoji)
+                .toList(), true);
+        event.replyEmbeds(embed.build()).setEphemeral(true).queue();
+    }
+
+    private void removeReactionRole(SlashCommandInteractionEvent event) {
+        List<ReactionRoleData> reactionRoleDataList = reactionRoleRepo.loadAll();
+        Optional<ReactionRoleData> toBeRemoved = reactionRoleDataList.stream()
+                .filter(data -> data.roleId().equals(event.getOption("role").getAsRole().getId()))
+                .findFirst();
+        if (toBeRemoved.isEmpty()) {
+            event.replyFormat("The role %s is not in the list.", event.getOption("role").getAsRole().getName())
+                    .setEphemeral(true).queue();
+            return;
+        }
+        reactionRoleDataList.remove(toBeRemoved.get());
+        try {
+            event.getGuild().getChannelById(StandardGuildMessageChannel.class, toBeRemoved.get().channelId()).removeReactionById(
+                            toBeRemoved.get().messageId(), Emoji.fromFormatted(toBeRemoved.get().emoji()))
+                    .complete();
+            reactionRoleRepo.saveAll(reactionRoleDataList, false);
+            event.replyFormat("The role %s has been removed.", event.getOption("role").getAsRole().getName())
+                    .setEphemeral(true).queue();
+        } catch (Exception e) {
+            Logger.error(e);
+            event.reply("ERROR: Failed to remove role reaction. Please contact the developer.")
                     .setEphemeral(true).queue();
         }
     }
 
     private void createMessage(SlashCommandInteractionEvent event) {
-        List<String> roleList = new ArrayList<>();
-        List<String> emojiList = new ArrayList<>();
+        List<Role> roleList = new ArrayList<>();
+        List<Emoji> emojiList = new ArrayList<>();
 
         if (event.getOption("roles") != null && event.getOption("emojis") != null) {
-            roleList = new ArrayList<>(Arrays.asList(event.getOption("roles").getAsString().split(";")));
-            emojiList =
-                    new ArrayList<>(Arrays.asList(event.getOption("emojis").getAsString().split(";")));
-        }
-
-        try {
-            if (roleList.size() == emojiList.size()) {
-                EmbedBuilder embedBuilder = new EmbedBuilder();
-                if (event.getOption("image") != null) {
-                    embedBuilder.setThumbnail(event.getOption("image").getAsString());
-                }
-                if (event.getOption("title") != null) {
-                    embedBuilder.setTitle(event.getOption("title").getAsString());
-                }
-                String message = event.getOption("message").getAsString().replace("\\n", "\n");
-                embedBuilder.setDescription(message);
-
-                MessageChannel channel = event.getGuild()
-                        .getChannelById(GuildMessageChannel.class, event.getOption("channel")
-                                .getAsChannel().getId());
-
-                validateRoles(event, roleList);
-
-                String messageId;
-                String roleReaction = !roleList.isEmpty() ? " with role reaction." : " without role reaction.";
-                if (event.getOption("embed").getAsBoolean()) {
-                    messageId = channel.sendMessageEmbeds(embedBuilder.build()).complete().getId();
-                    event.replyFormat("Embed created in %s", channel.getAsMention() + roleReaction).setEphemeral(true)
-                            .queue();
-                } else {
-                    messageId = channel.sendMessage(message).complete().getId();
-                    event.replyFormat("Message sent in %s", channel.getAsMention() + roleReaction).setEphemeral(true)
-                            .queue();
-                }
-                if (!roleList.isEmpty())
-                    handleReactionRoles(messageId, roleList, emojiList, channel);
-            } else {
+            roleList = event.getOption("roles").getMentions().getRoles();
+            emojiList = Arrays.stream(event.getOption("emojis").getAsString().split(";"))
+                    .map(emoji -> Emoji.fromFormatted(emoji.strip())).collect(Collectors.toList());
+            if (roleList.size() != emojiList.size()) {
                 event.reply("ERROR: Amount of roles and emojis don't match! Command has been canceled.")
                         .setEphemeral(true).queue();
+                return;
             }
-        } catch (InvalidParameterException e) {
-            if (e.getCode() == 1002) {
-                event.reply("ERROR: Faulty role input!").setEphemeral(true).queue();
+        }
+
+        MessageChannel channel = null;
+        String messageId = "";
+        try {
+            if (!event.getOption("roles").getMentions().getUsers().isEmpty()) {
+                event.reply("The list of roles contains users. Please only input valid roles.")
+                        .setEphemeral(true).queue();
+                return;
             }
-        } catch (IOException e) {
+            if (!validateEmojis(event.getGuild(), emojiList)) {
+                event.reply("One or more emojis are invalid. " +
+                                "Please only use either default emojis or custom emojis from this server.")
+                        .setEphemeral(true).queue();
+                return;
+            }
+            EmbedBuilder embedBuilder = new EmbedBuilder();
+            if (event.getOption("image") != null) {
+                embedBuilder.setThumbnail(event.getOption("image").getAsString());
+            }
+            if (event.getOption("title") != null) {
+                embedBuilder.setTitle(event.getOption("title").getAsString());
+            }
+            String message = event.getOption("message").getAsString().replace("\\n", "\n");
+            embedBuilder.setDescription(message);
+
+            channel = event.getGuild()
+                    .getChannelById(GuildMessageChannel.class, event.getOption("channel")
+                            .getAsChannel().getId());
+
+            String roleReaction = !roleList.isEmpty() ? " with role reaction." : " without role reaction.";
+            if (event.getOption("embed").getAsBoolean()) {
+                messageId = channel.sendMessageEmbeds(embedBuilder.build()).complete().getId();
+                event.replyFormat("Embed created in %s", channel.getAsMention() + roleReaction).setEphemeral(true)
+                        .queue();
+            } else {
+                messageId = channel.sendMessage(message).complete().getId();
+                event.replyFormat("Message sent in %s", channel.getAsMention() + roleReaction).setEphemeral(true)
+                        .queue();
+            }
+            if (!roleList.isEmpty())
+                handleReactionRoles(messageId, roleList, emojiList, channel);
+        } catch (Exception e) {
             Logger.error(e);
             event.reply("ERROR: Failed to create message. Please contact the developer.")
                     .setEphemeral(true).queue();
@@ -243,8 +308,8 @@ public class SlashCommandManager extends ListenerAdapter {
     }
 
     private void editMessage(SlashCommandInteractionEvent event) {
-        TextChannel channel =
-                event.getGuild().getTextChannelById(event.getOption("channel").getAsChannel().getId());
+        MessageChannel channel =
+                event.getOption("channel").getAsChannel().asStandardGuildMessageChannel();
 
         String messageId = event.getOption("messageid").getAsString();
 
@@ -283,18 +348,16 @@ public class SlashCommandManager extends ListenerAdapter {
 
     private void removeMessage(SlashCommandInteractionEvent event) {
         try {
-            TextChannel channel = event.getGuild()
-                    .getTextChannelById(event.getOption("channel")
-                            .getAsChannel()
-                            .getId());
+            StandardGuildMessageChannel channel = event.getOption("channel").getAsChannel()
+                    .asStandardGuildMessageChannel();
             String messageId = event.getOption("messageid").getAsString();
             List<ReactionRoleData> reactionRoleDataList = reactionRoleRepo.loadAll();
-            Optional<ReactionRoleData> toBeRemoved = reactionRoleDataList.stream()
+            List<ReactionRoleData> toBeRemoved = reactionRoleDataList.stream()
                     .filter(data -> data.messageId().equals(messageId))
-                    .findFirst();
-            if (toBeRemoved.isPresent()) {
-                reactionRoleDataList.remove(toBeRemoved.get());
-                reactionRoleRepo.saveAll(reactionRoleDataList);
+                    .toList();
+            if (!toBeRemoved.isEmpty()) {
+                reactionRoleDataList.removeAll(toBeRemoved);
+                reactionRoleRepo.saveAll(reactionRoleDataList, false);
                 reactionRoleManager.load();
             }
             channel.deleteMessageById(messageId).complete();
@@ -306,49 +369,14 @@ public class SlashCommandManager extends ListenerAdapter {
         }
     }
 
-    public static void validateRoles(SlashCommandInteractionEvent event, List<String> roleList)
-            throws InvalidParameterException {
-        for (String role : roleList) {
-            if (role.contains("@")) {
-                if (role.matches("@everyone|@here") || event.getGuild().getRoleById(
-                        Long.parseLong(role.substring(role.indexOf("&") + 1, role.lastIndexOf(">")))) == null) {
-                    throw new InvalidParameterException(1002, null);
-                }
-            } else {
-                if (event.getGuild().getRoleById(Long.parseLong(role)) == null) {
-                    throw new InvalidParameterException(1002, null);
-                }
-            }
-        }
-    }
-
-    private void handleReactionRoles(String messageId, List<String> roleList, List<String> emojiList,
-                                     MessageChannel channel) throws IOException {
-        List<ReactionRoleData> newRoleData = new ArrayList<>();
-        for (int i = 0; i < roleList.size(); i++) {
-            channel.addReactionById(messageId, Emoji.fromFormatted(emojiList.get(i).strip()))
-                    .complete();
-            newRoleData.add(new ReactionRoleData(
-                    messageId,
-                    Long.parseLong(roleList.get(i).substring(roleList.get(i).indexOf("&") + 1,
-                            roleList.get(i).lastIndexOf(">") == -1 ? roleList.get(i).length()
-                                    : roleList.get(i).indexOf(">"))),
-                    emojiList.get(i)
-            ));
-        }
-        reactionRoleRepo.saveAll(newRoleData);
-        reactionRoleManager.load();
-    }
-
     private void addYoutubeNotification(SlashCommandInteractionEvent event) {
         try {
-            validateRoles(event, Collections.singletonList(event.getOption("role").getAsString()));
             YouTubeData data = new YouTubeData(
                     event.getOption("channel").getAsString(),
                     event.getOption("message").getAsString(),
                     event.getOption("name").getAsString(),
                     youTube.getPlaylistIdFromChannelName(event.getOption("name").getAsString()),
-                    event.getOption("role").getAsString(),
+                    event.getOption("role").getAsRole().getId(),
                     "",
                     ""
             );
@@ -358,15 +386,10 @@ public class SlashCommandManager extends ListenerAdapter {
             } else event.replyFormat("The user %s is already in the list.", event.getOption("name").getAsString())
                     .setEphemeral(true).queue();
         } catch (InvalidParameterException e) {
-            if (e.getCode() == 1001)
-                event.replyFormat("ERROR: Faulty role input: %s.", event.getOption("role").getAsString())
-                        .setEphemeral(true).queue();
-            else if (e.getCode() == 1003) {
-                event.replyFormat("ERROR: Failed to find YouTube channel: %s.",
-                        event.getOption("name").getAsString()).setEphemeral(true).queue();
-                if (e.getCause() != null)
-                    Logger.error(e.getCause());
-            }
+            event.replyFormat("ERROR: Failed to find upload playlist for channel: %s.",
+                    event.getOption("name").getAsString()).setEphemeral(true).queue();
+            if (e.getCause() != null)
+                Logger.error(e.getCause());
         } catch (IOException e) {
             Logger.error(e);
             event.replyFormat("ERROR: Failed to add Youtube notification. Please contact the developer.")
@@ -392,13 +415,7 @@ public class SlashCommandManager extends ListenerAdapter {
                 return;
             }
             YouTubeData data = youTubeDataList.get(index);
-            data.updateList(event, youTubeDataList, index, (e, roles) -> {
-                try {
-                    SlashCommandManager.validateRoles(e, roles);
-                } catch (InvalidParameterException ex) {
-                    event.reply("ERROR: Faulty role input!").setEphemeral(true).queue();
-                }
-            });
+            data.updateList(event, youTubeDataList, index);
             youTubeRepo.saveAll(youTubeDataList, false);
             event.reply("YouTube notification edited.").setEphemeral(true).queue();
         } catch (IOException e) {
@@ -432,8 +449,7 @@ public class SlashCommandManager extends ListenerAdapter {
         try {
             String role = "";
             if (event.getOption("role") != null) {
-                validateRoles(event, Collections.singletonList(event.getOption("role").getAsString()));
-                role = event.getOption("role").getAsString();
+                role = event.getOption("role").getAsRole().getId();
             }
             TwitchData data = new TwitchData(
                     event.getOption("channel").getAsString(),
@@ -441,7 +457,9 @@ public class SlashCommandManager extends ListenerAdapter {
                     event.getOption("username").getAsString(),
                     role,
                     null,
-                    0L
+                    0L,
+                    null,
+                    null
             );
             if (!twitchRepo.loadAll().contains(data)) {
                 twitchRepo.saveAll(Collections.singletonList(data));
@@ -449,8 +467,6 @@ public class SlashCommandManager extends ListenerAdapter {
                 event.reply("Twitch notification added.").setEphemeral(true).queue();
             } else event.replyFormat("The user %s is already in the list.",
                     event.getOption("username").getAsString()).setEphemeral(true).queue();
-        } catch (InvalidParameterException e) {
-            event.reply("ERROR: Faulty role input!").setEphemeral(true).queue();
         } catch (IOException e) {
             Logger.error(e);
             event.reply("ERROR: Failed to add Twitch notification. Please contact the developer.")
@@ -476,13 +492,7 @@ public class SlashCommandManager extends ListenerAdapter {
                 return;
             }
             TwitchData data = twitchDataList.get(index);
-            data.updateList(event, twitchDataList, index, (e, roles) -> {
-                try {
-                    SlashCommandManager.validateRoles(e, roles);
-                } catch (InvalidParameterException ex) {
-                    event.reply("ERROR: Faulty role input!").setEphemeral(true).queue();
-                }
-            });
+            data.updateList(event, twitchDataList, index);
             twitchRepo.saveAll(twitchDataList, false);
             twitch.load();
             event.reply("Twitch notification edited.").setEphemeral(true).queue();
@@ -502,7 +512,7 @@ public class SlashCommandManager extends ListenerAdapter {
         if (toBeRemoved.isPresent()) {
             twitchDataList.remove(toBeRemoved.get());
             try {
-                twitchRepo.saveAll(twitchDataList);
+                twitchRepo.saveAll(twitchDataList, false);
                 twitch.load();
             } catch (IOException e) {
                 Logger.error(e);
@@ -627,35 +637,92 @@ public class SlashCommandManager extends ListenerAdapter {
         event.replyFormat("Rest ping: %d\nGateway ping: %d", restPing, gatewayPing).setEphemeral(true).queue();
     }
 
+    private boolean handleReactionRoles(String messageId, List<Role> roleList, List<Emoji> emojiList,
+                                        MessageChannel channel) throws IOException {
+        List<ReactionRoleData> newRoleData = new ArrayList<>();
+        List<String> oldRoleIds = reactionRoleRepo.loadAll().stream().map(ReactionRoleData::roleId).toList();
+        List<String> newRoleIds = roleList.stream().map(Role::getId).toList();
+        if (!CollectionUtils.intersection(oldRoleIds, newRoleIds).isEmpty())
+            return false;
+        for (int i = 0; i < roleList.size(); i++) {
+            channel.addReactionById(messageId, emojiList.get(i)).complete();
+            newRoleData.add(new ReactionRoleData(
+                    channel.getId(),
+                    messageId,
+                    newRoleIds.get(i),
+                    roleList.get(i).getName(),
+                    emojiList.get(i).getFormatted()));
+        }
+        reactionRoleRepo.saveAll(newRoleData);
+        reactionRoleManager.load();
+        return true;
+    }
+
+    private void addFieldSafe(EmbedBuilder embed, String title, List<String> lines, boolean inline) {
+        StringBuilder chunk = new StringBuilder();
+        for (String line : lines) {
+            if (chunk.length() + line.length() + 1 > 1024) {
+                embed.addField(title, chunk.toString(), inline);
+                chunk.setLength(0);
+                title = ""; // only show the title once
+            }
+            chunk.append(line).append("\n");
+        }
+        if (!chunk.isEmpty()) {
+            embed.addField(title, chunk.toString(), inline);
+        }
+    }
+
+    private boolean validateEmojis(Guild guild, List<Emoji> emojiList) {
+        boolean valid = true;
+        for (Emoji emoji : emojiList) {
+            valid = emoji.getType().equals(Type.UNICODE) || guild.getEmojiById(((CustomEmoji) emoji).getId()) != null;
+            if (!valid) break;
+        }
+        return valid;
+    }
+
     public SlashCommandManager(List<CommandData> commandDataList) {
         // Command: /addreactionrole <channel> <messageid> <@role> <emoji>
         commandDataList.add(
                 Commands.slash("addreactionrole", "Add a new reaction that assigns a role")
-                .addOptions(
-                        new OptionData(
-                                CHANNEL,
-                                "channel",
-                                "The ID of the channel that the message is in.",
-                                true)
-                                .setChannelTypes(
-                                        ChannelType.TEXT,
-                                        ChannelType.NEWS,
-                                        ChannelType.GUILD_PUBLIC_THREAD),
-                        new OptionData(
-                                STRING,
-                                "messageid",
-                                "The ID of the message that this reaction should be added to.",
-                                true),
-                        new OptionData(
-                                ROLE,
-                                "role",
-                                "The role that this reaction should give.",
-                                true),
-                        new OptionData(
-                                STRING,
-                                "emoji",
-                                "The emoji that should be used.",
-                                true)));
+                        .addOptions(
+                                new OptionData(
+                                        CHANNEL,
+                                        "channel",
+                                        "The ID of the channel that the message is in.",
+                                        true)
+                                        .setChannelTypes(
+                                                ChannelType.TEXT,
+                                                ChannelType.NEWS,
+                                                ChannelType.GUILD_PUBLIC_THREAD),
+                                new OptionData(
+                                        STRING,
+                                        "messageid",
+                                        "The ID of the message that this reaction should be added to.",
+                                        true),
+                                new OptionData(
+                                        ROLE,
+                                        "role",
+                                        "The role that this reaction should give.",
+                                        true),
+                                new OptionData(
+                                        STRING,
+                                        "emoji",
+                                        "The emoji that should be used.",
+                                        true)));
+
+        // Command: /displayreactionroles
+        commandDataList.add(Commands.slash("displayreactionroles", "Display all reaction roles."));
+
+        // Command: /removereactionrole <channel> <messageid> <role>
+        commandDataList.add(
+                Commands.slash("removereactionrole", "Remove a reaction role.")
+                        .addOptions(new OptionData(
+                                        ROLE,
+                                        "role",
+                                        "The role to remove.",
+                                        true)));
 
         // Command: /createmessage <channel, message, embed:true/false> [title, roles, emojis, image]
         commandDataList.add(
@@ -690,7 +757,7 @@ public class SlashCommandManager extends ListenerAdapter {
                                 new OptionData(
                                         STRING,
                                         "roles",
-                                        "Roles separated by ; in the same order as emojis."),
+                                        "Roles in the same order as emojis."),
                                 new OptionData(
                                         STRING,
                                         "emojis",
@@ -741,7 +808,10 @@ public class SlashCommandManager extends ListenerAdapter {
                                         STRING,
                                         "name",
                                         "The @ handle or legacy username of the YouTube channel.",
-                                        true), new OptionData(ROLE, "role",
+                                        true),
+                                new OptionData(
+                                        ROLE,
+                                        "role",
                                         "The role that will be pinged with the notification.",
                                         true)));
 
@@ -759,7 +829,7 @@ public class SlashCommandManager extends ListenerAdapter {
                                         "message",
                                         "The new message."),
                                 new OptionData(
-                                        STRING,
+                                        ROLE,
                                         "role",
                                         "The new role.")));
 
@@ -814,7 +884,7 @@ public class SlashCommandManager extends ListenerAdapter {
                                         "message",
                                         "The new message."),
                                 new OptionData(
-                                        STRING,
+                                        ROLE,
                                         "role",
                                         "The new role.")));
 

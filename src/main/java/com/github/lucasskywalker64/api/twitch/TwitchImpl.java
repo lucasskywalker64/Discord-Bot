@@ -18,13 +18,7 @@ import com.github.twitch4j.helix.domain.Video;
 
 import java.io.IOException;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Timer;
-import java.util.TimerTask;
+import java.util.*;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -44,7 +38,6 @@ public class TwitchImpl {
     private final List<TwitchData> twitchDataList = new ArrayList<>();
     private final List<ShoutoutData> shoutoutNames = new ArrayList<>();
     private final List<String> shoutedoutNames = new ArrayList<>();
-    private final Map<String, Game> lastPlayedGame = new HashMap<>();
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
     private final JDA discordAPI;
     private TwitchClient twitchClient;
@@ -90,9 +83,11 @@ public class TwitchImpl {
         if (index > -1 && twitchDataList.get(index).timestamp() + TimeUnit.HOURS.toMillis(3)
                 < System.currentTimeMillis()) {
             postStreamAnnouncement(event, index);
-            lastPlayedGame.put(event.getChannel().getName(), twitchClient.getHelix().getGames(null,
+            Game lastPlayed = twitchClient.getHelix().getGames(null,
                             Collections.singletonList(event.getStream().getGameId()), null, null)
-                    .execute().getGames().getFirst());
+                    .execute().getGames().getFirst();
+            twitchDataList.set(index, twitchDataList.get(index).withLastPlayed(lastPlayed.getName(),
+                    lastPlayed.getBoxArtUrl(600, 800)));
             if (index == 0) {
                 shoutedoutNames.clear();
                 try {
@@ -138,9 +133,9 @@ public class TwitchImpl {
             Logger.info("Message set up");
 
             String messageId;
-            if (!twitchDataList.get(index).role().isBlank()) {
+            if (!twitchDataList.get(index).roleId().isBlank()) {
                 messageId = textChannel.sendMessage(discordAPI.getRoleById(
-                        twitchDataList.get(index).role()).getAsMention() + " " + tempMessage)
+                        twitchDataList.get(index).roleId()).getAsMention() + " " + tempMessage)
                                 .addEmbeds(embedBuilder.build())
                                 .addActionRow(Button.link(HTTPS_TWITCH_TV + twitchDataList.get(index).username(),
                                         "Watch Stream"))
@@ -189,12 +184,11 @@ public class TwitchImpl {
                                 Collections.singletonList(event.getChannel().getName())).execute().getUsers()
                         .getFirst().getProfileImageUrl());
                 embedBuilder.setTitle(lastVod.getTitle());
-                embedBuilder.addField("Game", lastPlayedGame.get(event.getChannel().getName()).getName(), true);
+                embedBuilder.addField("Game", twitchDataList.get(index).gameName(), true);
                 embedBuilder.addField("Duration", lastVod.getDuration(), true);
                 embedBuilder.setImage(lastVod.getThumbnailUrl(852, 480)
                         + "?t=" + CryptoUtils.generateNonce(4));
-                embedBuilder.setThumbnail(lastPlayedGame.get(event.getChannel().getName())
-                        .getBoxArtUrl(600, 800));
+                embedBuilder.setThumbnail(twitchDataList.get(index).boxArtUrl());
                 embedBuilder.setFooter("Last online");
                 embedBuilder.setTimestamp(event.getFiredAtInstant());
                 Logger.info("Embed builder set up");

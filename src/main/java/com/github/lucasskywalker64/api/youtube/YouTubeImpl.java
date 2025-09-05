@@ -96,7 +96,7 @@ public class YouTubeImpl {
                 } else {
                     youTubeDataList.set(youTubeDataList.indexOf(data), data.withVideoId(videoId));
                     discordAPI.getChannelById(MessageChannel.class, data.channel())
-                            .sendMessage(discordAPI.getRoleById(data.role())
+                            .sendMessage(discordAPI.getRoleById(data.roleId())
                                     .getAsMention() + " " + data.message().replace("\\n", "\n") + "\n"
                                     + getUrl(videoId))
                             .queue();
@@ -132,7 +132,7 @@ public class YouTubeImpl {
             } catch (IOException e) {
                 Logger.error(e);
             }
-        }, 60 * 60L, 5 * 60L, TimeUnit.SECONDS);
+        }, 30, 5 * 60L, TimeUnit.SECONDS);
     }
 
     public String getPlaylistIdFromChannelName(String channelName) throws IOException, InvalidParameterException {
@@ -152,7 +152,7 @@ public class YouTubeImpl {
         }
 
         if (channelResponse.getItems().isEmpty())
-            throw new InvalidParameterException(1003, null);
+            throw new InvalidParameterException(1001, null);
 
         String playlistId = channelResponse.getItems()
                 .getFirst()
@@ -168,7 +168,7 @@ public class YouTubeImpl {
                     .setKey(API_KEY)
                     .execute();
         } catch (Exception e) {
-            throw new InvalidParameterException(1003, e.getCause());
+            throw new InvalidParameterException(1001, e.getCause());
         }
 
         return playlistId;
