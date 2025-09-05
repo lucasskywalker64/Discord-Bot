@@ -126,6 +126,7 @@ public class BotMain {
 
     private static boolean init(List<CommandData> commandDataList) throws Exception {
         discordAPI = JDABuilder.createDefault(CONFIG.get("BOT_TOKEN"),
+                        GatewayIntent.GUILD_EXPRESSIONS,
                         GatewayIntent.GUILD_MESSAGE_REACTIONS,
                         GatewayIntent.GUILD_MEMBERS)
                 .build();
@@ -151,11 +152,11 @@ public class BotMain {
         if (!shoutoutFile.exists()) {
             shoutoutFile.createNewFile();
         }
-        shoutedOutFile = new File(botFiles + "/shoutedout.csv");
+        shoutedOutFile = new File(botFiles + "/shoutedout.txt");
         if (!shoutedOutFile.exists()) {
             shoutedOutFile.createNewFile();
         }
-        moderatorFile = new File(botFiles + "/moderator.csv");
+        moderatorFile = new File(botFiles + "/moderator.txt");
         if (!moderatorFile.exists()) {
             moderatorFile.createNewFile();
         }

@@ -57,10 +57,17 @@ public class SlashCommandManager extends ListenerAdapter {
     private static final ReactionRoleManager reactionRoleManager = BotMain.getReactionRoleManager();
     private static final ReactionRoleRepository reactionRoleRepo = ReactionRoleRepository.getInstance();
     private static final File memberCountFile = BotMain.getMemberCountFile();
+    private static final Map<String, String> categories = new HashMap<>();
 
     @Override
     public void onSlashCommandInteraction(@NotNull SlashCommandInteractionEvent event) {
         switch (event.getName()) {
+            /*
+            Displays a list of commands.
+            Command: /help
+             */
+            case "help" -> help(event);
+
             /*
             Add a reaction to a message which can be used by members to assign a role to themselves.
             Command: /addreactionrole <channel> <messageid> <role> <emoji>
@@ -116,6 +123,12 @@ public class SlashCommandManager extends ListenerAdapter {
             case "removeyoutubenotif" -> removeYoutubeNotification(event);
 
             /*
+            Display all YouTube notifications
+            Command: /displayyoutubenotif
+             */
+            case "displayyoutubenotif" -> displayYouTubeNotification(event);
+
+            /*
             Add a Twitch notification output to a specific channel
             Command: /addtwitchnotif <channel, message, username, role>
              */
@@ -133,6 +146,11 @@ public class SlashCommandManager extends ListenerAdapter {
              */
             case "removetwitchnotif" -> removeTwitchNotification(event);
 
+            /*
+            Display all Twitch notifications
+            Command: /displaytwitchnotif
+             */
+            case "displaytwitchnotif" -> displayTwitchNotification(event);
 
             /*
             Add users to be shouted out on Twitch
@@ -176,8 +194,38 @@ public class SlashCommandManager extends ListenerAdapter {
              */
             case "ping" -> ping(event);
 
-            default -> Logger.error("No matching case found for {}", event.getName());
+            default -> {
+                Logger.error("No matching case found for {}", event.getName());
+                event.reply("Something went wrong. Please contact the developer.").setEphemeral(true).queue();
+            }
         }
+    }
+
+    private void help(SlashCommandInteractionEvent event) {
+        event.deferReply(true).queue();
+        List<Command> commands = event.getGuild().retrieveCommands().complete();
+
+        Map<String, List<String>> grouped = new LinkedHashMap<>();
+        for (Command command : commands) {
+            String category = categories.getOrDefault(command.getName(), "Other");
+            grouped.computeIfAbsent(category, k -> new ArrayList<>())
+                    .add("</" + command.getName() + ":" + command.getId() + ">" +
+                            (command.getDescription().isEmpty()
+                                    ? ""
+                                    : " : " + command.getDescription()));
+        }
+
+        EmbedBuilder embed = new EmbedBuilder();
+        embed.setTitle("Help");
+        embed.setColor(Color.GREEN);
+
+        for (Entry<String, List<String>> entry : grouped.entrySet()) {
+            String category = entry.getKey();
+            List<String> lines = entry.getValue();
+            addFieldSafe(embed, category, lines, false);
+        }
+
+        event.getHook().sendMessageEmbeds(embed.build()).queue();
     }
 
     private void addReactionRole(SlashCommandInteractionEvent event) {
@@ -302,7 +350,9 @@ public class SlashCommandManager extends ListenerAdapter {
                 handleReactionRoles(messageId, roleList, emojiList, channel);
         } catch (Exception e) {
             Logger.error(e);
-            event.reply("ERROR: Failed to create message. Please contact the developer.")
+            if (!messageId.isEmpty())
+                channel.deleteMessageById(messageId).complete();
+            event.reply("ERROR: Something went wrong and changes were reverted. Please contact the developer.")
                     .setEphemeral(true).queue();
         }
     }
@@ -445,6 +495,23 @@ public class SlashCommandManager extends ListenerAdapter {
                 .setEphemeral(true).queue();
     }
 
+    private void displayYouTubeNotification(SlashCommandInteractionEvent event) {
+        List<YouTubeData> youTubeDataList = youTubeRepo.loadAll();
+        if (youTubeDataList.isEmpty()) {
+            event.reply("No YouTube notifications").queue();
+            return;
+        }
+        EmbedBuilder embed = new EmbedBuilder();
+        embed.setTitle("YouTube Notifications");
+        addFieldSafe(embed, "Username", youTubeDataList.stream()
+                        .map(YouTubeData::name)
+                        .toList(), true);
+        addFieldSafe(embed, "Message", youTubeDataList.stream()
+                        .map(YouTubeData::message)
+                        .toList(), true);
+        event.replyEmbeds(embed.build()).setEphemeral(true).queue();
+    }
+
     private void addTwitchNotification(@NotNull SlashCommandInteractionEvent event) {
         try {
             String role = "";
@@ -525,10 +592,26 @@ public class SlashCommandManager extends ListenerAdapter {
                 .setEphemeral(true).queue();
     }
 
+    private void displayTwitchNotification(SlashCommandInteractionEvent event) {
+        List<TwitchData> twitchDataList = twitchRepo.loadAll();
+        if (twitchDataList.isEmpty()) {
+            event.reply("No Twitch notifications.").queue();
+            return;
+        }
+        EmbedBuilder embed = new EmbedBuilder();
+        embed.setTitle("Twitch notifications");
+        addFieldSafe(embed, "Username", twitchDataList.stream()
+                        .map(TwitchData::username)
+                        .toList(), true);
+        addFieldSafe(embed, "Message", twitchDataList.stream()
+                        .map(TwitchData::message)
+                        .toList(), true);
+        event.replyEmbeds(embed.build()).setEphemeral(true).queue();
+    }
+
     private void addShoutout(SlashCommandInteractionEvent event) {
-        List<ShoutoutData> shoutoutData =
-                new ArrayList<>(Arrays.stream(event.getOption("username").getAsString().split(";"))
-                        .map(ShoutoutData::new).toList());
+        List<ShoutoutData> shoutoutData = Arrays.stream(event.getOption("username").getAsString().split(";"))
+                        .map(ShoutoutData::new).toList();
 
         List<ShoutoutData> oldShoutoutData = twitchRepo.loadAllShoutout();
         if (oldShoutoutData.stream().anyMatch(shoutoutData::contains)) {
@@ -550,8 +633,13 @@ public class SlashCommandManager extends ListenerAdapter {
     }
 
     private static void displayShoutout(@NotNull SlashCommandInteractionEvent event) {
+        List<ShoutoutData> shoutoutData = twitchRepo.loadAllShoutout();
+        if (shoutoutData.isEmpty()) {
+            event.reply("No shoutout notifications.").queue();
+            return;
+        }
         StringBuilder message = new StringBuilder();
-        for (ShoutoutData s : twitchRepo.loadAllShoutout()) {
+        for (ShoutoutData s : shoutoutData) {
             message.append(s.username()).append("\n");
         }
         event.reply(message.toString()).setEphemeral(true).queue();
@@ -683,7 +771,10 @@ public class SlashCommandManager extends ListenerAdapter {
     }
 
     public SlashCommandManager(List<CommandData> commandDataList) {
-        // Command: /addreactionrole <channel> <messageid> <@role> <emoji>
+        // Command: /help
+        commandDataList.add(Commands.slash("help", "Displays a list of commands"));
+
+        // Command: /addreactionrole <channel> <messageid> <role> <emoji>
         commandDataList.add(
                 Commands.slash("addreactionrole", "Add a new reaction that assigns a role")
                         .addOptions(
@@ -841,8 +932,11 @@ public class SlashCommandManager extends ListenerAdapter {
                                         STRING,
                                         "name",
                                         "The @ handle or legacy username of the YouTube channel.",
-                                        true)
-                        ));
+                                        true)));
+
+        // Command: /displayyoutubenotif
+        commandDataList.add(
+                Commands.slash("displayyoutubenotif", "Displays all YouTube notifications."));
 
         // Command: /addtwitchnotif <channel, message, username, role>
         commandDataList.add(
@@ -897,6 +991,8 @@ public class SlashCommandManager extends ListenerAdapter {
                                         "username",
                                         "The username of the Twitch channel",
                                         true)));
+
+        commandDataList.add(Commands.slash("displaytwitchnotif", "Displays all Twitch notifications."));
 
         // Command: /editmessage <channel, messageid, message, embed:true/false> [title, image]
         commandDataList.add(
@@ -987,5 +1083,28 @@ public class SlashCommandManager extends ListenerAdapter {
 
         // Command: /ping
         commandDataList.add(Commands.slash("ping", "Simple ping to check if the bot is responding."));
+
+        categories.put("help", "General");
+        categories.put("addreactionrole", "Reaction Role");
+        categories.put("removereactionrole", "Reaction Role");
+        categories.put("displayreactionroles", "Reaction Roles");
+        categories.put("createmessage", "General");
+        categories.put("editmessage", "General");
+        categories.put("removemessage", "General");
+        categories.put("addyoutubenotif", "YouTube");
+        categories.put("edityoutubenotif", "YouTube");
+        categories.put("removeyoutubenotif", "YouTube");
+        categories.put("displayyoutubenotif", "YouTube");
+        categories.put("addtwitchnotif", "Twitch");
+        categories.put("edittwitchnotif", "Twitch");
+        categories.put("removetwitchnotif", "Twitch");
+        categories.put("displaytwitchnotif", "Twitch");
+        categories.put("addshoutout", "Shoutout");
+        categories.put("removeshoutout", "Shoutout");
+        categories.put("removeallshoutouts", "Shoutout");
+        categories.put("displayshoutout", "Shoutout");
+        categories.put("addmembercount", "General");
+        categories.put("removemembercount", "General");
+        categories.put("ping", "General");
     }
 }
