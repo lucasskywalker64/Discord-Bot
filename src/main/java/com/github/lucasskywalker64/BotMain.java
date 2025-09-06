@@ -108,42 +108,13 @@ public class BotMain {
                         GatewayIntent.GUILD_MEMBERS)
                 .build();
         File botFiles = new File(new File(BotMain.class.getProtectionDomain()
-                .getCodeSource().getLocation().toURI()).getParentFile().getPath()
-                + "/bot_files");
+                .getCodeSource().getLocation().toURI()).getParentFile().getPath(), "bot_files");
         if (!botFiles.exists()) {
             botFiles.mkdir();
         }
         dbFile = new File(botFiles, "bot.db");
         if (!dbFile.exists()) {
             dbFile.createNewFile();
-        }
-        File reactionRolesFile = new File(botFiles, "reaction-roles.csv");
-        if (!reactionRolesFile.exists()) {
-            reactionRolesFile.createNewFile();
-        }
-        File youTubeFile = new File(botFiles, "youtube.csv");
-        if (!youTubeFile.exists()) {
-            youTubeFile.createNewFile();
-        }
-        File twitchFile = new File(botFiles, "twitch.csv");
-        if (!twitchFile.exists()) {
-            twitchFile.createNewFile();
-        }
-        File shoutoutFile = new File(botFiles, "shoutout.csv");
-        if (!shoutoutFile.exists()) {
-            shoutoutFile.createNewFile();
-        }
-        File shoutedOutFile = new File(botFiles, "shoutedout.txt");
-        if (!shoutedOutFile.exists()) {
-            shoutedOutFile.createNewFile();
-        }
-        File moderatorFile = new File(botFiles, "moderator.txt");
-        if (!moderatorFile.exists()) {
-            moderatorFile.createNewFile();
-        }
-        File memberCountFile = new File(botFiles, "membercount.txt");
-        if (!memberCountFile.exists()) {
-            memberCountFile.createNewFile();
         }
         Logger.info("Bot files setup");
         db = new Database();
