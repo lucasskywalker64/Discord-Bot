@@ -1,43 +1,54 @@
 package com.github.lucasskywalker64.persistence.repository;
 
 import com.github.lucasskywalker64.BotMain;
+import com.github.lucasskywalker64.persistence.Database;
 import com.github.lucasskywalker64.persistence.data.YouTubeData;
-import com.github.lucasskywalker64.persistence.PersistenceUtil;
-import org.apache.commons.csv.CSVRecord;
 import org.tinylog.Logger;
 
 import java.io.IOException;
-import java.nio.file.Path;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 
 public class YouTubeRepository {
 
-    private static final Path FILE_PATH = BotMain.getYouTubeFile().toPath();
-    private static final String[] HEADERS = {
-            "channel", "message", "name", "playlistId", "roleId", "videoId", "streamId"
-    };
+    private final Connection conn = BotMain.getConnection();
     private final List<YouTubeData> localYouTubeData;
 
     public List<YouTubeData> loadAll() {
         return new ArrayList<>(localYouTubeData);
     }
 
-    public void saveAll(List<YouTubeData> youTubeData) throws IOException {
-        saveAll(youTubeData, true);
+    public void saveAll(List<YouTubeData> youtubeData) throws IOException {
+        saveAll(youtubeData, true);
     }
 
     public void saveAll(List<YouTubeData> youtubeData, boolean append) throws IOException {
         if (!localYouTubeData.equals(youtubeData)) {
-            PersistenceUtil.writeCsv(FILE_PATH, youtubeData, d -> new String[]{
-                    d.channel(),
-                    d.message(),
-                    d.name(),
-                    d.playlistId(),
-                    d.roleId(),
-                    d.videoId(),
-                    d.streamId()
-            }, append, HEADERS);
+            try {
+                if (!append) {
+                    conn.createStatement().executeUpdate("DELETE FROM youtube");
+                }
+                try (PreparedStatement ps = conn.prepareStatement("INSERT INTO youtube (channel, message, name, " +
+                        "playlistId, roleId, videoId, streamId) VALUES (?,?,?,?,?,?,?)")) {
+                    for (YouTubeData d : youtubeData) {
+                        ps.setString(1, d.channel());
+                        ps.setString(2, d.message());
+                        ps.setString(3, d.name());
+                        ps.setString(4, d.playlistId());
+                        ps.setString(5, d.roleId());
+                        ps.setString(6, d.videoId());
+                        ps.setString(7, d.streamId());
+                        ps.addBatch();
+                    }
+                    ps.executeBatch();
+                }
+            } catch (SQLException e) {
+                throw new IOException(e);
+            }
             if (!append)
                 localYouTubeData.clear();
             localYouTubeData.addAll(youtubeData);
@@ -46,14 +57,24 @@ public class YouTubeRepository {
     }
 
     private YouTubeRepository() throws IOException {
-        localYouTubeData = PersistenceUtil.readCsv(FILE_PATH, (CSVRecord record) -> new YouTubeData(
-                record.get("channel"),
-                record.get("message"),
-                record.get("name"),
-                record.get("playlistId"),
-                record.get("roleId"),
-                record.get("videoId"),
-                record.get("streamId")), HEADERS);
+        localYouTubeData = new ArrayList<>();
+        try (PreparedStatement ps = conn.prepareStatement("SELECT channel, message, name, playlistId, " +
+                "roleId, videoId, streamId FROM youtube");
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                localYouTubeData.add(new YouTubeData(
+                        rs.getString(1),
+                        rs.getString(2),
+                        rs.getString(3),
+                        rs.getString(4),
+                        rs.getString(5),
+                        rs.getString(6),
+                        rs.getString(7)
+                ));
+            }
+        } catch (SQLException e) {
+            throw new IOException(e);
+        }
         Logger.info("YouTube data loaded.");
     }
 

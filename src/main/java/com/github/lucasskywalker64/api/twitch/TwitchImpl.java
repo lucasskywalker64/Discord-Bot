@@ -1,7 +1,6 @@
 package com.github.lucasskywalker64.api.twitch;
 
 import com.github.lucasskywalker64.BotMain;
-import com.github.lucasskywalker64.persistence.PersistenceUtil;
 import com.github.lucasskywalker64.persistence.data.ShoutoutData;
 import com.github.lucasskywalker64.persistence.data.TwitchData;
 import com.github.lucasskywalker64.persistence.repository.TwitchRepository;
@@ -52,12 +51,7 @@ public class TwitchImpl {
         shoutoutNames.clear();
         shoutoutNames.addAll(twitchRepo.loadAllShoutout());
         shoutedoutNames.clear();
-        try {
-            shoutedoutNames.addAll(Arrays.asList(
-                    PersistenceUtil.readFileAsString(BotMain.getShoutedOutFile().toPath()).split(";")));
-        } catch (IOException e) {
-            Logger.error("Failed to read shoutedout file.");
-        }
+        shoutedoutNames.addAll(twitchRepo.loadAllShoutedOutNames());
 
         moderatorName = twitchRepo.readModeratorName();
 
@@ -90,11 +84,7 @@ public class TwitchImpl {
                     lastPlayed.getBoxArtUrl(600, 800)));
             if (index == 0) {
                 shoutedoutNames.clear();
-                try {
-                    PersistenceUtil.writeStringAsFile(BotMain.getShoutedOutFile().toPath(), "");
-                } catch (IOException e) {
-                    Logger.error("Failed to write shoutedout file.");
-                }
+                twitchRepo.clearShoutedOutNames();
             }
         }
     }
@@ -278,11 +268,10 @@ public class TwitchImpl {
         }
     }
 
-    public void cleanUp() throws InterruptedException, IOException {
+    public void shutdown() throws InterruptedException, IOException {
         twitchClient.close();
         twitchRepo.saveAll(twitchDataList, false);
-        PersistenceUtil.writeStringAsFile(BotMain.getShoutedOutFile().toPath(),
-                String.join(";", shoutedoutNames));
+        twitchRepo.saveShoutedOutNames(shoutedoutNames);
 
         scheduler.awaitTermination(10, TimeUnit.SECONDS);
     }

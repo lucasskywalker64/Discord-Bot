@@ -118,7 +118,7 @@ public class ReactionRoleManager extends ListenerAdapter {
         }
     }
 
-    public void cleanUp() throws InterruptedException {
+    public void shutdown() throws InterruptedException {
         scheduler.awaitTermination(10, TimeUnit.SECONDS);
     }
 

@@ -3,7 +3,6 @@ package com.github.lucasskywalker64.listener.command;
 import com.github.lucasskywalker64.BotMain;
 import com.github.lucasskywalker64.persistence.data.ShoutoutData;
 import com.github.lucasskywalker64.api.youtube.YouTubeImpl;
-import com.github.lucasskywalker64.persistence.PersistenceUtil;
 import com.github.lucasskywalker64.persistence.data.ReactionRoleData;
 import com.github.lucasskywalker64.persistence.data.TwitchData;
 import com.github.lucasskywalker64.api.twitch.TwitchImpl;
@@ -56,7 +55,6 @@ public class SlashCommandManager extends ListenerAdapter {
     private static final YouTubeRepository youTubeRepo = YouTubeRepository.getInstance();
     private static final ReactionRoleManager reactionRoleManager = BotMain.getReactionRoleManager();
     private static final ReactionRoleRepository reactionRoleRepo = ReactionRoleRepository.getInstance();
-    private static final File memberCountFile = BotMain.getMemberCountFile();
     private static final Map<String, String> categories = new HashMap<>();
 
     @Override
@@ -236,7 +234,8 @@ public class SlashCommandManager extends ListenerAdapter {
                     Collections.singletonList(event.getOption("role").getAsRole()),
                     Collections.singletonList(Emoji.fromFormatted(event.getOption("emoji").getAsString())),
                     event.getOption("channel").getAsChannel().asStandardGuildMessageChannel()))
-                event.getHook().sendMessage("One or more roles are already in the list.").queue();
+                event.getHook().sendMessage(String.format("The role %s is already in the list.",
+                        event.getOption("role").getAsRole().getName())).queue();
             else
                 event.getHook().sendMessage("Reaction role has been added.").queue();
         } catch (ErrorResponseException e) {
@@ -700,16 +699,16 @@ public class SlashCommandManager extends ListenerAdapter {
 
     private void addMemberCount(SlashCommandInteractionEvent event) {
         try {
-            if (!PersistenceUtil.readFileAsString(memberCountFile.toPath()).isEmpty()) {
+            if (!com.github.lucasskywalker64.persistence.repository.SettingsRepository.getInstance().get("member_count_channel").isEmpty()) {
                 event.reply("Member count already added please remove it first before adding a new one.")
                         .setEphemeral(true).queue();
                 return;
             }
-            PersistenceUtil.writeStringAsFile(memberCountFile.toPath(), event.getOption("channel").getAsString());
+            com.github.lucasskywalker64.persistence.repository.SettingsRepository.getInstance().set("member_count_channel", event.getOption("channel").getAsString());
             BotMain.scheduleUpdateMemberCount();
 
             event.reply("Member count successfully added!").setEphemeral(true).queue();
-        } catch (IOException e) {
+        } catch (Exception e) {
             Logger.error(e);
             event.reply("ERROR: Failed to add member count! Please contact the developer.")
                     .setEphemeral(true).queue();
@@ -718,12 +717,12 @@ public class SlashCommandManager extends ListenerAdapter {
 
     private void removeMemberCount(SlashCommandInteractionEvent event) {
         try {
-            if (PersistenceUtil.readFileAsString(memberCountFile.toPath()).isEmpty()) {
+            if (!com.github.lucasskywalker64.persistence.repository.SettingsRepository.getInstance().get("member_count_channel").isEmpty()) {
                 BotMain.removeMemberCount();
-                PersistenceUtil.writeStringAsFile(memberCountFile.toPath(), "");
+                com.github.lucasskywalker64.persistence.repository.SettingsRepository.getInstance().set("member_count_channel", "");
                 event.reply("Member count successfully removed.").setEphemeral(true).queue();
             } else event.reply("No existing member count to remove.").setEphemeral(true).queue();
-        } catch (IOException e) {
+        } catch (Exception e) {
             Logger.error(e);
             event.reply("ERROR: Failed to remove member count! Please contact the developer.")
                     .setEphemeral(true).queue();

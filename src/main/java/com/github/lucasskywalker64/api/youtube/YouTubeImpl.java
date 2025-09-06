@@ -174,7 +174,7 @@ public class YouTubeImpl {
         return playlistId;
     }
 
-    public void cleanUp() throws InterruptedException, IOException {
+    public void shutdown() throws InterruptedException, IOException {
         scheduler.awaitTermination(10L, TimeUnit.SECONDS);
         save();
     }

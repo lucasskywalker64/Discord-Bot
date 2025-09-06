@@ -2,11 +2,13 @@ package com.github.lucasskywalker64;
 
 import com.github.lucasskywalker64.api.youtube.YouTubeImpl;
 import com.github.lucasskywalker64.listener.role.ReactionRoleManager;
-import com.github.lucasskywalker64.persistence.PersistenceUtil;
+import com.github.lucasskywalker64.persistence.Database;
+import com.github.lucasskywalker64.persistence.repository.SettingsRepository;
 import io.github.cdimascio.dotenv.Dotenv;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.sql.Connection;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -47,49 +49,17 @@ public class BotMain {
             Dotenv.configure().directory(botFile.getParentFile().getAbsolutePath()).load();
     private static final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2);
     private static ScheduledFuture<?> memberCountFuture;
-    private static File reactionRolesFile;
-    private static File youTubeFile;
-    private static File twitchFile;
-    private static File shoutoutFile;
-    private static File shoutedOutFile;
-    private static File moderatorFile;
-    private static File memberCountFile;
     private static JDA discordAPI;
     private static TwitchImpl twitch;
     private static YouTubeImpl youtube;
     private static String channel;
     private static ReactionRoleManager reactionRoleManager;
+    private static File dbFile;
+    private static Database db;
+    private static Connection conn;
 
     public static Dotenv getConfig() {
         return CONFIG;
-    }
-
-    public static File getReactionRolesFile() {
-        return reactionRolesFile;
-    }
-
-    public static File getYouTubeFile() {
-        return youTubeFile;
-    }
-
-    public static File getTwitchFile() {
-        return twitchFile;
-    }
-
-    public static File getShoutoutFile() {
-        return shoutoutFile;
-    }
-
-    public static File getShoutedOutFile() {
-        return shoutedOutFile;
-    }
-
-    public static File getModeratorFile() {
-        return moderatorFile;
-    }
-
-    public static File getMemberCountFile() {
-        return memberCountFile;
     }
 
     public static TwitchImpl getTwitch() {
@@ -104,9 +74,16 @@ public class BotMain {
         return reactionRoleManager;
     }
 
+    public static File getDbFile() {
+        return dbFile;
+    }
+
+    public static Connection getConnection() {
+        return conn;
+    }
 
     public static void scheduleUpdateMemberCount() throws IOException {
-        channel = PersistenceUtil.readFileAsString(memberCountFile.toPath());
+        channel = SettingsRepository.getInstance().get("member_count_channel");
         if (channel.isEmpty())
             return;
         memberCountFuture = scheduler.scheduleAtFixedRate(BotMain::updateMemberCount, 0, 1, TimeUnit.HOURS);
@@ -131,40 +108,17 @@ public class BotMain {
                         GatewayIntent.GUILD_MEMBERS)
                 .build();
         File botFiles = new File(new File(BotMain.class.getProtectionDomain()
-                .getCodeSource().getLocation().toURI()).getParentFile().getPath()
-                + "/bot_files");
+                .getCodeSource().getLocation().toURI()).getParentFile().getPath(), "bot_files");
         if (!botFiles.exists()) {
             botFiles.mkdir();
         }
-        reactionRolesFile = new File(botFiles + "/reaction-roles.csv");
-        if (!reactionRolesFile.exists()) {
-            reactionRolesFile.createNewFile();
-        }
-        youTubeFile = new File(botFiles + "/youtube.csv");
-        if (!youTubeFile.exists()) {
-            youTubeFile.createNewFile();
-        }
-        twitchFile = new File(botFiles + "/twitch.csv");
-        if (!twitchFile.exists()) {
-            twitchFile.createNewFile();
-        }
-        shoutoutFile = new File(botFiles + "/shoutout.csv");
-        if (!shoutoutFile.exists()) {
-            shoutoutFile.createNewFile();
-        }
-        shoutedOutFile = new File(botFiles + "/shoutedout.txt");
-        if (!shoutedOutFile.exists()) {
-            shoutedOutFile.createNewFile();
-        }
-        moderatorFile = new File(botFiles + "/moderator.txt");
-        if (!moderatorFile.exists()) {
-            moderatorFile.createNewFile();
-        }
-        memberCountFile = new File(botFiles + "/membercount.txt");
-        if (!memberCountFile.exists()) {
-            memberCountFile.createNewFile();
+        dbFile = new File(botFiles, "bot.db");
+        if (!dbFile.exists()) {
+            dbFile.createNewFile();
         }
         Logger.info("Bot files setup");
+        db = new Database();
+        conn = db.getConnection();
         youtube = new YouTubeImpl(discordAPI);
         twitch = new TwitchImpl(discordAPI);
         reactionRoleManager = new ReactionRoleManager();
@@ -247,10 +201,11 @@ public class BotMain {
         }
         scheduler.schedule(() -> {
             try {
-                twitch.cleanUp();
-                youtube.cleanUp();
-                reactionRoleManager.cleanUp();
+                twitch.shutdown();
+                youtube.shutdown();
+                reactionRoleManager.shutdown();
                 discordAPI.shutdown();
+                db.shutdown();
                 ProcessBuilder restartBuilder = new ProcessBuilder("bash", "-c", "sleep 10 && "
                         + "nohup java -jar " + botFile.getName() + " > nohup.out 2>&1");
                 restartBuilder.directory(botFile.getParentFile());

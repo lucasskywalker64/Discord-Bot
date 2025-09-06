@@ -1,25 +1,19 @@
 package com.github.lucasskywalker64.persistence.repository;
 
 import com.github.lucasskywalker64.BotMain;
+import com.github.lucasskywalker64.persistence.Database;
 import com.github.lucasskywalker64.persistence.data.ShoutoutData;
 import com.github.lucasskywalker64.persistence.data.TwitchData;
-import com.github.lucasskywalker64.persistence.PersistenceUtil;
-import org.apache.commons.csv.CSVRecord;
 import org.tinylog.Logger;
 
 import java.io.IOException;
-import java.nio.file.Path;
+import java.sql.*;
 import java.util.ArrayList;
 import java.util.List;
 
 public class TwitchRepository {
 
-    private static final Path TWITCH_FILE_PATH = BotMain.getTwitchFile().toPath();
-    private static final Path SHOUTOUT_FILE_PATH = BotMain.getShoutoutFile().toPath();
-    private static final Path MODERATOR_FILE_PATH = BotMain.getModeratorFile().toPath();
-    private static final String[] HEADERS = {
-            "channel", "message", "username", "roleId", "announcementId", "timestamp", "gameName", "boxArtUrl"
-    };
+    private final Connection conn = BotMain.getConnection();
     private final List<TwitchData> localTwitchData;
     private final List<ShoutoutData> localShoutoutData;
 
@@ -33,16 +27,27 @@ public class TwitchRepository {
 
     public void saveAll(List<TwitchData> twitchData, boolean append) throws IOException {
         if (!localTwitchData.equals(twitchData)) {
-            PersistenceUtil.writeCsv(TWITCH_FILE_PATH, twitchData, d -> new String[]{
-                    d.channel(),
-                    d.message(),
-                    d.username().toLowerCase(),
-                    d.roleId(),
-                    d.announcementId(),
-                    String.valueOf(d.timestamp()),
-                    d.gameName(),
-                    d.boxArtUrl()
-            }, append, HEADERS);
+            try {
+                if (!append) conn.createStatement().executeUpdate("DELETE FROM twitch");
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "INSERT INTO twitch (channel, message, username, roleId, announcementId, " +
+                                "timestamp, gameName, boxArtUrl) VALUES (?,?,?,?,?,?,?,?)")) {
+                    for (TwitchData d : twitchData) {
+                        ps.setString(1, d.channel());
+                        ps.setString(2, d.message());
+                        ps.setString(3, d.username().toLowerCase());
+                        ps.setString(4, d.roleId());
+                        ps.setString(5, d.announcementId());
+                        ps.setLong(6, d.timestamp());
+                        ps.setString(7, d.gameName());
+                        ps.setString(8, d.boxArtUrl());
+                        ps.addBatch();
+                    }
+                    ps.executeBatch();
+                }
+            } catch (SQLException e) {
+                throw new IOException(e);
+            }
             if (!append)
                 localTwitchData.clear();
             localTwitchData.addAll(twitchData);
@@ -60,9 +65,19 @@ public class TwitchRepository {
 
     public void saveAllShoutout(List<ShoutoutData> shoutoutData, boolean append) throws IOException {
         if (!localShoutoutData.equals(shoutoutData)) {
-            PersistenceUtil.writeCsv(SHOUTOUT_FILE_PATH, shoutoutData, d -> new String[]{
-                    d.username().toLowerCase()
-            }, append, "username");
+            try {
+                if (!append) conn.createStatement().executeUpdate("DELETE FROM shoutout");
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "INSERT OR IGNORE INTO shoutout (username) VALUES (?)")) {
+                    for (ShoutoutData d : shoutoutData) {
+                        ps.setString(1, d.username().toLowerCase());
+                        ps.addBatch();
+                    }
+                    ps.executeBatch();
+                }
+            } catch (SQLException e) {
+                throw new IOException(e);
+            }
             if (!append)
                 localShoutoutData.clear();
             localShoutoutData.addAll(shoutoutData);
@@ -71,26 +86,65 @@ public class TwitchRepository {
     }
 
     public String readModeratorName() {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT value FROM settings WHERE key = 'moderator_name'");
+             ResultSet rs = ps.executeQuery()) {
+            if (rs.next()) return rs.getString(1);
+        } catch (SQLException e) {
+            Logger.error(e);
+        }
+        return "";
+    }
+
+    public List<String> loadAllShoutedOutNames() {
+        List<String> names = new ArrayList<>();
+        try (PreparedStatement ps = conn.prepareStatement("SELECT name FROM shoutedout");
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) names.add(rs.getString(1));
+        } catch (SQLException e) {
+            Logger.error(e);
+        }
+        return names;
+    }
+
+    public void clearShoutedOutNames() {
         try {
-            return PersistenceUtil.readFileAsString(MODERATOR_FILE_PATH);
-        } catch (IOException e) {
-            return "";
+            conn.createStatement().executeUpdate("DELETE FROM shoutedout");
+        } catch (SQLException e) {
+            Logger.error(e);
+        }
+    }
+
+    public void saveShoutedOutNames(List<String> names) {
+        try (PreparedStatement ps = conn.prepareStatement("INSERT OR IGNORE INTO shoutedout(name) VALUES(?)")) {
+            for (String n : names) { ps.setString(1, n.toLowerCase()); ps.addBatch(); }
+            ps.executeBatch();
+        } catch (SQLException e) {
+            Logger.error(e);
         }
     }
 
     private TwitchRepository() throws IOException {
-        localTwitchData = PersistenceUtil.readCsv(TWITCH_FILE_PATH, (CSVRecord record) -> new TwitchData(
-                record.get("channel"),
-                record.get("message"),
-                record.get("username"),
-                record.get("roleId"),
-                record.get("announcementId"),
-                Long.parseLong(record.get("timestamp")),
-                record.get("gameName"),
-                record.get("boxArtUrl")), HEADERS);
-        localShoutoutData = PersistenceUtil.readCsv(SHOUTOUT_FILE_PATH, (CSVRecord record) -> new ShoutoutData(
-                record.get("username")
-        ), "username");
+        localTwitchData = new ArrayList<>();
+        localShoutoutData = new ArrayList<>();
+        try (PreparedStatement ps = conn.prepareStatement("SELECT channel, message, username, roleId, " +
+                "announcementId, timestamp, gameName, boxArtUrl FROM twitch");
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                localTwitchData.add(new TwitchData(
+                        rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4),
+                        rs.getString(5), rs.getLong(6), rs.getString(7), rs.getString(8)
+                ));
+            }
+        } catch (SQLException e) {
+            throw new IOException(e);
+        }
+        try (PreparedStatement ps = conn.prepareStatement("SELECT username FROM shoutout");
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) localShoutoutData.add(new ShoutoutData(rs.getString(1)));
+        } catch (SQLException e) {
+            throw new IOException(e);
+        }
         Logger.info("Twitch and shoutout data loaded.");
     }
 
