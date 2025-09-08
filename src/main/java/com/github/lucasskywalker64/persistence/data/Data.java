@@ -4,6 +4,7 @@ import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEve
 
 import java.util.List;
 
+@SuppressWarnings("DataFlowIssue")
 public interface Data<T extends Data<T>> {
     T self();
 

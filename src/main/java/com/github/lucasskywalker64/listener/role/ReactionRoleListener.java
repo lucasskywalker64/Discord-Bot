@@ -17,7 +17,7 @@ import org.jetbrains.annotations.NotNull;
 import org.tinylog.Logger;
 
 @SuppressWarnings({"java:S1192", "DataFlowIssue"})
-public class ReactionRoleManager extends ListenerAdapter {
+public class ReactionRoleListener extends ListenerAdapter {
 
     private static final List<ReactionRoleData> reactionRoleDataList = new ArrayList<>();
     private static final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
@@ -122,7 +122,7 @@ public class ReactionRoleManager extends ListenerAdapter {
         scheduler.awaitTermination(10, TimeUnit.SECONDS);
     }
 
-    public ReactionRoleManager() {
+    public ReactionRoleListener() {
         Logger.info("Starting Reaction Role Manager...");
         scheduleLoad();
     }
