@@ -2,10 +2,28 @@ package com.github.lucasskywalker64;
 
 import com.github.lucasskywalker64.api.youtube.YouTubeImpl;
 import com.github.lucasskywalker64.commands.RootRegistry;
+import com.github.lucasskywalker64.commands.general.GeneralHelp;
+import com.github.lucasskywalker64.commands.general.GeneralMemberCountAdd;
+import com.github.lucasskywalker64.commands.general.GeneralMemberCountRemove;
+import com.github.lucasskywalker64.commands.general.GeneralPing;
+import com.github.lucasskywalker64.commands.message.MessageCreate;
+import com.github.lucasskywalker64.commands.message.MessageEdit;
+import com.github.lucasskywalker64.commands.message.MessageRemove;
 import com.github.lucasskywalker64.commands.notif.twitch.NotifTwitchAdd;
+import com.github.lucasskywalker64.commands.notif.twitch.NotifTwitchDisplay;
+import com.github.lucasskywalker64.commands.notif.twitch.NotifTwitchEdit;
+import com.github.lucasskywalker64.commands.notif.twitch.NotifTwitchRemove;
+import com.github.lucasskywalker64.commands.notif.youtube.NotifYouTubeAdd;
+import com.github.lucasskywalker64.commands.notif.youtube.NotifYouTubeDisplay;
+import com.github.lucasskywalker64.commands.notif.youtube.NotifYouTubeEdit;
+import com.github.lucasskywalker64.commands.notif.youtube.NotifYouTubeRemove;
 import com.github.lucasskywalker64.commands.reaction.ReactionRoleAdd;
 import com.github.lucasskywalker64.commands.reaction.ReactionRoleDisplay;
 import com.github.lucasskywalker64.commands.reaction.ReactionRoleRemove;
+import com.github.lucasskywalker64.commands.shoutout.ShoutoutAdd;
+import com.github.lucasskywalker64.commands.shoutout.ShoutoutDisplay;
+import com.github.lucasskywalker64.commands.shoutout.ShoutoutRemove;
+import com.github.lucasskywalker64.commands.shoutout.ShoutoutRemoveAll;
 import com.github.lucasskywalker64.listener.role.ReactionRoleListener;
 import com.github.lucasskywalker64.persistence.Database;
 import com.github.lucasskywalker64.persistence.repository.SettingsRepository;
@@ -44,6 +62,7 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 import net.dv8tion.jda.api.requests.restaction.CommandListUpdateAction;
+import org.jetbrains.annotations.NotNull;
 import org.tinylog.Logger;
 
 @SuppressWarnings({"DataFlowIssue", "ResultOfMethodCallIgnored"})
@@ -130,18 +149,44 @@ public class BotMain {
         youtube = new YouTubeImpl(discordAPI);
         twitch = new TwitchImpl(discordAPI);
         reactionRoleListener = new ReactionRoleListener();
+        RootRegistry registry = newRegistry();
+        commandDataList.addAll(registry.definitions());
+        discordAPI.addEventListener(reactionRoleListener, new SlashCommandListener(registry));
+        Logger.info("Discord event listeners added");
+        return botFiles.exists();
+    }
+
+    private static @NotNull RootRegistry newRegistry() {
         var modules = List.of(
                 new ReactionRoleAdd(reactionRoleListener),
                 new ReactionRoleRemove(reactionRoleListener),
                 new ReactionRoleDisplay(),
 
-                new NotifTwitchAdd(twitch)
+                new NotifTwitchAdd(twitch),
+                new NotifTwitchEdit(twitch),
+                new NotifTwitchRemove(twitch),
+                new NotifTwitchDisplay(),
+
+                new NotifYouTubeAdd(youtube),
+                new NotifYouTubeEdit(),
+                new NotifYouTubeRemove(),
+                new NotifYouTubeDisplay(),
+
+                new MessageCreate(reactionRoleListener),
+                new MessageEdit(),
+                new MessageRemove(reactionRoleListener),
+
+                new ShoutoutAdd(twitch),
+                new ShoutoutRemove(twitch),
+                new ShoutoutDisplay(),
+                new ShoutoutRemoveAll(twitch),
+
+                new GeneralMemberCountAdd(),
+                new GeneralMemberCountRemove(),
+                new GeneralPing(),
+                new GeneralHelp()
         );
-        RootRegistry registry = new RootRegistry(modules);
-        commandDataList.addAll(registry.definitions());
-        discordAPI.addEventListener(reactionRoleListener, new SlashCommandListener(registry));
-        Logger.info("Discord event listeners added");
-        return botFiles.exists();
+        return new RootRegistry(modules);
     }
 
     private static long computeNextDelay(int targetHour, int targetMin, int targetSec) {

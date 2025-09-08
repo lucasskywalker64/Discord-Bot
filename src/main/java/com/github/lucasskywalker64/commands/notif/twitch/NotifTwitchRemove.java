@@ -1,0 +1,59 @@
+package com.github.lucasskywalker64.commands.notif.twitch;
+
+import com.github.lucasskywalker64.api.twitch.TwitchImpl;
+import com.github.lucasskywalker64.commands.SubcommandModule;
+import com.github.lucasskywalker64.persistence.data.TwitchData;
+import com.github.lucasskywalker64.persistence.repository.TwitchRepository;
+import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
+import net.dv8tion.jda.api.interactions.commands.OptionType;
+import net.dv8tion.jda.api.interactions.commands.build.SubcommandData;
+import org.tinylog.Logger;
+
+import java.io.IOException;
+import java.util.List;
+import java.util.Objects;
+
+@SuppressWarnings("DataFlowIssue")
+public class NotifTwitchRemove implements SubcommandModule {
+
+    private final TwitchRepository repository = TwitchRepository.getInstance();
+    private final TwitchImpl twitch;
+
+    public NotifTwitchRemove(TwitchImpl twitch) {
+        this.twitch = twitch;
+    }
+
+    @Override public String getRootName() { return "notif"; }
+    @Override public String getGroupName() { return "twitch"; }
+    @Override public String getSubcommandName() { return "remove"; }
+    @Override public String getDescription() { return "Remove a Twitch notification"; }
+
+    @Override
+    public SubcommandData definition() {
+        return new SubcommandData(getSubcommandName(), getDescription())
+                .addOption(OptionType.STRING, "username", "The username of the Twitch channel", true);
+    }
+
+    @Override
+    public void handle(SlashCommandInteractionEvent event) {
+        event.deferReply(true).queue();
+        String user = event.getOption("username").getAsString();
+        List<TwitchData> list = repository.loadAll();
+        var toBeRemoved = list.stream()
+                .filter(d -> d.username().equalsIgnoreCase(user))
+                .findFirst();
+        if (toBeRemoved.isEmpty()) {
+            event.getHook().sendMessage(String.format("The user %s is not in the list.", user)).queue();
+            return;
+        }
+        list.remove(toBeRemoved.get());
+        try {
+            repository.saveAll(list, false);
+            twitch.load();
+            event.getHook().sendMessage(String.format("Twitch notification for %s removed.", user)).queue();
+        } catch (IOException e) {
+            Logger.error(e);
+            event.getHook().sendMessage("ERROR: Failed to remove Twitch notification. Please contact the developer.").queue();
+        }
+    }
+}
