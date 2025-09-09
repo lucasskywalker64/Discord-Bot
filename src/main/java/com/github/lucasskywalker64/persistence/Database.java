@@ -30,7 +30,7 @@ public final class Database {
                     "channel TEXT NOT NULL, " +
                     "message TEXT NOT NULL, " +
                     "username TEXT NOT NULL PRIMARY KEY, " +
-                    "roleId TEXT NOT NULL, " +
+                    "roleId TEXT, " +
                     "announcementId TEXT, " +
                     "timestamp INTEGER NOT NULL, " +
                     "gameName TEXT, " +
