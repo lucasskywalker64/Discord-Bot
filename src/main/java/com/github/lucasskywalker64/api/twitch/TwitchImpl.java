@@ -123,7 +123,7 @@ public class TwitchImpl {
             Logger.info("Message set up");
 
             String messageId;
-            if (!twitchDataList.get(index).roleId().isBlank()) {
+            if (twitchDataList.get(index).roleId() != null) {
                 messageId = textChannel.sendMessage(discordAPI.getRoleById(
                         twitchDataList.get(index).roleId()).getAsMention() + " " + tempMessage)
                                 .addEmbeds(embedBuilder.build())
@@ -161,7 +161,7 @@ public class TwitchImpl {
                     .findFirst()
                     .orElse(-1);
 
-            if (index > -1) {
+            if (index > -1 && twitchDataList.get(index).announcementId() != null) {
                 Video lastVod = twitchClient.getHelix().getVideos(BotMain.getConfig()
                                 .get("TWITCH_ACCESS_TOKEN"), (List<String>) null, event.getChannel().getId(),
                         null, null, null, null, null, null,
@@ -193,7 +193,8 @@ public class TwitchImpl {
                                 .setActionRow(Button.link(lastVod.getUrl(), "Watch VOD"))).queue();
                 Logger.info("Announcement updated");
             }
-            Logger.error(String.format("Failed to locate %s in the data list.", event.getChannel().getName()));
+            Logger.error("Failed to locate %s in the data list " +
+                    "or we didn't yet catch a live event from this channel.", event.getChannel().getName());
         } catch (Exception e) {
             Logger.error(e);
         }
