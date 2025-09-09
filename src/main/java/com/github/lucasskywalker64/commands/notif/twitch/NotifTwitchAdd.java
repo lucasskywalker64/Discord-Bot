@@ -36,7 +36,7 @@ public class NotifTwitchAdd implements SubcommandModule {
                         "Target channel", true).setChannelTypes(ChannelType.TEXT, ChannelType.NEWS))
                 .addOption(OptionType.STRING,  "message",  "Message (use \\n for newline)", true)
                 .addOption(OptionType.STRING,  "username", "Twitch username", true)
-                .addOption(OptionType.ROLE,    "role",     "Role to ping", true);
+                .addOption(OptionType.ROLE,    "role",     "Role to ping");
     }
 
     @Override
