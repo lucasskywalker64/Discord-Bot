@@ -1,6 +1,5 @@
 package com.github.lucasskywalker64.persistence.repository;
 
-import com.github.lucasskywalker64.BotMain;
 import com.github.lucasskywalker64.persistence.Database;
 import com.github.lucasskywalker64.persistence.data.ShoutoutData;
 import com.github.lucasskywalker64.persistence.data.TwitchData;
@@ -13,7 +12,7 @@ import java.util.List;
 
 public class TwitchRepository {
 
-    private final Connection conn = BotMain.getConnection();
+    private final Connection conn = Database.getInstance().getConnection();
     private final List<TwitchData> localTwitchData;
     private final List<ShoutoutData> localShoutoutData;
 

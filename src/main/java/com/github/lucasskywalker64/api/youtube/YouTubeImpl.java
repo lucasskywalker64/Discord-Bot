@@ -32,8 +32,8 @@ import org.tinylog.Logger;
 @SuppressWarnings({"java:S1192", "DataFlowIssue"})
 public class YouTubeImpl {
 
-    private static final String APP_NAME = BotMain.getConfig().get("YOUTUBE_APP_NAME");
-    private static final String API_KEY = BotMain.getConfig().get("YOUTUBE_API_KEY");
+    private static final String APP_NAME = BotMain.getContext().config().get("YOUTUBE_APP_NAME");
+    private static final String API_KEY = BotMain.getContext().config().get("YOUTUBE_API_KEY");
     private static final JsonFactory JSON_FACTORY = GsonFactory.getDefaultInstance();
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
     private final List<YouTubeData> youTubeDataList = new ArrayList<>();

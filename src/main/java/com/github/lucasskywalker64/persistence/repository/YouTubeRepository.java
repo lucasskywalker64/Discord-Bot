@@ -1,6 +1,5 @@
 package com.github.lucasskywalker64.persistence.repository;
 
-import com.github.lucasskywalker64.BotMain;
 import com.github.lucasskywalker64.persistence.Database;
 import com.github.lucasskywalker64.persistence.data.YouTubeData;
 import org.tinylog.Logger;
@@ -15,7 +14,7 @@ import java.util.List;
 
 public class YouTubeRepository {
 
-    private final Connection conn = BotMain.getConnection();
+    private final Connection conn = Database.getInstance().getConnection();
     private final List<YouTubeData> localYouTubeData;
 
     public List<YouTubeData> loadAll() {

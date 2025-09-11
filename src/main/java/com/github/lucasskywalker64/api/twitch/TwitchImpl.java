@@ -23,6 +23,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.IntStream;
 
+import io.github.cdimascio.dotenv.Dotenv;
 import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.entities.channel.middleman.MessageChannel;
@@ -34,6 +35,7 @@ public class TwitchImpl {
 
     private static final String HTTPS_TWITCH_TV = "https://twitch.tv/";
     private static final TwitchRepository twitchRepo = TwitchRepository.getInstance();
+    private static final Dotenv config = BotMain.getContext().config();
     private final List<TwitchData> twitchDataList = new ArrayList<>();
     private final List<ShoutoutData> shoutoutNames = new ArrayList<>();
     private final List<String> shoutedoutNames = new ArrayList<>();
@@ -162,10 +164,10 @@ public class TwitchImpl {
                     .orElse(-1);
 
             if (index > -1 && twitchDataList.get(index).announcementId() != null) {
-                Video lastVod = twitchClient.getHelix().getVideos(BotMain.getConfig()
-                                .get("TWITCH_ACCESS_TOKEN"), (List<String>) null, event.getChannel().getId(),
-                        null, null, null, null, null, null,
-                        null, null).execute().getVideos().getFirst();
+                Video lastVod = twitchClient.getHelix().getVideos(config.get("TWITCH_ACCESS_TOKEN"),
+                        (List<String>) null, event.getChannel().getId(), null, null,
+                        null, null, null, null, null, null)
+                        .execute().getVideos().getFirst();
 
                 EmbedBuilder embedBuilder = new EmbedBuilder();
                 embedBuilder.setAuthor(event.getChannel().getName(), HTTPS_TWITCH_TV
@@ -217,7 +219,7 @@ public class TwitchImpl {
     private void handleRaidEvent(RaidEvent raidEvent) {
         if (shoutoutTimestamp + 120000L < System.currentTimeMillis()) {
             twitchClient.getHelix().sendShoutout(
-                    BotMain.getConfig().get("TWITCH_ACCESS_TOKEN"),
+                    config.get("TWITCH_ACCESS_TOKEN"),
                     streamerId,
                     raidEvent.getRaider().getId(),
                     moderatorId).queue();
@@ -243,11 +245,11 @@ public class TwitchImpl {
 
     private void setup() {
         twitchClient = TwitchClientBuilder.builder()
-                .withClientId(BotMain.getConfig().get("TWITCH_CLIENT_ID"))
-                .withClientSecret(BotMain.getConfig().get("TWITCH_CLIENT_SECRET"))
+                .withClientId(config.get("TWITCH_CLIENT_ID"))
+                .withClientSecret(config.get("TWITCH_CLIENT_SECRET"))
                 .withEnableChat(true)
                 .withChatAccount(new OAuth2Credential("twitch",
-                        BotMain.getConfig().get("TWITCH_ACCESS_TOKEN")))
+                        config.get("TWITCH_ACCESS_TOKEN")))
                 .withEnableHelix(true)
                 .build();
 

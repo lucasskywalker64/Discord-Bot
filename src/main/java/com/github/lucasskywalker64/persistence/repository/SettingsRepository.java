@@ -1,6 +1,5 @@
 package com.github.lucasskywalker64.persistence.repository;
 
-import com.github.lucasskywalker64.BotMain;
 import com.github.lucasskywalker64.persistence.Database;
 
 import java.sql.Connection;
@@ -10,7 +9,7 @@ import java.sql.SQLException;
 
 public class SettingsRepository {
 
-    private final Connection conn = BotMain.getConnection();
+    private final Connection conn = Database.getInstance().getConnection();
 
     public String get(String key) {
         try (PreparedStatement ps = conn.prepareStatement("SELECT value FROM settings WHERE key = ?")) {
