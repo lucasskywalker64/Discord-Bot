@@ -1,14 +1,14 @@
 package com.github.lucasskywalker64.persistence;
 
-import com.github.lucasskywalker64.BotMain;
 import org.tinylog.Logger;
 
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.sql.*;
 
 public final class Database {
 
-    private static final Path DB_PATH = BotMain.getDbFile().toPath();
+    private static final Path DB_PATH = Paths.get("bot_files", "bot.db");
     private Connection connection;
 
     public Connection getConnection() {
@@ -61,7 +61,7 @@ public final class Database {
         }
     }
 
-    public Database() throws Exception {
+    private Database() throws Exception {
         try {
             String url = "jdbc:sqlite:" + DB_PATH.toAbsolutePath();
             connection = DriverManager.getConnection(url);
@@ -71,8 +71,23 @@ public final class Database {
             initSchema(connection);
             Logger.info("Database initialized");
         } catch (Exception e) {
-            Logger.error("Failed to initialize SQLite connection", e);
             throw new Exception("Failed to initialize SQLite connection", e);
         }
+    }
+
+    private static class Holder {
+        private static final Database INSTANCE;
+
+        static {
+            try {
+                INSTANCE = new Database();
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }
+    }
+
+    public static Database getInstance() {
+        return Holder.INSTANCE;
     }
 }

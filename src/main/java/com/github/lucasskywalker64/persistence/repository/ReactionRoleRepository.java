@@ -1,6 +1,6 @@
 package com.github.lucasskywalker64.persistence.repository;
 
-import com.github.lucasskywalker64.BotMain;
+import com.github.lucasskywalker64.persistence.Database;
 import com.github.lucasskywalker64.persistence.data.ReactionRoleData;
 import org.tinylog.Logger;
 
@@ -12,8 +12,8 @@ import java.util.List;
 public class ReactionRoleRepository {
 
     private final List<ReactionRoleData> localReactionRoleData;
-    private final Connection conn = BotMain.getConnection();
-    
+    private final Connection conn = Database.getInstance().getConnection();
+
     public List<ReactionRoleData> loadAll() {
         return new ArrayList<>(localReactionRoleData);
     }
@@ -47,7 +47,7 @@ public class ReactionRoleRepository {
             Logger.info("Reaction role data saved.");
         }
     }
-    
+
     private ReactionRoleRepository() throws IOException {
         localReactionRoleData = new ArrayList<>();
         try (PreparedStatement ps = conn.prepareStatement(
@@ -67,7 +67,7 @@ public class ReactionRoleRepository {
         }
         Logger.info("Reaction role data loaded.");
     }
-    
+
     private static class Holder {
         private static final ReactionRoleRepository INSTANCE;
 
@@ -79,7 +79,7 @@ public class ReactionRoleRepository {
             }
         }
     }
-    
+
     public static ReactionRoleRepository getInstance() {
         return Holder.INSTANCE;
     }
