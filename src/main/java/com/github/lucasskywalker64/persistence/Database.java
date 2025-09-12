@@ -1,5 +1,6 @@
 package com.github.lucasskywalker64.persistence;
 
+import com.github.lucasskywalker64.BotMain;
 import org.tinylog.Logger;
 
 import java.nio.file.Path;
@@ -8,7 +9,8 @@ import java.sql.*;
 
 public final class Database {
 
-    private static final Path DB_PATH = Paths.get("bot_files", "bot.db");
+    private static final Path DB_PATH = Paths.get(BotMain.getContext().botFile().getParent(),
+            "bot_files", "bot.db");
     private Connection connection;
 
     public Connection getConnection() {

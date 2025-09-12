@@ -70,7 +70,7 @@ public class BotInitializer {
         jda = JDABuilder.createDefault(config.get("BOT_TOKEN"))
                 .enableIntents(GatewayIntent.GUILD_MEMBERS)
                 .build();
-        BotMain.setContext(new BotContext(jda, config));
+        BotMain.setContext(new BotContext(jda, config, botFile));
         youTube = new YouTubeImpl(jda);
         twitch = new  TwitchImpl(jda);
         reactionRoleListener = new ReactionRoleListener();
