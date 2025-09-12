@@ -1,4 +1,4 @@
-package com.github.lucasskywalker64.commands.notif.youtube;
+package com.github.lucasskywalker64.commands.youtube;
 
 import com.github.lucasskywalker64.commands.SubcommandModule;
 import com.github.lucasskywalker64.persistence.data.YouTubeData;
@@ -11,12 +11,11 @@ import java.util.List;
 
 import static com.github.lucasskywalker64.commands.CommandUtil.addFieldSafe;
 
-public class NotifYouTubeDisplay implements SubcommandModule {
+public class YouTubeDisplay implements SubcommandModule {
 
     private final YouTubeRepository repo = YouTubeRepository.getInstance();
 
-    @Override public String getRootName() { return "notif"; }
-    @Override public String getGroupName() { return "youtube"; }
+    @Override public String getRootName() { return "youtube"; }
     @Override public String getSubcommandName() { return "display"; }
     @Override public String getDescription() { return "Displays all YouTube notifications"; }
 

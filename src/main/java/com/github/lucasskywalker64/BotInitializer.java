@@ -11,14 +11,14 @@ import com.github.lucasskywalker64.commands.general.GeneralPing;
 import com.github.lucasskywalker64.commands.message.MessageCreate;
 import com.github.lucasskywalker64.commands.message.MessageEdit;
 import com.github.lucasskywalker64.commands.message.MessageRemove;
-import com.github.lucasskywalker64.commands.notif.twitch.NotifTwitchAdd;
-import com.github.lucasskywalker64.commands.notif.twitch.NotifTwitchDisplay;
-import com.github.lucasskywalker64.commands.notif.twitch.NotifTwitchEdit;
-import com.github.lucasskywalker64.commands.notif.twitch.NotifTwitchRemove;
-import com.github.lucasskywalker64.commands.notif.youtube.NotifYouTubeAdd;
-import com.github.lucasskywalker64.commands.notif.youtube.NotifYouTubeDisplay;
-import com.github.lucasskywalker64.commands.notif.youtube.NotifYouTubeEdit;
-import com.github.lucasskywalker64.commands.notif.youtube.NotifYouTubeRemove;
+import com.github.lucasskywalker64.commands.twitch.TwitchAdd;
+import com.github.lucasskywalker64.commands.twitch.TwitchDisplay;
+import com.github.lucasskywalker64.commands.twitch.TwitchEdit;
+import com.github.lucasskywalker64.commands.twitch.TwitchRemove;
+import com.github.lucasskywalker64.commands.youtube.YouTubeAdd;
+import com.github.lucasskywalker64.commands.youtube.YouTubeDisplay;
+import com.github.lucasskywalker64.commands.youtube.YouTubeEdit;
+import com.github.lucasskywalker64.commands.youtube.YouTubeRemove;
 import com.github.lucasskywalker64.commands.reaction.ReactionRoleAdd;
 import com.github.lucasskywalker64.commands.reaction.ReactionRoleDisplay;
 import com.github.lucasskywalker64.commands.reaction.ReactionRoleRemove;
@@ -109,15 +109,15 @@ public class BotInitializer {
                 new ReactionRoleRemove(reactionRoleListener),
                 new ReactionRoleDisplay(),
 
-                new NotifTwitchAdd(twitch),
-                new NotifTwitchEdit(twitch),
-                new NotifTwitchRemove(twitch),
-                new NotifTwitchDisplay(),
+                new TwitchAdd(twitch),
+                new TwitchEdit(twitch),
+                new TwitchRemove(twitch),
+                new TwitchDisplay(),
 
-                new NotifYouTubeAdd(youTube),
-                new NotifYouTubeEdit(),
-                new NotifYouTubeRemove(),
-                new NotifYouTubeDisplay(),
+                new YouTubeAdd(youTube),
+                new YouTubeEdit(),
+                new YouTubeRemove(),
+                new YouTubeDisplay(),
 
                 new MessageCreate(reactionRoleListener),
                 new MessageEdit(),
