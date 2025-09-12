@@ -1,4 +1,4 @@
-package com.github.lucasskywalker64.commands.notif.twitch;
+package com.github.lucasskywalker64.commands.twitch;
 
 import com.github.lucasskywalker64.commands.SubcommandModule;
 import com.github.lucasskywalker64.persistence.data.TwitchData;
@@ -11,12 +11,11 @@ import java.util.List;
 
 import static com.github.lucasskywalker64.commands.CommandUtil.addFieldSafe;
 
-public class NotifTwitchDisplay implements SubcommandModule {
+public class TwitchDisplay implements SubcommandModule {
 
     private final TwitchRepository repository = TwitchRepository.getInstance();
 
-    @Override public String getRootName() { return "notif"; }
-    @Override public String getGroupName() { return "twitch"; }
+    @Override public String getRootName() { return "twitch"; }
     @Override public String getSubcommandName() { return "display"; }
     @Override public String getDescription() { return "Displays all Twitch notifications"; }
 

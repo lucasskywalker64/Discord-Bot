@@ -1,4 +1,4 @@
-package com.github.lucasskywalker64.commands.notif.youtube;
+package com.github.lucasskywalker64.commands.youtube;
 
 import com.github.lucasskywalker64.commands.SubcommandModule;
 import com.github.lucasskywalker64.persistence.data.YouTubeData;
@@ -13,12 +13,11 @@ import java.util.List;
 import java.util.stream.IntStream;
 
 @SuppressWarnings("DataFlowIssue")
-public class NotifYouTubeEdit implements SubcommandModule {
+public class YouTubeEdit implements SubcommandModule {
 
     private final YouTubeRepository repo = YouTubeRepository.getInstance();
 
-    @Override public String getRootName() { return "notif"; }
-    @Override public String getGroupName() { return "youtube"; }
+    @Override public String getRootName() { return "youtube"; }
     @Override public String getSubcommandName() { return "edit"; }
     @Override public String getDescription() { return "Edit a YouTube notification"; }
 

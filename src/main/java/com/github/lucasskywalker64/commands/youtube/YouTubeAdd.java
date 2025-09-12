@@ -1,4 +1,4 @@
-package com.github.lucasskywalker64.commands.notif.youtube;
+package com.github.lucasskywalker64.commands.youtube;
 
 import com.github.lucasskywalker64.api.youtube.YouTubeImpl;
 import com.github.lucasskywalker64.commands.SubcommandModule;
@@ -14,20 +14,18 @@ import org.tinylog.Logger;
 
 import java.io.IOException;
 import java.util.Collections;
-import java.util.Objects;
 
 @SuppressWarnings("DataFlowIssue")
-public class NotifYouTubeAdd implements SubcommandModule {
+public class YouTubeAdd implements SubcommandModule {
 
     private final YouTubeRepository repo = YouTubeRepository.getInstance();
     private final YouTubeImpl youtube;
 
-    public NotifYouTubeAdd(YouTubeImpl youtube) {
+    public YouTubeAdd(YouTubeImpl youtube) {
         this.youtube = youtube;
     }
 
-    @Override public String getRootName() { return "notif"; }
-    @Override public String getGroupName() { return "youtube"; }
+    @Override public String getRootName() { return "youtube"; }
     @Override public String getSubcommandName() { return "add"; }
     @Override public String getDescription() { return "Add a YouTube notification"; }
 

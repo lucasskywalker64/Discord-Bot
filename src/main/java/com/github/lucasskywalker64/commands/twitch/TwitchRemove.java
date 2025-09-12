@@ -1,4 +1,4 @@
-package com.github.lucasskywalker64.commands.notif.twitch;
+package com.github.lucasskywalker64.commands.twitch;
 
 import com.github.lucasskywalker64.api.twitch.TwitchImpl;
 import com.github.lucasskywalker64.commands.SubcommandModule;
@@ -11,20 +11,18 @@ import org.tinylog.Logger;
 
 import java.io.IOException;
 import java.util.List;
-import java.util.Objects;
 
 @SuppressWarnings("DataFlowIssue")
-public class NotifTwitchRemove implements SubcommandModule {
+public class TwitchRemove implements SubcommandModule {
 
     private final TwitchRepository repository = TwitchRepository.getInstance();
     private final TwitchImpl twitch;
 
-    public NotifTwitchRemove(TwitchImpl twitch) {
+    public TwitchRemove(TwitchImpl twitch) {
         this.twitch = twitch;
     }
 
-    @Override public String getRootName() { return "notif"; }
-    @Override public String getGroupName() { return "twitch"; }
+    @Override public String getRootName() { return "twitch"; }
     @Override public String getSubcommandName() { return "remove"; }
     @Override public String getDescription() { return "Remove a Twitch notification"; }
 

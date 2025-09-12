@@ -1,4 +1,4 @@
-package com.github.lucasskywalker64.commands.notif.twitch;
+package com.github.lucasskywalker64.commands.twitch;
 
 import com.github.lucasskywalker64.api.twitch.TwitchImpl;
 import com.github.lucasskywalker64.commands.SubcommandModule;
@@ -15,17 +15,16 @@ import java.io.IOException;
 import java.util.Collections;
 
 @SuppressWarnings("DataFlowIssue")
-public class NotifTwitchAdd implements SubcommandModule {
+public class TwitchAdd implements SubcommandModule {
 
     private final TwitchRepository repository = TwitchRepository.getInstance();
     private final TwitchImpl twitch;
 
-    public NotifTwitchAdd(TwitchImpl twitch) {
+    public TwitchAdd(TwitchImpl twitch) {
         this.twitch = twitch;
     }
 
-    @Override public String getRootName() { return "notif"; }
-    @Override public String getGroupName() { return "twitch"; }
+    @Override public String getRootName() { return "twitch"; }
     @Override public String getSubcommandName() { return "add"; }
     @Override public String getDescription() { return "Add a Twitch notification"; }
 
