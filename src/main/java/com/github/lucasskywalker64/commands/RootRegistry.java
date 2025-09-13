@@ -1,6 +1,7 @@
 package com.github.lucasskywalker64.commands;
 
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
+import net.dv8tion.jda.api.interactions.commands.DefaultMemberPermissions;
 import net.dv8tion.jda.api.interactions.commands.build.CommandData;
 import net.dv8tion.jda.api.interactions.commands.build.Commands;
 import net.dv8tion.jda.api.interactions.commands.build.SlashCommandData;
@@ -44,6 +45,8 @@ public class RootRegistry {
             Map<String, List<SubcommandModule>> byGroup = entry.getValue();
 
             SlashCommandData rootData = Commands.slash(root, describeRoot(root));
+
+            rootData.setDefaultPermissions(DefaultMemberPermissions.DISABLED);
 
             List<SubcommandModule> ungrouped = byGroup.getOrDefault("", List.of());
             for (SubcommandModule module : ungrouped) rootData.addSubcommands(module.definition());
