@@ -154,7 +154,7 @@ public class TwitchOAuthService {
         server = HttpServer.create(new InetSocketAddress(InetAddress.getByName("0.0.0.0"), port), 0);
         server.createContext(redirectUri.getPath(), new CallbackHandler());
         server.start();
-        Logger.info("OAuth callback server listening at {}", server.getAddress());
+        Logger.info("OAuth callback server started waiting for request...");
     }
 
     @NotNull
@@ -171,6 +171,7 @@ public class TwitchOAuthService {
         @Override
         public void handle(HttpExchange exchange) throws IOException {
             try {
+                Logger.info("Received OAuth callback");
                 Map<String, String> query = parseQuery(exchange.getRequestURI().getRawQuery());
                 String code = query.get("code");
                 String state = query.get("state");
@@ -180,7 +181,9 @@ public class TwitchOAuthService {
                 }
                 onOAuthCallback(code, state);
                 writeHtml(exchange, 200, "<h1>Authorization complete</h1>");
-                server.stop(10000);
+                server.stop(5);
+                server = null;
+                Logger.info("OAuth callback server stopped");
                 context.setTwitch(new TwitchImpl(context.jda()));
             } catch (Exception e) {
                 Logger.error(e);
