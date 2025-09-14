@@ -1,12 +1,15 @@
 package com.github.lucasskywalker64.persistence.repository;
 
+import com.github.lucasskywalker64.api.twitch.auth.TwitchOAuthService.TokenBundle;
 import com.github.lucasskywalker64.persistence.Database;
 import com.github.lucasskywalker64.persistence.data.ShoutoutData;
+import com.github.lucasskywalker64.persistence.data.TokenData;
 import com.github.lucasskywalker64.persistence.data.TwitchData;
 import org.tinylog.Logger;
 
 import java.io.IOException;
 import java.sql.*;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -84,17 +87,6 @@ public class TwitchRepository {
         }
     }
 
-    public String readModeratorName() {
-        try (PreparedStatement ps = conn.prepareStatement(
-                "SELECT value FROM settings WHERE key = 'moderator_name'");
-             ResultSet rs = ps.executeQuery()) {
-            if (rs.next()) return rs.getString(1);
-        } catch (SQLException e) {
-            Logger.error(e);
-        }
-        return "";
-    }
-
     public List<String> loadAllShoutedOutNames() {
         List<String> names = new ArrayList<>();
         try (PreparedStatement ps = conn.prepareStatement("SELECT name FROM shoutedout");
@@ -121,6 +113,38 @@ public class TwitchRepository {
         } catch (SQLException e) {
             Logger.error(e);
         }
+    }
+
+    public void saveToken(TokenData data) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "INSERT INTO token_data (user_id, login, access_token, refresh_token, expires_at) " +
+                        "VALUES (?, ?, ?, ?, ?) " +
+                        "ON CONFLICT (user_id) DO UPDATE SET login = excluded.login, " +
+                        "access_token = excluded.access_token, refresh_token = excluded.refresh_token, " +
+                        "expires_at = excluded.expires_at")) {
+            ps.setString(1, data.userId());
+            ps.setString(2, data.login());
+            ps.setString(3, data.bundle().accessToken());
+            ps.setString(4, data.bundle().refreshToken());
+            ps.setLong(5, data.bundle().expiresAt().toEpochMilli());
+            ps.executeUpdate();
+        }
+    }
+
+    public TokenData loadToken() throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement("SELECT * FROM token_data")) {
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    TokenBundle bundle = new TokenBundle(
+                            rs.getString("access_token"),
+                            rs.getString("refresh_token"),
+                            Instant.ofEpochMilli(rs.getLong("expires_at"))
+                    );
+                    return new TokenData(bundle, rs.getString("user_id"), rs.getString("login"));
+                }
+            }
+        }
+        return null;
     }
 
     private TwitchRepository() throws IOException {

@@ -1,6 +1,8 @@
 package com.github.lucasskywalker64.commands.shoutout;
 
+import com.github.lucasskywalker64.BotMain;
 import com.github.lucasskywalker64.api.twitch.TwitchImpl;
+import com.github.lucasskywalker64.commands.CommandUtil;
 import com.github.lucasskywalker64.commands.SubcommandModule;
 import com.github.lucasskywalker64.persistence.repository.TwitchRepository;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
@@ -15,9 +17,7 @@ import java.util.ArrayList;
 public class ShoutoutRemoveAll implements SubcommandModule {
 
     private final TwitchRepository repo = TwitchRepository.getInstance();
-    private final TwitchImpl twitch;
-
-    public ShoutoutRemoveAll(TwitchImpl twitch) { this.twitch = twitch; }
+    private final TwitchImpl twitch = BotMain.getContext().twitch();
 
     @Override public String getRootName() { return "shoutout"; }
     @Override public String getSubcommandName() { return "removeall"; }
@@ -31,6 +31,11 @@ public class ShoutoutRemoveAll implements SubcommandModule {
 
     @Override
     public void handle(SlashCommandInteractionEvent event) {
+        if (twitch == null) {
+            event.deferReply(true).queue();
+            CommandUtil.handleNoTwitchService(event);
+            return;
+        }
         if (!"yes".equals(event.getOption("are-you-sure").getAsString())) {
             event.reply("Please confirm that you want to remove all shoutouts.").setEphemeral(true).queue();
             return;

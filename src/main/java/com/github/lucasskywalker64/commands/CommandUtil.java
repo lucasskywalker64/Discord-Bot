@@ -5,6 +5,7 @@ import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.emoji.CustomEmoji;
 import net.dv8tion.jda.api.entities.emoji.Emoji;
 import net.dv8tion.jda.api.entities.emoji.Emoji.Type;
+import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
 import net.dv8tion.jda.api.interactions.commands.Command;
 import net.dv8tion.jda.api.interactions.commands.Command.Choice;
 import net.dv8tion.jda.api.interactions.commands.Command.Option;
@@ -41,6 +42,16 @@ public final class CommandUtil {
         if (!chunk.isEmpty()) {
             embed.addField(title, chunk.toString(), inline);
         }
+    }
+
+    public static void handleNoTwitchService(SlashCommandInteractionEvent event) {
+        List<Command> commands = event.getGuild().retrieveCommands().complete();
+        Command twitchCommand = commands.stream()
+                .filter(command -> command.getName().equals("twitch"))
+                .findFirst()
+                .get();
+        event.getHook().sendMessage(String.format("No Twitch service setup yet. " +
+                "Please authorize your twitch first with </twitch auth:%s>", twitchCommand.getId())).queue();
     }
 
     public static boolean commandListsMatch(List<Command> existing, List<CommandData> updated) {

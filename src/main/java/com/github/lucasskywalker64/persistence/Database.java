@@ -38,6 +38,13 @@ public final class Database {
                     "gameName TEXT, " +
                     "boxArtUrl TEXT) ");
 
+            st.executeUpdate("CREATE TABLE IF NOT EXISTS token_data (" +
+                    "user_id INTEGER PRIMARY KEY," +
+                    "login TEXT NOT NULL," +
+                    "access_token TEXT NOT NULL," +
+                    "refresh_token TEXT NOT NULL," +
+                    "expires_at INTEGER NOT NULL)");
+
             st.executeUpdate("CREATE TABLE IF NOT EXISTS shoutout (" +
                     "username TEXT PRIMARY KEY) ");
 
