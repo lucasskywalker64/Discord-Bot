@@ -1,7 +1,11 @@
 package com.github.lucasskywalker64.api.twitch;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.github.lucasskywalker64.BotMain;
+import com.github.lucasskywalker64.api.twitch.auth.TwitchOAuthService;
+import com.github.lucasskywalker64.api.twitch.auth.TwitchOAuthService.TokenBundle;
 import com.github.lucasskywalker64.persistence.data.ShoutoutData;
+import com.github.lucasskywalker64.persistence.data.TokenData;
 import com.github.lucasskywalker64.persistence.data.TwitchData;
 import com.github.lucasskywalker64.persistence.repository.TwitchRepository;
 import com.github.philippheuer.credentialmanager.domain.OAuth2Credential;
@@ -16,6 +20,7 @@ import com.github.twitch4j.helix.domain.Game;
 import com.github.twitch4j.helix.domain.Video;
 
 import java.io.IOException;
+import java.sql.SQLException;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.Executors;
@@ -36,6 +41,7 @@ public class TwitchImpl {
     private static final String HTTPS_TWITCH_TV = "https://twitch.tv/";
     private static final TwitchRepository twitchRepo = TwitchRepository.getInstance();
     private static final Dotenv config = BotMain.getContext().config();
+    private final TwitchOAuthService oAuthService;
     private final List<TwitchData> twitchDataList = new ArrayList<>();
     private final List<ShoutoutData> shoutoutNames = new ArrayList<>();
     private final List<String> shoutedoutNames = new ArrayList<>();
@@ -44,8 +50,8 @@ public class TwitchImpl {
     private TwitchClient twitchClient;
     private Long shoutoutTimestamp = 0L;
     private String streamerId;
-    private String moderatorName;
     private String moderatorId;
+    private TokenData tokenData;
 
     public void load() {
         twitchDataList.clear();
@@ -54,8 +60,6 @@ public class TwitchImpl {
         shoutoutNames.addAll(twitchRepo.loadAllShoutout());
         shoutedoutNames.clear();
         shoutedoutNames.addAll(twitchRepo.loadAllShoutedOutNames());
-
-        moderatorName = twitchRepo.readModeratorName();
 
         if (!twitchDataList.isEmpty()) {
             twitchDataList.forEach(data -> {
@@ -68,6 +72,18 @@ public class TwitchImpl {
 
     public void scheduleLoad() {
         scheduler.scheduleAtFixedRate(this::load, 1, 1, TimeUnit.DAYS);
+    }
+
+    private synchronized String getValidAccessToken() throws Exception {
+        Instant now = Instant.now();
+        if (tokenData.bundle().expiresAt().isBefore(now.plusSeconds(60))) {
+            Logger.info("Access token expired, refreshing...");
+            TokenBundle refreshed = oAuthService.refreshToken(tokenData.bundle().refreshToken());
+            tokenData = tokenData.withTokenBundle(refreshed);
+            twitchRepo.saveToken(tokenData);
+        }
+
+        return tokenData.bundle().accessToken();
     }
 
     private void handleChannelGoLiveEvent(ChannelGoLiveEvent event) {
@@ -164,7 +180,7 @@ public class TwitchImpl {
                     .orElse(-1);
 
             if (index > -1 && twitchDataList.get(index).announcementId() != null) {
-                Video lastVod = twitchClient.getHelix().getVideos(config.get("TWITCH_ACCESS_TOKEN"),
+                Video lastVod = twitchClient.getHelix().getVideos(getValidAccessToken(),
                         (List<String>) null, event.getChannel().getId(), null, null,
                         null, null, null, null, null, null)
                         .execute().getVideos().getFirst();
@@ -218,11 +234,15 @@ public class TwitchImpl {
 
     private void handleRaidEvent(RaidEvent raidEvent) {
         if (shoutoutTimestamp + 120000L < System.currentTimeMillis()) {
-            twitchClient.getHelix().sendShoutout(
-                    config.get("TWITCH_ACCESS_TOKEN"),
-                    streamerId,
-                    raidEvent.getRaider().getId(),
-                    moderatorId).queue();
+            try {
+                twitchClient.getHelix().sendShoutout(
+                        getValidAccessToken(),
+                        streamerId,
+                        raidEvent.getRaider().getId(),
+                        moderatorId).queue();
+            } catch (Exception e) {
+                Logger.error(e);
+            }
             shoutoutTimestamp = System.currentTimeMillis();
         } else {
             Timer timer = new Timer();
@@ -243,13 +263,12 @@ public class TwitchImpl {
         }
     }
 
-    private void setup() {
+    private void setup() throws Exception {
         twitchClient = TwitchClientBuilder.builder()
                 .withClientId(config.get("TWITCH_CLIENT_ID"))
                 .withClientSecret(config.get("TWITCH_CLIENT_SECRET"))
                 .withEnableChat(true)
-                .withChatAccount(new OAuth2Credential("twitch",
-                        config.get("TWITCH_ACCESS_TOKEN")))
+                .withChatAccount(new OAuth2Credential("twitch", getValidAccessToken()))
                 .withEnableHelix(true)
                 .build();
 
@@ -261,11 +280,7 @@ public class TwitchImpl {
                     .execute().getUsers().getFirst().getId();
             Logger.info("Streamer ID setup");
 
-            if (!moderatorName.isEmpty()) {
-                moderatorId = twitchClient.getHelix().getUsers(null, null,
-                        List.of(moderatorName)).execute().getUsers().getFirst().getId();
-                Logger.info("Current moderator ID setup");
-            }
+            moderatorId = tokenData.userId();
 
             twitchClient.getChat().joinChannel(twitchDataList.getFirst().username());
         }
@@ -279,10 +294,13 @@ public class TwitchImpl {
         scheduler.awaitTermination(10, TimeUnit.SECONDS);
     }
 
-    public TwitchImpl(JDA discordAPI) {
+    public TwitchImpl(JDA discordAPI) throws Exception {
         Logger.info("Starting Twitch API...");
 
         this.discordAPI = discordAPI;
+        this.oAuthService = new TwitchOAuthService();
+
+        this.tokenData = twitchRepo.loadToken();
 
         setup();
 

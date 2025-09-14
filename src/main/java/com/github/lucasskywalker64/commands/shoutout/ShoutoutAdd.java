@@ -1,6 +1,8 @@
 package com.github.lucasskywalker64.commands.shoutout;
 
+import com.github.lucasskywalker64.BotMain;
 import com.github.lucasskywalker64.api.twitch.TwitchImpl;
+import com.github.lucasskywalker64.commands.CommandUtil;
 import com.github.lucasskywalker64.commands.SubcommandModule;
 import com.github.lucasskywalker64.persistence.data.ShoutoutData;
 import com.github.lucasskywalker64.persistence.repository.TwitchRepository;
@@ -16,9 +18,7 @@ import java.util.*;
 public class ShoutoutAdd implements SubcommandModule {
 
     private final TwitchRepository repo = TwitchRepository.getInstance();
-    private final TwitchImpl twitch;
-
-    public ShoutoutAdd(TwitchImpl twitch) { this.twitch = twitch; }
+    private final TwitchImpl twitch = BotMain.getContext().twitch();
 
     @Override public String getRootName() { return "shoutout"; }
     @Override public String getSubcommandName() { return "add"; }
@@ -32,6 +32,11 @@ public class ShoutoutAdd implements SubcommandModule {
 
     @Override
     public void handle(SlashCommandInteractionEvent event) {
+        if (twitch == null) {
+            event.deferReply(true).queue();
+            CommandUtil.handleNoTwitchService(event);
+            return;
+        }
         List<ShoutoutData> shoutoutData = Arrays.stream(event.getOption("username").getAsString().split(";"))
                 .map(ShoutoutData::new).toList();
 

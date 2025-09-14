@@ -1,6 +1,7 @@
 package com.github.lucasskywalker64;
 
 import com.github.lucasskywalker64.api.twitch.TwitchImpl;
+import com.github.lucasskywalker64.api.twitch.auth.TwitchOAuthService;
 import com.github.lucasskywalker64.api.youtube.YouTubeImpl;
 import com.github.lucasskywalker64.commands.CommandUtil;
 import com.github.lucasskywalker64.commands.RootRegistry;
@@ -11,10 +12,7 @@ import com.github.lucasskywalker64.commands.general.GeneralPing;
 import com.github.lucasskywalker64.commands.message.MessageCreate;
 import com.github.lucasskywalker64.commands.message.MessageEdit;
 import com.github.lucasskywalker64.commands.message.MessageRemove;
-import com.github.lucasskywalker64.commands.twitch.TwitchAdd;
-import com.github.lucasskywalker64.commands.twitch.TwitchDisplay;
-import com.github.lucasskywalker64.commands.twitch.TwitchEdit;
-import com.github.lucasskywalker64.commands.twitch.TwitchRemove;
+import com.github.lucasskywalker64.commands.twitch.*;
 import com.github.lucasskywalker64.commands.youtube.YouTubeAdd;
 import com.github.lucasskywalker64.commands.youtube.YouTubeDisplay;
 import com.github.lucasskywalker64.commands.youtube.YouTubeEdit;
@@ -29,6 +27,7 @@ import com.github.lucasskywalker64.commands.shoutout.ShoutoutRemoveAll;
 import com.github.lucasskywalker64.listener.command.SlashCommandListener;
 import com.github.lucasskywalker64.listener.role.ReactionRoleListener;
 import com.github.lucasskywalker64.persistence.Database;
+import com.github.lucasskywalker64.persistence.repository.TwitchRepository;
 import io.github.cdimascio.dotenv.Dotenv;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.JDABuilder;
@@ -70,9 +69,10 @@ public class BotInitializer {
         jda = JDABuilder.createDefault(config.get("BOT_TOKEN"))
                 .enableIntents(GatewayIntent.GUILD_MEMBERS)
                 .build();
-        BotMain.setContext(new BotContext(jda, config, botFile));
+        BotMain.setContext(new BotContext(jda, config, botFile, twitch));
         youTube = new YouTubeImpl(jda);
-        twitch = new  TwitchImpl(jda);
+        if (TwitchRepository.getInstance().loadToken() != null)
+            twitch = new TwitchImpl(jda);
         reactionRoleListener = new ReactionRoleListener();
         RootRegistry registry = newRegistry();
         jda.addEventListener(reactionRoleListener);
@@ -85,7 +85,8 @@ public class BotInitializer {
         Logger.info("Discord API ready");
         scheduler.schedule(() -> {
             try {
-                twitch.shutdown();
+                if (twitch != null)
+                    twitch.shutdown();
                 youTube.shutdown();
                 reactionRoleListener.shutdown();
                 jda.shutdown();
@@ -109,10 +110,11 @@ public class BotInitializer {
                 new ReactionRoleRemove(reactionRoleListener),
                 new ReactionRoleDisplay(),
 
-                new TwitchAdd(twitch),
-                new TwitchEdit(twitch),
-                new TwitchRemove(twitch),
+                new TwitchAdd(),
+                new TwitchEdit(),
+                new TwitchRemove(),
                 new TwitchDisplay(),
+                new TwitchAuth(new TwitchOAuthService()),
 
                 new YouTubeAdd(youTube),
                 new YouTubeEdit(),
@@ -123,10 +125,10 @@ public class BotInitializer {
                 new MessageEdit(),
                 new MessageRemove(reactionRoleListener),
 
-                new ShoutoutAdd(twitch),
-                new ShoutoutRemove(twitch),
+                new ShoutoutAdd(),
+                new ShoutoutRemove(),
                 new ShoutoutDisplay(),
-                new ShoutoutRemoveAll(twitch),
+                new ShoutoutRemoveAll(),
 
                 new GeneralMemberCountAdd(),
                 new GeneralMemberCountRemove(),
