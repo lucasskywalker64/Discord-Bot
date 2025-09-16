@@ -1,6 +1,5 @@
 package com.github.lucasskywalker64.commands.twitch;
 
-import com.github.lucasskywalker64.BotContext;
 import com.github.lucasskywalker64.BotMain;
 import com.github.lucasskywalker64.api.twitch.TwitchImpl;
 import com.github.lucasskywalker64.commands.CommandUtil;
@@ -9,7 +8,6 @@ import com.github.lucasskywalker64.persistence.data.TwitchData;
 import com.github.lucasskywalker64.persistence.repository.TwitchRepository;
 import net.dv8tion.jda.api.entities.channel.ChannelType;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
-import net.dv8tion.jda.api.interactions.commands.Command;
 import net.dv8tion.jda.api.interactions.commands.OptionType;
 import net.dv8tion.jda.api.interactions.commands.build.OptionData;
 import net.dv8tion.jda.api.interactions.commands.build.SubcommandData;
@@ -17,13 +15,11 @@ import org.tinylog.Logger;
 
 import java.io.IOException;
 import java.util.Collections;
-import java.util.List;
 
 @SuppressWarnings("DataFlowIssue")
 public class TwitchAdd implements SubcommandModule {
 
     private final TwitchRepository repository = TwitchRepository.getInstance();
-    private final TwitchImpl twitch = BotMain.getContext().twitch();
 
     @Override public String getRootName() { return "twitch"; }
     @Override public String getSubcommandName() { return "add"; }
@@ -41,6 +37,7 @@ public class TwitchAdd implements SubcommandModule {
 
     @Override
     public void handle(SlashCommandInteractionEvent event) {
+        TwitchImpl twitch = BotMain.getContext().twitch();
         event.deferReply(true).queue();
         if (twitch == null) {
             CommandUtil.handleNoTwitchService(event);

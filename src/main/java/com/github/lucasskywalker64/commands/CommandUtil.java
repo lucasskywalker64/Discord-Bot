@@ -50,7 +50,7 @@ public final class CommandUtil {
                 .filter(command -> command.getName().equals("twitch"))
                 .findFirst()
                 .get();
-        event.getHook().sendMessage(String.format("No Twitch service setup yet. " +
+        event.getHook().sendMessage(String.format("No Twitch service setup. " +
                 "Please authorize your twitch first with </twitch auth:%s>", twitchCommand.getId())).queue();
     }
 

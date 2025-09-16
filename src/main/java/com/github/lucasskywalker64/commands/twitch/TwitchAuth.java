@@ -2,12 +2,16 @@ package com.github.lucasskywalker64.commands.twitch;
 
 import com.github.lucasskywalker64.api.twitch.auth.TwitchOAuthService;
 import com.github.lucasskywalker64.commands.SubcommandModule;
+import com.github.lucasskywalker64.persistence.repository.TwitchRepository;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
+import net.dv8tion.jda.api.interactions.commands.Command;
 import net.dv8tion.jda.api.interactions.commands.build.SubcommandData;
 import net.dv8tion.jda.api.interactions.components.buttons.Button;
 import org.tinylog.Logger;
 
 import java.io.IOException;
+import java.sql.SQLException;
+import java.util.List;
 
 public class TwitchAuth implements SubcommandModule {
 
@@ -34,8 +38,17 @@ public class TwitchAuth implements SubcommandModule {
         event.deferReply(true).queue();
         TwitchOAuthService.AuthLink link = null;
         try {
+            if (TwitchRepository.getInstance().loadToken() != null) {
+                List<Command> commands = event.getGuild().retrieveCommands().complete();
+                Command twitchCommand = commands.stream()
+                        .filter(command -> command.getName().equals("twitch"))
+                        .findFirst()
+                        .get();
+                event.getHook().sendMessage(String.format("Twitch is already authorized, if you need to re-authorize " +
+                        "please revoke it first with </twitch revoke:%s", twitchCommand.getId())).queue();
+            }
             link = oauth.createAuthorizationLink(event.getUser().getIdLong());
-        } catch (IOException e) {
+        } catch (IOException | SQLException e) {
             Logger.error(e);
             event.getHook().sendMessage("Internal server error. Please try again. " +
                             "If this error persists contact the developer.").queue();

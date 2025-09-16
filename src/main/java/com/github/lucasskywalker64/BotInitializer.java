@@ -53,10 +53,10 @@ public class BotInitializer {
 
     private final File botFile;
     private final ScheduledExecutorService scheduler;
+    private TwitchOAuthService oAuthService;
     private Dotenv config;
     private JDA jda;
     private YouTubeImpl youTube;
-    private TwitchImpl twitch;
     private ReactionRoleListener reactionRoleListener;
 
     public BotInitializer(File botFile, ScheduledExecutorService scheduler) {
@@ -69,10 +69,11 @@ public class BotInitializer {
         jda = JDABuilder.createDefault(config.get("BOT_TOKEN"))
                 .enableIntents(GatewayIntent.GUILD_MEMBERS)
                 .build();
-        BotMain.setContext(new BotContext(jda, config, botFile, twitch));
+        BotMain.setContext(new BotContext(jda, config, botFile, null));
+        oAuthService = new TwitchOAuthService();
         youTube = new YouTubeImpl(jda);
         if (TwitchRepository.getInstance().loadToken() != null)
-            twitch = new TwitchImpl(jda);
+            BotMain.getContext().setTwitch(new TwitchImpl(jda));
         reactionRoleListener = new ReactionRoleListener();
         RootRegistry registry = newRegistry();
         jda.addEventListener(reactionRoleListener);
@@ -114,7 +115,8 @@ public class BotInitializer {
                 new TwitchEdit(),
                 new TwitchRemove(),
                 new TwitchDisplay(),
-                new TwitchAuth(new TwitchOAuthService()),
+                new TwitchAuth(oAuthService),
+                new TwitchRevoke(oAuthService),
 
                 new YouTubeAdd(youTube),
                 new YouTubeEdit(),

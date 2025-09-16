@@ -21,6 +21,7 @@ import java.net.*;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.HttpResponse.BodyHandlers;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -43,7 +44,7 @@ public class TwitchOAuthService {
     private final TwitchRepository repository = TwitchRepository.getInstance();
     private final JDA jda;
     private final Map<String, AuthSession> pending = new ConcurrentHashMap<>();
-    private final HttpClient http = HttpClient.newHttpClient();
+    private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
     private final String clientId;
     private final String clientSecret;
     private final URI redirectUri;
@@ -76,6 +77,22 @@ public class TwitchOAuthService {
 
         startLocalServer();
         return new AuthLink(state, url);
+    }
+
+    public void revokeToken(String token) throws Exception {
+        String form = "client_id=" + URLEncoder.encode(clientId, StandardCharsets.UTF_8)
+                    + "&token=" + URLEncoder.encode(token, StandardCharsets.UTF_8);
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("https://id.twitch.tv/oauth2/revoke"))
+                .header("Content-Type", "application/x-www-form-urlencoded")
+                .POST(HttpRequest.BodyPublishers.ofString(form))
+                .build();
+
+        http.send(request, BodyHandlers.ofString());
+        repository.deleteToken();
+        context.twitch().shutdown();
+        context.setTwitch(null);
     }
 
     public void onOAuthCallback(String code, String state) throws Exception {
@@ -181,7 +198,7 @@ public class TwitchOAuthService {
                 }
                 onOAuthCallback(code, state);
                 writeHtml(exchange, 200, "<h1>Authorization complete</h1>");
-                server.stop(5);
+                server.stop(3);
                 server = null;
                 Logger.info("OAuth callback server stopped");
                 context.setTwitch(new TwitchImpl(context.jda()));
