@@ -6,7 +6,7 @@
 
     <groupId>com.github.lucasskywalker64</groupId>
     <artifactId>DiscordBot</artifactId>
-    <version>3.0.1</version>
+    <version>3.1.0</version>
 
     <properties>
         <maven.compiler.source>21</maven.compiler.source>
