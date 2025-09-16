@@ -291,7 +291,9 @@ public class TwitchImpl {
         twitchRepo.saveAll(twitchDataList, false);
         twitchRepo.saveShoutedOutNames(shoutedoutNames);
 
-        scheduler.awaitTermination(10, TimeUnit.SECONDS);
+        scheduler.shutdown();
+        scheduler.awaitTermination(3, TimeUnit.SECONDS);
+        Logger.info("Twitch API shutdown");
     }
 
     public TwitchImpl(JDA discordAPI) throws Exception {

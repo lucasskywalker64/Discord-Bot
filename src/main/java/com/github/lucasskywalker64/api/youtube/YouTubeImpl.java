@@ -175,8 +175,10 @@ public class YouTubeImpl {
     }
 
     public void shutdown() throws InterruptedException, IOException {
-        scheduler.awaitTermination(10L, TimeUnit.SECONDS);
+        scheduler.shutdown();
+        scheduler.awaitTermination(3, TimeUnit.SECONDS);
         save();
+        Logger.info("YouTube API shutdown");
     }
 
     /**
