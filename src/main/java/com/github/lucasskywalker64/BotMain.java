@@ -55,6 +55,7 @@ public class BotMain {
 
     // TODO:first redeem counter (twitch channel point api), twitch quote system, ticket system
     public static void main(String[] args) {
+        long startTime = System.nanoTime();
         Logger.info("Starting Discord API...");
         try {
             BotInitializer init = new BotInitializer(botFile, scheduler);
@@ -66,5 +67,9 @@ public class BotMain {
         } catch (Exception e) {
             Logger.error(e);
         }
+        long elapsedNano = System.nanoTime() - startTime;
+        long seconds = elapsedNano / 1_000_000_000L;
+        long millis = (elapsedNano / 1_000_000) % 1000;
+        Logger.info(String.format("Bot started in %d.%03d seconds", seconds, millis));
     }
 }
