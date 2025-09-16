@@ -17,7 +17,6 @@ import java.util.ArrayList;
 public class ShoutoutRemoveAll implements SubcommandModule {
 
     private final TwitchRepository repo = TwitchRepository.getInstance();
-    private final TwitchImpl twitch = BotMain.getContext().twitch();
 
     @Override public String getRootName() { return "shoutout"; }
     @Override public String getSubcommandName() { return "removeall"; }
@@ -26,17 +25,18 @@ public class ShoutoutRemoveAll implements SubcommandModule {
     @Override
     public SubcommandData definition() {
         return new SubcommandData(getSubcommandName(), getDescription())
-                .addOption(OptionType.STRING, "are-you-sure", "Type yes to confirm the removal of all shoutouts.", true);
+                .addOption(OptionType.BOOLEAN, "are-you-sure", "Select true to confirm the removal of all shoutouts.", true);
     }
 
     @Override
     public void handle(SlashCommandInteractionEvent event) {
+        TwitchImpl twitch = BotMain.getContext().twitch();
         if (twitch == null) {
             event.deferReply(true).queue();
             CommandUtil.handleNoTwitchService(event);
             return;
         }
-        if (!"yes".equals(event.getOption("are-you-sure").getAsString())) {
+        if (!event.getOption("are-you-sure").getAsBoolean()) {
             event.reply("Please confirm that you want to remove all shoutouts.").setEphemeral(true).queue();
             return;
         }

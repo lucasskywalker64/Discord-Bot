@@ -147,6 +147,10 @@ public class TwitchRepository {
         return null;
     }
 
+    public void deleteToken() throws SQLException {
+        conn.createStatement().executeUpdate("DELETE FROM token_data");
+    }
+
     private TwitchRepository() throws IOException {
         localTwitchData = new ArrayList<>();
         localShoutoutData = new ArrayList<>();

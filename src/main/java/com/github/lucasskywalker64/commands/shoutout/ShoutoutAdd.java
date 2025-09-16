@@ -18,7 +18,6 @@ import java.util.*;
 public class ShoutoutAdd implements SubcommandModule {
 
     private final TwitchRepository repo = TwitchRepository.getInstance();
-    private final TwitchImpl twitch = BotMain.getContext().twitch();
 
     @Override public String getRootName() { return "shoutout"; }
     @Override public String getSubcommandName() { return "add"; }
@@ -32,6 +31,7 @@ public class ShoutoutAdd implements SubcommandModule {
 
     @Override
     public void handle(SlashCommandInteractionEvent event) {
+        TwitchImpl twitch = BotMain.getContext().twitch();
         if (twitch == null) {
             event.deferReply(true).queue();
             CommandUtil.handleNoTwitchService(event);
