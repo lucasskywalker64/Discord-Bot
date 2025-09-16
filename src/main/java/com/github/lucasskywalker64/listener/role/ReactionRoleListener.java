@@ -119,7 +119,9 @@ public class ReactionRoleListener extends ListenerAdapter {
     }
 
     public void shutdown() throws InterruptedException {
-        scheduler.awaitTermination(10, TimeUnit.SECONDS);
+        scheduler.shutdown();
+        scheduler.awaitTermination(3, TimeUnit.SECONDS);
+        Logger.info("Reaction role listener shutdown");
     }
 
     public ReactionRoleListener() {

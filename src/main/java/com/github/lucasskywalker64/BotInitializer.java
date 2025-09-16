@@ -84,21 +84,29 @@ public class BotInitializer {
             jda.getGuilds().getFirst().updateCommands().addCommands(registry.definitions()).queue();
         }
         Logger.info("Discord API ready");
-        scheduler.schedule(() -> {
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             try {
+                TwitchImpl twitch = BotMain.getContext().twitch();
                 if (twitch != null)
                     twitch.shutdown();
                 youTube.shutdown();
                 reactionRoleListener.shutdown();
                 jda.shutdown();
+                jda.awaitShutdown(3, TimeUnit.SECONDS);
                 Database.getInstance().shutdown();
+                Files.deleteIfExists(Path.of(botFile.getParentFile() + "/nohup.out"));
+            } catch (InterruptedException | IOException e) {
+                throw new RuntimeException(e);
+            }
+        }));
+        scheduler.schedule(() -> {
+            try {
                 ProcessBuilder restartBuilder = new ProcessBuilder("bash", "-c", "sleep 10 && "
                         + "nohup java -jar " + botFile.getName() + " > nohup.out 2>&1");
                 restartBuilder.directory(botFile.getParentFile());
-                Files.delete(Path.of(botFile.getParentFile() + "/nohup.out"));
                 restartBuilder.start();
                 System.exit(0);
-            } catch (IOException | InterruptedException e) {
+            } catch (IOException e) {
                 Logger.error(e);
             }
 

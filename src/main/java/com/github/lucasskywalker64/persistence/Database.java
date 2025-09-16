@@ -65,8 +65,10 @@ public final class Database {
 
     public void shutdown() {
         if (connection != null) {
-            try { connection.close(); } catch (SQLException ignored) {}
-            connection = null;
+            try {
+                connection.close();
+                Logger.info("Database shutdown");
+            } catch (SQLException ignored) {}
         }
     }
 
