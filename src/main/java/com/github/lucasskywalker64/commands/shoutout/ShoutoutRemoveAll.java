@@ -31,23 +31,23 @@ public class ShoutoutRemoveAll implements SubcommandModule {
     @Override
     public void handle(SlashCommandInteractionEvent event) {
         TwitchImpl twitch = BotMain.getContext().twitch();
+        event.deferReply(true).queue();
         if (twitch == null) {
-            event.deferReply(true).queue();
             CommandUtil.handleNoTwitchService(event);
             return;
         }
         if (!event.getOption("are-you-sure").getAsBoolean()) {
-            event.reply("Please confirm that you want to remove all shoutouts.").setEphemeral(true).queue();
+            event.getHook().sendMessage("Please confirm that you want to remove all shoutouts.").queue();
             return;
         }
         try {
             repo.saveAllShoutout(new ArrayList<>(), false);
         } catch (IOException e) {
             Logger.error(e);
-            event.reply("ERROR: Failed to remove shoutouts! Please contact the developer.")
-                    .setEphemeral(true).queue();
+            event.getHook().sendMessage("ERROR: Failed to remove shoutouts! Please contact the developer.")
+                    .queue();
         }
         twitch.load();
-        event.reply("All shoutouts removed.").setEphemeral(true).queue();
+        event.getHook().sendMessage("All shoutouts removed.").queue();
     }
 }
