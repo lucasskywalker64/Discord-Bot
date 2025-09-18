@@ -32,8 +32,8 @@ public class ShoutoutAdd implements SubcommandModule {
     @Override
     public void handle(SlashCommandInteractionEvent event) {
         TwitchImpl twitch = BotMain.getContext().twitch();
+        event.deferReply(true).queue();
         if (twitch == null) {
-            event.deferReply(true).queue();
             CommandUtil.handleNoTwitchService(event);
             return;
         }
@@ -43,19 +43,18 @@ public class ShoutoutAdd implements SubcommandModule {
         List<ShoutoutData> oldShoutoutData = repo.loadAllShoutout();
         if (oldShoutoutData.stream().anyMatch(shoutoutData::contains)) {
             List<ShoutoutData> names = oldShoutoutData.stream().filter(shoutoutData::contains).toList();
-            event.reply(String.format("The following names are already in the list please remove them and try again\n%s",
-                    String.join("\n", names.stream().map(ShoutoutData::username).toList())))
-                    .setEphemeral(true).queue();
+            event.getHook().sendMessage(String.format("The following names are already in the list " +
+                    "please remove them and try again\n%s", String.join("\n", names.stream()
+                    .map(ShoutoutData::username).toList()))).queue();
             return;
         }
         try {
             repo.saveAllShoutout(shoutoutData);
         } catch (IOException e) {
             Logger.error(e);
-            event.reply("ERROR: Failed to add Shout out! Please contact the developer.")
-                    .setEphemeral(true).queue();
+            event.getHook().sendMessage("ERROR: Failed to add Shout out! Please contact the developer.").queue();
         }
         twitch.load();
-        event.reply("Shout out added.").setEphemeral(true).queue();
+        event.getHook().sendMessage("Shout out added.").queue();
     }
 }

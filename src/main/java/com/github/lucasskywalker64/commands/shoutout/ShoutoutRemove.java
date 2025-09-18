@@ -32,8 +32,8 @@ public class ShoutoutRemove implements SubcommandModule {
     @Override
     public void handle(SlashCommandInteractionEvent event) {
         TwitchImpl twitch = BotMain.getContext().twitch();
+        event.deferReply(true).queue();
         if (twitch == null) {
-            event.deferReply(true).queue();
             CommandUtil.handleNoTwitchService(event);
             return;
         }
@@ -43,21 +43,20 @@ public class ShoutoutRemove implements SubcommandModule {
         List<ShoutoutData> removed = new ArrayList<>(oldShoutoutData);
         removed.retainAll(toRemove);
         if (!oldShoutoutData.removeAll(toRemove)) {
-            event.reply(String.format("No username was removed. Ensure that the following names are in the " +
+            event.getHook().sendMessage(String.format("No username was removed. Ensure that the following names are in the " +
                                     "list and spelled correctly\n%s",
-                            String.join("\n", toRemove.stream().map(ShoutoutData::username).toList())))
-                    .setEphemeral(true).queue();
+                            String.join("\n", toRemove.stream().map(ShoutoutData::username).toList()))).queue();
             return;
         }
         try {
             repo.saveAllShoutout(oldShoutoutData, false);
         } catch (IOException e) {
             Logger.error(e);
-            event.reply("ERROR: Failed to add Shout out! Please contact the developer.")
-                    .setEphemeral(true).queue();
+            event.getHook().sendMessage("ERROR: Failed to add Shout out! Please contact the developer.")
+                    .queue();
         }
         twitch.load();
-        event.replyFormat("Following usernames were removed\n%s", String.join("\n",
-                        removed.stream().map(ShoutoutData::username).toList())).setEphemeral(true).queue();
+        event.getHook().sendMessage(String.format("Following usernames were removed\n%s", String.join("\n",
+                        removed.stream().map(ShoutoutData::username).toList()))).queue();
     }
 }
