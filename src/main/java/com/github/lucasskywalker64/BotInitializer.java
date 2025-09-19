@@ -45,8 +45,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.List;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 
 @SuppressWarnings("ResultOfMethodCallIgnored")
 public class BotInitializer {
@@ -70,10 +69,30 @@ public class BotInitializer {
                 .enableIntents(GatewayIntent.GUILD_MEMBERS)
                 .build();
         BotMain.setContext(new BotContext(jda, config, botFile, null));
+
         oAuthService = new TwitchOAuthService();
+        CompletableFuture<TwitchImpl> twitchFuture;
+        if (TwitchRepository.getInstance().loadToken() != null) {
+            ExecutorService executor = Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("twitch-init").factory());
+
+            twitchFuture = CompletableFuture.supplyAsync(() -> {
+                try {
+                    return new TwitchImpl(jda);
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            }, executor).whenComplete((twitch, err) -> {
+                if (err != null) {
+                    Logger.error(err);
+                }  else
+                    BotMain.getContext().setTwitch(twitch);
+            });
+        } else {
+            twitchFuture = null;
+        }
+        BotMain.getContext().setTwitchFuture(twitchFuture);
+
         youTube = new YouTubeImpl(jda);
-        if (TwitchRepository.getInstance().loadToken() != null)
-            BotMain.getContext().setTwitch(new TwitchImpl(jda));
         reactionRoleListener = new ReactionRoleListener();
         RootRegistry registry = newRegistry();
         jda.addEventListener(reactionRoleListener);
@@ -86,9 +105,16 @@ public class BotInitializer {
         Logger.info("Discord API ready");
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             try {
-                TwitchImpl twitch = BotMain.getContext().twitch();
-                if (twitch != null)
-                    twitch.shutdown();
+                if (twitchFuture != null) {
+                    TwitchImpl twitch = twitchFuture.getNow(null);
+                    if (twitch != null)
+                        twitch.shutdown();
+                    else twitchFuture.cancel(true);
+                } else {
+                    TwitchImpl twitch = BotMain.getContext().twitch();
+                    if (twitch != null)
+                        twitch.shutdown();
+                }
                 youTube.shutdown();
                 reactionRoleListener.shutdown();
                 jda.shutdown();
