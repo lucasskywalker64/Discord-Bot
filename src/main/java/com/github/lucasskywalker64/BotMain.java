@@ -67,6 +67,8 @@ public class BotMain {
         } catch (Exception e) {
             Logger.error(e);
         }
+        if (context.twitchFuture() != null)
+            context.twitchFuture().join();
         long elapsedNano = System.nanoTime() - startTime;
         long seconds = elapsedNano / 1_000_000_000L;
         long millis = (elapsedNano / 1_000_000) % 1000;
