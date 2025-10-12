@@ -2,6 +2,7 @@ package com.github.lucasskywalker64.commands;
 
 import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.entities.Guild;
+import net.dv8tion.jda.api.entities.Member;
 import net.dv8tion.jda.api.entities.emoji.CustomEmoji;
 import net.dv8tion.jda.api.entities.emoji.Emoji;
 import net.dv8tion.jda.api.entities.emoji.Emoji.Type;
@@ -17,8 +18,22 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public final class CommandUtil {
+
+    public static List<Member> getMembers(SlashCommandInteractionEvent event) {
+        List<Member> members = new ArrayList<>();
+        String memberString = event.getOption("member").getAsString();
+        Pattern pattern = Pattern.compile("<@[0-9]{17,20}>");
+        Matcher matcher = pattern.matcher(memberString);
+        while (matcher.find()) {
+            String memberId = matcher.group().substring(2, matcher.group().length() - 1);
+            members.add(event.getGuild().retrieveMemberById(memberId).complete());
+        }
+        return members;
+    }
 
     public static boolean validateEmojis(Guild guild, List<Emoji> emojiList) {
         boolean valid = true;
@@ -35,7 +50,7 @@ public final class CommandUtil {
             if (chunk.length() + line.length() + 1 > 1024) {
                 embed.addField(title, chunk.toString(), inline);
                 chunk.setLength(0);
-                title = ""; // only show the title once
+                title = "";
             }
             chunk.append(line).append("\n");
         }
@@ -67,8 +82,8 @@ public final class CommandUtil {
 
             if (!Objects.equals(exRoot.getName(), upRoot.getName())) return false;
             if (!Objects.equals(exRoot.getDescription(), upRoot.getDescription())) return false;
+            if (!Objects.equals(exRoot.getDefaultPermissions(), upRoot.getDefaultPermissions())) return false;
 
-            // Compare ungrouped subcommands
             List<Subcommand> exUngrouped = new ArrayList<>(exRoot.getSubcommands());
             List<SubcommandData> upUngrouped = new ArrayList<>(upRoot.getSubcommands());
             if (exUngrouped.size() != upUngrouped.size()) return false;
@@ -78,7 +93,6 @@ public final class CommandUtil {
                 if (!subcommandMatches(exUngrouped.get(s), upUngrouped.get(s))) return false;
             }
 
-            // Compare subcommand groups
             List<SubcommandGroup> exGroups = new ArrayList<>(exRoot.getSubcommandGroups());
             List<SubcommandGroupData> upGroups = new ArrayList<>(upRoot.getSubcommandGroups());
             if (exGroups.size() != upGroups.size()) return false;
@@ -103,7 +117,6 @@ public final class CommandUtil {
                 }
             }
 
-            // Root-level options (rare when using subcommands, but keep parity if any are present)
             List<Option> exRootOpts = new ArrayList<>(exRoot.getOptions());
             List<OptionData> upRootOpts = new ArrayList<>(upRoot.getOptions());
             if (exRootOpts.size() != upRootOpts.size()) return false;
@@ -120,7 +133,6 @@ public final class CommandUtil {
         if (!Objects.equals(ex.getName(), up.getName())) return false;
         if (!Objects.equals(ex.getDescription(), up.getDescription())) return false;
 
-        // Options inside subcommand
         List<Option> exOpts = new ArrayList<>(ex.getOptions());
         List<OptionData> upOpts = new ArrayList<>(up.getOptions());
         if (exOpts.size() != upOpts.size()) return false;
@@ -139,10 +151,8 @@ public final class CommandUtil {
         if (!Objects.equals(ex.getType(), up.getType())) return false;
         if (ex.isRequired() != up.isRequired()) return false;
 
-        // Autocomplete
         if (ex.isAutoComplete() != up.isAutoComplete()) return false;
 
-        // Channel types (order-independent)
         var exCh = ex.getChannelTypes();
         var upCh = up.getChannelTypes();
         if (!exCh.isEmpty() || !upCh.isEmpty()) {
@@ -151,7 +161,6 @@ public final class CommandUtil {
             if (!exSet.equals(upSet)) return false;
         }
 
-        // Choices (order-independent by name+value)
         List<Choice> exChoices = ex.getChoices();
         List<Choice> upChoices = up.getChoices();
         if (!exChoices.isEmpty() || !upChoices.isEmpty()) {
@@ -165,7 +174,6 @@ public final class CommandUtil {
             if (!exSet.equals(upSet)) return false;
         }
 
-        // Numeric min/max (if present)
         if (ex.getMinValue() != null || up.getMinValue() != null) {
             if (!Objects.equals(ex.getMinValue(), up.getMinValue())) return false;
         }
@@ -173,7 +181,6 @@ public final class CommandUtil {
             if (!Objects.equals(ex.getMaxValue(), up.getMaxValue())) return false;
         }
 
-        // String length min/max (if present in your JDA version)
         if (ex.getMinLength() != null || up.getMinLength() != null) {
             if (!Objects.equals(ex.getMinLength(), up.getMinLength())) return false;
         }

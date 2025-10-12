@@ -151,7 +151,7 @@ public class TwitchRepository {
         conn.createStatement().executeUpdate("DELETE FROM token_data");
     }
 
-    private TwitchRepository() throws IOException {
+    private TwitchRepository() throws SQLException {
         localTwitchData = new ArrayList<>();
         localShoutoutData = new ArrayList<>();
         try (PreparedStatement ps = conn.prepareStatement("SELECT channel, message, username, roleId, " +
@@ -163,14 +163,10 @@ public class TwitchRepository {
                         rs.getString(5), rs.getLong(6), rs.getString(7), rs.getString(8)
                 ));
             }
-        } catch (SQLException e) {
-            throw new IOException(e);
         }
         try (PreparedStatement ps = conn.prepareStatement("SELECT username FROM shoutout");
              ResultSet rs = ps.executeQuery()) {
             while (rs.next()) localShoutoutData.add(new ShoutoutData(rs.getString(1)));
-        } catch (SQLException e) {
-            throw new IOException(e);
         }
         Logger.info("Twitch and shoutout data loaded.");
     }
@@ -181,7 +177,7 @@ public class TwitchRepository {
         static {
             try {
                 INSTANCE = new TwitchRepository();
-            } catch (IOException e) {
+            } catch (SQLException e) {
                 throw new RuntimeException(e);
             }
         }

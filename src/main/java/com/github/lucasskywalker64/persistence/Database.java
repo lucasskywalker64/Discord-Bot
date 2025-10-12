@@ -1,8 +1,11 @@
 package com.github.lucasskywalker64.persistence;
 
 import com.github.lucasskywalker64.BotMain;
+import com.zaxxer.hikari.HikariConfig;
+import com.zaxxer.hikari.HikariDataSource;
 import org.tinylog.Logger;
 
+import javax.sql.DataSource;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.sql.*;
@@ -11,10 +14,14 @@ public final class Database {
 
     private static final Path DB_PATH = Paths.get(BotMain.getContext().botFile().getParent(),
             "bot_files", "bot.db");
-    private Connection connection;
+    private final HikariDataSource dataSource;
 
-    public Connection getConnection() {
-        return connection;
+    public Connection getConnection() throws SQLException {
+        return dataSource.getConnection();
+    }
+
+    public DataSource getDataSource() {
+        return dataSource;
     }
 
     private void initSchema(Connection conn) throws SQLException {
@@ -60,30 +67,66 @@ public final class Database {
 
             st.executeUpdate("CREATE TABLE IF NOT EXISTS settings (" +
                     "key TEXT PRIMARY KEY, value TEXT NOT NULL) ");
+
+            st.executeUpdate("CREATE TABLE IF NOT EXISTS tickets (" +
+                    "id INTEGER NOT NULL PRIMARY KEY, " +
+                    "openerId INTEGER NOT NULL," +
+                    "channelId INTEGER NOT NULL," +
+                    "status TEXT NOT NULL," +
+                    "createdAt TEXT NOT NULL," +
+                    "closedAt TEXT," +
+                    "closerId INTEGER," +
+                    "reason TEXT," +
+                    "claimerId INTEGER," +
+                    "transcriptContent TEXT," +
+                    "transcriptJson TEXT)");
+
+            st.executeUpdate("CREATE TABLE IF NOT EXISTS ticket_config (" +
+                    "ticketsCategoryId INTEGER PRIMARY KEY," +
+                    "supportRoleId INTEGER NOT NULL," +
+                    "logChannelId INTEGER NOT NULL," +
+                    "maxOpenTicketsPerUser INTEGER NOT NULL," +
+                    "autoCloseAfter INTEGER NOT NULL)");
+
+            st.executeUpdate("CREATE TABLE IF NOT EXISTS ticket_authorized_users (" +
+                    "ticketId INTEGER NOT NULL," +
+                    "userId INTEGER NOT NULL," +
+                    "FOREIGN KEY (ticketId) REFERENCES tickets (id) ON DELETE CASCADE," +
+                    "PRIMARY KEY (ticketId, userId))");
+
+            st.executeUpdate("CREATE TABLE IF NOT EXISTS ticket_attachment_keys (" +
+                    "ticketId INTEGER NOT NULL," +
+                    "attachmentKey TEXT NOT NULL," +
+                    "FOREIGN KEY (ticketId) REFERENCES tickets (id) ON DELETE CASCADE," +
+                    "PRIMARY KEY (ticketId, attachmentKey))");
+
+            st.executeUpdate("CREATE TABLE IF NOT EXISTS scheduled_ticket_closures (" +
+                    "ticketId INTEGER PRIMARY KEY," +
+                    "closeTimeEpoch INTEGER NOT NULL," +
+                    "channelId INTEGER NOT NULL)");
         }
     }
 
     public void shutdown() {
-        if (connection != null) {
-            try {
-                connection.close();
-                Logger.info("Database shutdown");
-            } catch (SQLException ignored) {}
+        if (dataSource != null) {
+            dataSource.close();
+            Logger.info("Database shutdown");
         }
     }
 
     private Database() throws Exception {
-        try {
-            String url = "jdbc:sqlite:" + DB_PATH.toAbsolutePath();
-            connection = DriverManager.getConnection(url);
-            try (Statement st = connection.createStatement()) {
-                st.execute("PRAGMA journal_mode=WAL");
-            }
-            initSchema(connection);
-            Logger.info("Database initialized");
-        } catch (Exception e) {
-            throw new Exception("Failed to initialize SQLite connection", e);
+        HikariConfig config = new HikariConfig();
+        config.setJdbcUrl("jdbc:sqlite:" + DB_PATH.toAbsolutePath());
+        config.addDataSourceProperty("journal_mode", "WAL");
+        config.setMaximumPoolSize(10);
+        config.setConnectionTimeout(30000);
+
+        this.dataSource = new HikariDataSource(config);
+
+        try (Connection conn = getConnection()) {
+            initSchema(conn);
         }
+        Logger.info("Database initialized.");
     }
 
     private static class Holder {

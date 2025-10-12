@@ -1,9 +1,6 @@
 package com.github.lucasskywalker64.listener.command;
 
-import com.github.lucasskywalker64.commands.RootRegistry;
-
-import java.awt.*;
-import java.util.*;
+import com.github.lucasskywalker64.commands.CommandRegistry;
 
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
@@ -11,9 +8,9 @@ import org.jetbrains.annotations.NotNull;
 
 public class SlashCommandListener extends ListenerAdapter {
 
-    private final RootRegistry registry;
+    private final CommandRegistry registry;
 
-    public SlashCommandListener(RootRegistry registry) {
+    public SlashCommandListener(CommandRegistry registry) {
         this.registry = registry;
     }
 
