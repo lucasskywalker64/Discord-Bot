@@ -48,7 +48,7 @@ public class ReactionRoleRepository {
         }
     }
 
-    private ReactionRoleRepository() throws IOException {
+    private ReactionRoleRepository() throws SQLException {
         localReactionRoleData = new ArrayList<>();
         try (PreparedStatement ps = conn.prepareStatement(
                 "SELECT channelId, messageId, roleId, roleName, emoji FROM reaction_roles");
@@ -62,8 +62,6 @@ public class ReactionRoleRepository {
                         rs.getString(5)
                 ));
             }
-        } catch (SQLException e) {
-            throw new IOException(e);
         }
         Logger.info("Reaction role data loaded.");
     }
@@ -74,7 +72,7 @@ public class ReactionRoleRepository {
         static {
             try {
                 INSTANCE = new ReactionRoleRepository();
-            } catch (IOException e) {
+            } catch (SQLException e) {
                 throw new RuntimeException(e);
             }
         }

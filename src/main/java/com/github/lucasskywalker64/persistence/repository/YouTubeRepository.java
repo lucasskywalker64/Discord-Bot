@@ -55,7 +55,7 @@ public class YouTubeRepository {
         }
     }
 
-    private YouTubeRepository() throws IOException {
+    private YouTubeRepository() throws SQLException {
         localYouTubeData = new ArrayList<>();
         try (PreparedStatement ps = conn.prepareStatement("SELECT channel, message, name, playlistId, " +
                 "roleId, videoId, streamId FROM youtube");
@@ -71,8 +71,6 @@ public class YouTubeRepository {
                         rs.getString(7)
                 ));
             }
-        } catch (SQLException e) {
-            throw new IOException(e);
         }
         Logger.info("YouTube data loaded.");
     }
@@ -83,7 +81,7 @@ public class YouTubeRepository {
         static {
             try {
                 INSTANCE = new YouTubeRepository();
-            } catch (IOException e) {
+            } catch (SQLException e) {
                 throw new RuntimeException(e);
             }
         }

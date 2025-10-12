@@ -30,8 +30,18 @@ public class SettingsRepository {
         } catch (SQLException ignored) {}
     }
 
+    private SettingsRepository() throws SQLException {}
+
     private static class Holder {
-        private static final SettingsRepository INSTANCE = new SettingsRepository();
+        private static final SettingsRepository INSTANCE;
+
+        static {
+            try {
+                INSTANCE = new SettingsRepository();
+            } catch (SQLException e) {
+                throw new RuntimeException(e);
+            }
+        }
     }
     public static SettingsRepository getInstance() {
         return Holder.INSTANCE;

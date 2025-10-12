@@ -3,8 +3,9 @@ package com.github.lucasskywalker64;
 import com.github.lucasskywalker64.api.twitch.TwitchImpl;
 import com.github.lucasskywalker64.api.twitch.auth.TwitchOAuthService;
 import com.github.lucasskywalker64.api.youtube.YouTubeImpl;
+import com.github.lucasskywalker64.buttons.ButtonRegistry;
+import com.github.lucasskywalker64.commands.CommandRegistry;
 import com.github.lucasskywalker64.commands.CommandUtil;
-import com.github.lucasskywalker64.commands.RootRegistry;
 import com.github.lucasskywalker64.commands.general.GeneralHelp;
 import com.github.lucasskywalker64.commands.general.GeneralMemberCountAdd;
 import com.github.lucasskywalker64.commands.general.GeneralMemberCountRemove;
@@ -24,15 +25,34 @@ import com.github.lucasskywalker64.commands.shoutout.ShoutoutAdd;
 import com.github.lucasskywalker64.commands.shoutout.ShoutoutDisplay;
 import com.github.lucasskywalker64.commands.shoutout.ShoutoutRemove;
 import com.github.lucasskywalker64.commands.shoutout.ShoutoutRemoveAll;
+import com.github.lucasskywalker64.listener.button.ButtonListener;
 import com.github.lucasskywalker64.listener.command.SlashCommandListener;
+import com.github.lucasskywalker64.listener.message.MessageListener;
+import com.github.lucasskywalker64.listener.modal.ModalListener;
 import com.github.lucasskywalker64.listener.role.ReactionRoleListener;
+import com.github.lucasskywalker64.modals.ModalModule;
+import com.github.lucasskywalker64.modals.ModalRegistry;
 import com.github.lucasskywalker64.persistence.Database;
 import com.github.lucasskywalker64.persistence.repository.TwitchRepository;
+import com.github.lucasskywalker64.ticket.TicketModule;
+import com.github.lucasskywalker64.ticket.interaction.buttons.*;
+import com.github.lucasskywalker64.ticket.interaction.commands.TicketCreate;
+import com.github.lucasskywalker64.ticket.interaction.commands.TicketList;
+import com.github.lucasskywalker64.ticket.interaction.commands.admin.TicketAdminPanel;
+import com.github.lucasskywalker64.ticket.interaction.commands.admin.TicketAdminSetTranscriptVersion;
+import com.github.lucasskywalker64.ticket.interaction.commands.admin.TicketAdminSetup;
+import com.github.lucasskywalker64.ticket.interaction.commands.admin.TicketAdminUpdate;
+import com.github.lucasskywalker64.ticket.interaction.commands.mod.TicketModAddMembers;
+import com.github.lucasskywalker64.ticket.interaction.commands.mod.TicketModRemoveMember;
+import com.github.lucasskywalker64.ticket.interaction.modals.TicketCloseModal;
+import com.github.lucasskywalker64.web.WebServer;
 import io.github.cdimascio.dotenv.Dotenv;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.JDABuilder;
 import net.dv8tion.jda.api.interactions.commands.Command;
 import net.dv8tion.jda.api.requests.GatewayIntent;
+import net.dv8tion.jda.api.utils.MemberCachePolicy;
+import net.dv8tion.jda.api.utils.cache.CacheFlag;
 import org.jetbrains.annotations.NotNull;
 import org.tinylog.Logger;
 
@@ -57,6 +77,7 @@ public class BotInitializer {
     private JDA jda;
     private YouTubeImpl youTube;
     private ReactionRoleListener reactionRoleListener;
+    private TicketModule ticketModule;
 
     public BotInitializer(File botFile, ScheduledExecutorService scheduler) {
         this.botFile = botFile;
@@ -67,6 +88,8 @@ public class BotInitializer {
         setupFiles();
         jda = JDABuilder.createDefault(config.get("BOT_TOKEN"))
                 .enableIntents(GatewayIntent.GUILD_MEMBERS)
+                .setMemberCachePolicy(MemberCachePolicy.ALL)
+                .enableCache(CacheFlag.MEMBER_OVERRIDES)
                 .build();
         BotMain.setContext(new BotContext(jda, config, botFile, null));
 
@@ -94,14 +117,22 @@ public class BotInitializer {
 
         youTube = new YouTubeImpl(jda);
         reactionRoleListener = new ReactionRoleListener();
-        RootRegistry registry = newRegistry();
+        ticketModule = new TicketModule();
+        ticketModule.init();
+        BotMain.getContext().setTicketModule(ticketModule);
+        CommandRegistry registry = createCommands();
         jda.addEventListener(reactionRoleListener);
         jda.addEventListener(new SlashCommandListener(registry));
+        jda.addEventListener(new ButtonListener(createButtons()));
+        jda.addEventListener(new ModalListener(createModals()));
+        jda.addEventListener(new MessageListener());
         jda.awaitReady();
         List<Command> existingCommands = jda.getGuilds().getFirst().retrieveCommands().complete();
         if (!CommandUtil.commandListsMatch(existingCommands, registry.definitions())) {
             jda.getGuilds().getFirst().updateCommands().addCommands(registry.definitions()).queue();
         }
+        WebServer webServer = new WebServer();
+        webServer.start();
         Logger.info("Discord API ready");
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             try {
@@ -135,12 +166,20 @@ public class BotInitializer {
             } catch (IOException e) {
                 Logger.error(e);
             }
-
         }, computeNextDelay(4, 0, 0), TimeUnit.SECONDS);
     }
 
-    private @NotNull RootRegistry newRegistry() {
+    private @NotNull CommandRegistry createCommands() {
         var modules = List.of(
+                new TicketAdminSetup(),
+                new TicketAdminPanel(),
+                new TicketAdminUpdate(),
+                new TicketAdminSetTranscriptVersion(),
+                new TicketModAddMembers(),
+                new TicketModRemoveMember(),
+                new TicketCreate(),
+                new TicketList(),
+
                 new ReactionRoleAdd(reactionRoleListener),
                 new ReactionRoleRemove(reactionRoleListener),
                 new ReactionRoleDisplay(),
@@ -171,7 +210,25 @@ public class BotInitializer {
                 new GeneralPing(),
                 new GeneralHelp()
         );
-        return new RootRegistry(modules);
+        return new CommandRegistry(modules);
+    }
+
+    private @NotNull ButtonRegistry createButtons() {
+        var modules = List.of(
+                new TicketCreateButton(ticketModule.getService()),
+                new TicketCloseButton(),
+                new TicketCloseConfirmButton(ticketModule.getService()),
+                new TicketCloseReasonButton(),
+                new TicketClaimButton(ticketModule.getService())
+        );
+        return new ButtonRegistry(modules);
+    }
+
+    private @NotNull ModalRegistry createModals() {
+        List<ModalModule> modules = List.of(
+                new TicketCloseModal(ticketModule.getService())
+        );
+        return new ModalRegistry(modules);
     }
 
     private void setupFiles() throws IOException {

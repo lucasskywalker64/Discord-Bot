@@ -11,11 +11,13 @@ import org.tinylog.Logger;
 import java.util.*;
 import java.util.stream.Collectors;
 
-public class RootRegistry {
+import static com.github.lucasskywalker64.BotConstants.INTERNAL_ERROR;
+
+public class CommandRegistry {
 
     private final Map<String, Map<String, List<SubcommandModule>>> tree = new HashMap<>();
 
-    public RootRegistry(Collection<SubcommandModule> modules) {
+    public CommandRegistry(Collection<SubcommandModule> modules) {
         for (SubcommandModule module : modules) {
             tree.computeIfAbsent(module.getRootName(),
                             rootName -> new HashMap<>())
@@ -46,7 +48,8 @@ public class RootRegistry {
 
             SlashCommandData rootData = Commands.slash(root, describeRoot(root));
 
-            rootData.setDefaultPermissions(DefaultMemberPermissions.DISABLED);
+            if (!"ticket".equals(root))
+                rootData.setDefaultPermissions(DefaultMemberPermissions.DISABLED);
 
             List<SubcommandModule> ungrouped = byGroup.getOrDefault("", List.of());
             for (SubcommandModule module : ungrouped) rootData.addSubcommands(module.definition());
@@ -72,7 +75,7 @@ public class RootRegistry {
         Map<String, List<SubcommandModule>> byGroup = tree.get(root);
         if (byGroup == null) {
             Logger.error("No root handler for {}", root);
-            event.reply("Something went wrong. Please contact the developer.").setEphemeral(true).queue();
+            event.reply(INTERNAL_ERROR).setEphemeral(true).queue();
             return;
         }
 
@@ -88,7 +91,7 @@ public class RootRegistry {
                 .findFirst().orElse(null);
         if (target == null) {
             Logger.error("No subcommand '{}' (group '{}') for root {}", sub, group, root);
-            event.reply("Something went wrong. Please contact the developer").setEphemeral(true).queue();
+            event.reply(INTERNAL_ERROR).setEphemeral(true).queue();
             return;
         }
 
@@ -107,6 +110,8 @@ public class RootRegistry {
             case "notif"        -> "Manage streaming/video notifications";
             case "shoutout"     -> "Manage Twitch shoutouts";
             case "general"      -> "General utilities";
+            case "ticket"       -> "Ticket utilities";
+            case "ticket-admin" -> "Ticket administration utilities";
             default -> "Commands";
         };
     }
