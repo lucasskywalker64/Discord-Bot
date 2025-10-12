@@ -1,7 +1,7 @@
 package com.github.lucasskywalker64.ticket.service;
 
 import com.github.lucasskywalker64.ticket.persistence.TicketRepository;
-import com.github.lucasskywalker64.web.R2Uploader;
+import com.github.lucasskywalker64.web.S3Uploader;
 import net.dv8tion.jda.api.entities.Message;
 import net.dv8tion.jda.api.entities.Message.Attachment;
 
@@ -10,11 +10,11 @@ import java.util.*;
 
 public class AttachmentUploaderService {
 
-    private final R2Uploader uploader;
+    private final S3Uploader uploader;
     private final TicketRepository repository = TicketRepository.getInstance();
 
     public AttachmentUploaderService() {
-        uploader = new R2Uploader();
+        uploader = new S3Uploader();
     }
 
     public void uploadAttachmentsForTranscript(List<Message> messages, long ticketId) throws Exception {

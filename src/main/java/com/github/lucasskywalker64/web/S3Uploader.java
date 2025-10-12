@@ -14,12 +14,12 @@ import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import java.io.InputStream;
 import java.net.URI;
 
-public class R2Uploader {
+public class S3Uploader {
 
     private final S3Client client;
     private final String BUCKET_NAME;
 
-    public R2Uploader() {
+    public S3Uploader() {
         Dotenv config = BotMain.getContext().config();
         BUCKET_NAME = config.get("S3_CLOUD_BUCKET");
         String accessId = config.get("S3_CLOUD_ID");
