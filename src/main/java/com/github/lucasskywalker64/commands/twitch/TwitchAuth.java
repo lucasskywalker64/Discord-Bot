@@ -1,5 +1,6 @@
 package com.github.lucasskywalker64.commands.twitch;
 
+import com.github.lucasskywalker64.BotMain;
 import com.github.lucasskywalker64.api.twitch.auth.TwitchOAuthService;
 import com.github.lucasskywalker64.commands.SubcommandModule;
 import com.github.lucasskywalker64.persistence.repository.TwitchRepository;
@@ -13,12 +14,14 @@ import java.io.IOException;
 import java.sql.SQLException;
 import java.util.List;
 
+import static com.github.lucasskywalker64.BotConstants.INTERNAL_ERROR;
+
 public class TwitchAuth implements SubcommandModule {
 
     private final TwitchOAuthService oauth;
 
-    public TwitchAuth(TwitchOAuthService oauth) {
-        this.oauth = oauth;
+    public TwitchAuth() {
+        this.oauth = BotMain.getContext().twitchOauthService();
     }
 
     @Override
@@ -36,7 +39,7 @@ public class TwitchAuth implements SubcommandModule {
     @Override
     public void handle(SlashCommandInteractionEvent event) {
         event.deferReply(true).queue();
-        TwitchOAuthService.AuthLink link = null;
+        String link;
         try {
             if (TwitchRepository.getInstance().loadToken() != null) {
                 List<Command> commands = event.getGuild().retrieveCommands().complete();
@@ -46,17 +49,17 @@ public class TwitchAuth implements SubcommandModule {
                         .get();
                 event.getHook().sendMessage(String.format("Twitch is already authorized, if you need to re-authorize " +
                         "please revoke it first with </twitch revoke:%s", twitchCommand.getId())).queue();
+                return;
             }
-            link = oauth.createAuthorizationLink(event.getUser().getIdLong());
+            link = oauth.createAuthorizationLink();
         } catch (IOException | SQLException e) {
             Logger.error(e);
-            event.getHook().sendMessage("Internal server error. Please try again. " +
-                            "If this error persists contact the developer.").queue();
+            event.getHook().sendMessage(INTERNAL_ERROR).queue();
             return;
         }
 
         event.getHook().sendMessage("Click the button below to authorize this bot to access your Twitch account")
-                .addActionRow(Button.link(link.url(), "Authorize on Twitch"))
+                .addActionRow(Button.link(link, "Authorize on Twitch"))
                 .queue();
     }
 }

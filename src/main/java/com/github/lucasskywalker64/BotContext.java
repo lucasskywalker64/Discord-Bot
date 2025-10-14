@@ -1,6 +1,7 @@
 package com.github.lucasskywalker64;
 
 import com.github.lucasskywalker64.api.twitch.TwitchImpl;
+import com.github.lucasskywalker64.api.twitch.auth.TwitchOAuthService;
 import com.github.lucasskywalker64.ticket.TicketModule;
 import io.github.cdimascio.dotenv.Dotenv;
 import net.dv8tion.jda.api.JDA;
@@ -16,6 +17,7 @@ public class BotContext {
     private TwitchImpl twitch;
     private CompletableFuture<TwitchImpl> twitchFuture;
     private TicketModule ticketModule;
+    private TwitchOAuthService twitchOAuthService;
 
     public BotContext(JDA jda, Dotenv config, File botFile, TwitchImpl twitch) {
         this.jda = jda;
@@ -48,6 +50,10 @@ public class BotContext {
         return ticketModule;
     }
 
+    public TwitchOAuthService twitchOauthService() {
+        return twitchOAuthService;
+    }
+
     public void setTwitch(TwitchImpl twitch) {
         this.twitch = twitch;
     }
@@ -58,5 +64,9 @@ public class BotContext {
 
     public void setTicketModule(TicketModule ticketModule) {
         this.ticketModule = ticketModule;
+    }
+
+    public void setTwitchOAuthService(TwitchOAuthService twitchOAuthService) {
+        this.twitchOAuthService = twitchOAuthService;
     }
 }
