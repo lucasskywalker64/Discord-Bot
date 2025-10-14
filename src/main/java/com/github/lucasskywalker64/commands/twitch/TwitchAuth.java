@@ -1,5 +1,6 @@
 package com.github.lucasskywalker64.commands.twitch;
 
+import com.github.lucasskywalker64.BotMain;
 import com.github.lucasskywalker64.api.twitch.auth.TwitchOAuthService;
 import com.github.lucasskywalker64.commands.SubcommandModule;
 import com.github.lucasskywalker64.persistence.repository.TwitchRepository;
@@ -19,8 +20,8 @@ public class TwitchAuth implements SubcommandModule {
 
     private final TwitchOAuthService oauth;
 
-    public TwitchAuth(TwitchOAuthService oauth) {
-        this.oauth = oauth;
+    public TwitchAuth() {
+        this.oauth = BotMain.getContext().twitchOauthService();
     }
 
     @Override
@@ -38,7 +39,7 @@ public class TwitchAuth implements SubcommandModule {
     @Override
     public void handle(SlashCommandInteractionEvent event) {
         event.deferReply(true).queue();
-        TwitchOAuthService.AuthLink link;
+        String link;
         try {
             if (TwitchRepository.getInstance().loadToken() != null) {
                 List<Command> commands = event.getGuild().retrieveCommands().complete();
@@ -50,7 +51,7 @@ public class TwitchAuth implements SubcommandModule {
                         "please revoke it first with </twitch revoke:%s", twitchCommand.getId())).queue();
                 return;
             }
-            link = oauth.createAuthorizationLink(event.getUser().getIdLong());
+            link = oauth.createAuthorizationLink();
         } catch (IOException | SQLException e) {
             Logger.error(e);
             event.getHook().sendMessage(INTERNAL_ERROR).queue();
@@ -58,7 +59,7 @@ public class TwitchAuth implements SubcommandModule {
         }
 
         event.getHook().sendMessage("Click the button below to authorize this bot to access your Twitch account")
-                .addActionRow(Button.link(link.url(), "Authorize on Twitch"))
+                .addActionRow(Button.link(link, "Authorize on Twitch"))
                 .queue();
     }
 }

@@ -1,6 +1,8 @@
 package com.github.lucasskywalker64.web;
 
 import com.github.lucasskywalker64.BotMain;
+import com.github.lucasskywalker64.api.twitch.TwitchImpl;
+import com.github.lucasskywalker64.api.twitch.auth.TwitchOAuthService;
 import com.github.lucasskywalker64.persistence.Database;
 import com.github.lucasskywalker64.ticket.model.Ticket;
 import com.github.lucasskywalker64.ticket.persistence.TicketRepository;
@@ -28,6 +30,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.sql.SQLException;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -36,16 +39,22 @@ import java.util.concurrent.TimeUnit;
 
 public class WebServer {
 
+    private final String TWITCH_LOGIN_PATH;
+    private final String TWITCH_REDIRECT_PATH;
+    private final String ENCODED_TWITCH_REDIRECT_URI;
+    private final String TWITCH_CLIENT_ID;
+    private final String TWITCH_SCOPES;
     private final String DISCORD_LOGIN_PATH;
     private final String DISCORD_REDIRECT_PATH;
     private final String ENCODED_DISCORD_REDIRECT_URI;
+    private final String DISCORD_CLIENT_ID;
+    private final String DISCORD_CLIENT_SECRET;
     private final String TICKETS_BASE_PATH;
     private final String TICKETS_TRANSCRIPTS_PATH;
     private final String TICKETS_TRANSCRIPTS_ATTACHMENTS_PATH;
-    private final String DISCORD_CLIENT_ID;
-    private final String DISCORD_CLIENT_SECRET;
     private final int port;
 
+    private final TwitchOAuthService twitchOAuthService;
     private final TicketRepository ticketRepository;
     private final TicketService ticketService;
 
@@ -57,20 +66,29 @@ public class WebServer {
         Dotenv config = BotMain.getContext().config();
         String serverBaseUrl = config.get("SERVER_BASE_URL");
         port = Integer.parseInt(config.get("SERVER_PORT"));
+        TWITCH_LOGIN_PATH = config.get("TWITCH_LOGIN_PATH");
+        TWITCH_REDIRECT_PATH = config.get("TWITCH_REDIRECT_PATH");
+        TWITCH_CLIENT_ID = config.get("TWITCH_CLIENT_ID");
+        TWITCH_SCOPES = config.get("TWITCH_SCOPE");
         DISCORD_LOGIN_PATH = config.get("DISCORD_LOGIN_PATH");
         DISCORD_REDIRECT_PATH = config.get("DISCORD_REDIRECT_PATH");
+        String twitchRedirectUri;
         String discordRedirectUri;
         if ("prod".equals(System.getProperty("app.env", "prod"))) {
+            twitchRedirectUri = serverBaseUrl + TWITCH_REDIRECT_PATH;
             discordRedirectUri = serverBaseUrl + DISCORD_REDIRECT_PATH;
         } else {
+            twitchRedirectUri = serverBaseUrl + ":" + port + TWITCH_REDIRECT_PATH;
             discordRedirectUri = serverBaseUrl + ":" + port + DISCORD_REDIRECT_PATH;
         }
+        ENCODED_TWITCH_REDIRECT_URI = URLEncoder.encode(twitchRedirectUri, StandardCharsets.UTF_8);
         ENCODED_DISCORD_REDIRECT_URI = URLEncoder.encode(discordRedirectUri, StandardCharsets.UTF_8);
+        DISCORD_CLIENT_ID = config.get("DISCORD_CLIENT_ID");
+        DISCORD_CLIENT_SECRET = config.get("DISCORD_CLIENT_SECRET");
         TICKETS_BASE_PATH = config.get("TICKETS_BASE_PATH");
         TICKETS_TRANSCRIPTS_PATH = TICKETS_BASE_PATH + "/transcripts/{id}";
         TICKETS_TRANSCRIPTS_ATTACHMENTS_PATH = TICKETS_TRANSCRIPTS_PATH + "/attachments";
-        DISCORD_CLIENT_ID = config.get("DISCORD_CLIENT_ID");
-        DISCORD_CLIENT_SECRET = config.get("DISCORD_CLIENT_SECRET");
+        twitchOAuthService = BotMain.getContext().twitchOauthService();
         ticketRepository = TicketRepository.getInstance();
         ticketService = BotMain.getContext().ticketModule().getService();
         httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
@@ -90,7 +108,7 @@ public class WebServer {
                 sessionHandler.setHttpOnly(true);
                 sessionHandler.setSecureRequestOnly(true);
                 sessionHandler.setSameSite(SameSite.LAX);
-                sessionHandler.getSessionCookieConfig().setMaxAge((int) TimeUnit.DAYS.toSeconds(365));
+                sessionHandler.getSessionCookieConfig().setMaxAge((int) TimeUnit.DAYS.toSeconds(90));
                 sessionHandler.setSessionIdManager(new DefaultSessionIdManager(new Server(), new SecureRandom()));
 
                 SessionCache sessionCache = new DefaultSessionCache(sessionHandler);
@@ -112,12 +130,70 @@ public class WebServer {
             });
         }).start(port);
 
+        server.get(TWITCH_LOGIN_PATH, this::handleTwitchLogin);
+        server.get(TWITCH_REDIRECT_PATH, this::handleTwitchCallback);
+
         server.get(DISCORD_LOGIN_PATH, this::handleDiscordLogin);
         server.get(DISCORD_REDIRECT_PATH, this::handleDiscordCallback);
 
         server.get(TICKETS_BASE_PATH, this::handleTicketList);
         server.get(TICKETS_TRANSCRIPTS_PATH, this::handleTranscriptRequest);
         server.get(TICKETS_TRANSCRIPTS_ATTACHMENTS_PATH, this::handleTranscriptAttachments);
+    }
+
+    private void handleTwitchLogin(Context ctx) {
+        String state = UUID.randomUUID().toString();
+        ctx.sessionAttribute("state", new ExpiringSessionAttribute(state, TimeUnit.MINUTES.toSeconds(10)));
+
+        String twitchAuthUrl = "https://id.twitch.tv/oauth2/authorize" +
+                "?client_id=" + TWITCH_CLIENT_ID +
+                "&redirect_uri=" + ENCODED_TWITCH_REDIRECT_URI +
+                "&response_type=code" +
+                "&scope=" + URLEncoder.encode(TWITCH_SCOPES, StandardCharsets.UTF_8) +
+                "&state=" + state;
+        ctx.redirect(twitchAuthUrl);
+    }
+
+    private void handleTwitchCallback(Context ctx) {
+        String code = ctx.queryParam("code");
+        String state = ctx.queryParam("state");
+        ExpiringSessionAttribute expectedState = ctx.sessionAttribute("state");
+        ctx.req().getSession().removeAttribute("state");
+
+        if (state == null || expectedState == null) {
+            ctx.status(HttpStatus.BAD_REQUEST).html("<h1>400 Bad Request</h1>" +
+                    "<p>Missing parameters.</p>");
+            return;
+        }
+
+        if (expectedState.isExpired()) {
+            ctx.status(HttpStatus.BAD_REQUEST).html("<h1>400 Bad Request</h1>" +
+                    "<p>Login flow expired. Please try again.</p>");
+            return;
+        }
+
+        if (!state.equals(expectedState.value)) {
+            ctx.status(HttpStatus.BAD_REQUEST).html("<h1>400 Bad Request</h1>" +
+                    "<p>State mismatch: Invalid state parameter.</p>");
+            return;
+        }
+
+        if (code == null) {
+            ctx.status(HttpStatus.BAD_REQUEST).html("<h1>Error: Authorization failed.</h1>");
+            return;
+        }
+
+        try {
+            twitchOAuthService.onOAuthCallback(code);
+            BotMain.getContext().setTwitch(new TwitchImpl(BotMain.getContext().jda()));
+        } catch (Exception e) {
+            Logger.error(e);
+            ctx.status(HttpStatus.INTERNAL_SERVER_ERROR).html("<h1>500 Internal Server Error</h1>" +
+                    "<p>Please try again. If this error persists contact the developer.</p>");
+            return;
+        }
+        ctx.status(HttpStatus.OK).html("<h1>Authorization successful</h1>" +
+                "<p>You can now leave this page.</p>");
     }
 
     private void handleDiscordLogin(Context ctx) {
@@ -332,6 +408,17 @@ public class WebServer {
             return null;
         }
         return gson.fromJson(userResponse.body(), DiscordUser.class);
+    }
+
+    private record ExpiringSessionAttribute(String value, long expiryTimestamp) {
+        public ExpiringSessionAttribute(String value, long expiryTimestamp) {
+            this.value = value;
+            this.expiryTimestamp = Instant.now().getEpochSecond() + expiryTimestamp;
+        }
+
+        public boolean isExpired() {
+                return Instant.now().getEpochSecond() > expiryTimestamp;
+        }
     }
 
     private record DiscordTokenResponse(

@@ -1,6 +1,5 @@
 package com.github.lucasskywalker64.api.twitch;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.github.lucasskywalker64.BotMain;
 import com.github.lucasskywalker64.api.twitch.auth.TwitchOAuthService;
 import com.github.lucasskywalker64.api.twitch.auth.TwitchOAuthService.TokenBundle;
@@ -20,7 +19,6 @@ import com.github.twitch4j.helix.domain.Game;
 import com.github.twitch4j.helix.domain.Video;
 
 import java.io.IOException;
-import java.sql.SQLException;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.Executors;
@@ -300,7 +298,7 @@ public class TwitchImpl {
         Logger.info("Starting Twitch API...");
 
         this.discordAPI = discordAPI;
-        this.oAuthService = new TwitchOAuthService();
+        this.oAuthService = BotMain.getContext().twitchOauthService();
 
         this.tokenData = twitchRepo.loadToken();
 

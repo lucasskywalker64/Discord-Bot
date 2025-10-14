@@ -72,7 +72,6 @@ public class BotInitializer {
 
     private final File botFile;
     private final ScheduledExecutorService scheduler;
-    private TwitchOAuthService oAuthService;
     private Dotenv config;
     private JDA jda;
     private YouTubeImpl youTube;
@@ -93,7 +92,8 @@ public class BotInitializer {
                 .build();
         BotMain.setContext(new BotContext(jda, config, botFile, null));
 
-        oAuthService = new TwitchOAuthService();
+        BotMain.getContext().setTwitchOAuthService(new TwitchOAuthService());
+
         CompletableFuture<TwitchImpl> twitchFuture;
         if (TwitchRepository.getInstance().loadToken() != null) {
             ExecutorService executor = Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("twitch-init").factory());
@@ -188,8 +188,8 @@ public class BotInitializer {
                 new TwitchEdit(),
                 new TwitchRemove(),
                 new TwitchDisplay(),
-                new TwitchAuth(oAuthService),
-                new TwitchRevoke(oAuthService),
+                new TwitchAuth(),
+                new TwitchRevoke(),
 
                 new YouTubeAdd(youTube),
                 new YouTubeEdit(),

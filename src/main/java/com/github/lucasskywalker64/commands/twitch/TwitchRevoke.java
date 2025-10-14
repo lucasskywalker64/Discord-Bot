@@ -1,5 +1,6 @@
 package com.github.lucasskywalker64.commands.twitch;
 
+import com.github.lucasskywalker64.BotMain;
 import com.github.lucasskywalker64.api.twitch.auth.TwitchOAuthService;
 import com.github.lucasskywalker64.commands.SubcommandModule;
 import com.github.lucasskywalker64.persistence.data.TokenData;
@@ -14,8 +15,8 @@ public class TwitchRevoke implements SubcommandModule {
     private final TwitchRepository repository = TwitchRepository.getInstance();
     private final TwitchOAuthService oAuthService;
 
-    public TwitchRevoke(TwitchOAuthService oAuthService) {
-        this.oAuthService = oAuthService;
+    public TwitchRevoke() {
+        this.oAuthService = BotMain.getContext().twitchOauthService();
     }
 
     @Override
