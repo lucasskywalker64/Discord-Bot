@@ -155,31 +155,13 @@ public class WebServer {
     }
 
     private void handleTwitchCallback(Context ctx) {
+        if (stateIsInvalid(ctx))
+            return;
+
         String code = ctx.queryParam("code");
-        String state = ctx.queryParam("state");
-        ExpiringSessionAttribute expectedState = ctx.sessionAttribute("state");
-        ctx.req().getSession().removeAttribute("state");
-
-        if (state == null || expectedState == null) {
-            ctx.status(HttpStatus.BAD_REQUEST).html("<h1>400 Bad Request</h1>" +
-                    "<p>Missing parameters.</p>");
-            return;
-        }
-
-        if (expectedState.isExpired()) {
-            ctx.status(HttpStatus.BAD_REQUEST).html("<h1>400 Bad Request</h1>" +
-                    "<p>Login flow expired. Please try again.</p>");
-            return;
-        }
-
-        if (!state.equals(expectedState.value)) {
-            ctx.status(HttpStatus.BAD_REQUEST).html("<h1>400 Bad Request</h1>" +
-                    "<p>State mismatch: Invalid state parameter.</p>");
-            return;
-        }
 
         if (code == null) {
-            ctx.status(HttpStatus.BAD_REQUEST).html("<h1>Error: Authorization failed.</h1>");
+            ctx.status(400).html("<h1>Error: Authorization failed.</h1>");
             return;
         }
 
@@ -198,7 +180,7 @@ public class WebServer {
 
     private void handleDiscordLogin(Context ctx) {
         String state = UUID.randomUUID().toString();
-        ctx.sessionAttribute("state", state);
+        ctx.sessionAttribute("state", new ExpiringSessionAttribute(state, TimeUnit.MINUTES.toSeconds(10)));
 
         String redirectPath = ctx.queryParam("redirect_path");
         if (redirectPath != null) {
@@ -213,22 +195,15 @@ public class WebServer {
     }
 
     private void handleDiscordCallback(Context ctx) throws IOException, InterruptedException {
-        String code = ctx.queryParam("code");
-        String state = ctx.queryParam("state");
-        String expectedState = ctx.sessionAttribute("state");
-
-        if (state == null || !state.equals(expectedState)) {
-            ctx.status(HttpStatus.FORBIDDEN).html("<h1>403 Forbidden</h1>" +
-                    "<p>Invalid state parameter. Authentification failed.</p>");
+        if (stateIsInvalid(ctx))
             return;
-        }
-        ctx.sessionAttribute("state", null);
+
+        String code = ctx.queryParam("code");
 
         if (code == null) {
             ctx.status(400).html("<h1>Error: Authorization failed.</h1>");
             return;
         }
-
 
         String body =
                 "client_id=" + DISCORD_CLIENT_ID +
@@ -259,6 +234,31 @@ public class WebServer {
             ctx.sessionAttribute("redirect_path", null);
             ctx.redirect(redirectPath);
         } else ctx.html("<h1>Login successful!</h1>");
+    }
+
+    private static boolean stateIsInvalid(Context ctx) {
+        String state = ctx.queryParam("state");
+        ExpiringSessionAttribute expectedState = ctx.sessionAttribute("state");
+        ctx.req().getSession().removeAttribute("state");
+
+        if (state == null || expectedState == null) {
+            ctx.status(HttpStatus.BAD_REQUEST).html("<h1>400 Bad Request</h1>" +
+                    "<p>Missing state parameter.</p>");
+            return true;
+        }
+
+        if (expectedState.isExpired()) {
+            ctx.status(HttpStatus.BAD_REQUEST).html("<h1>400 Bad Request</h1>" +
+                    "<p>Login flow expired. Please try again.</p>");
+            return true;
+        }
+
+        if (!state.equals(expectedState.value)) {
+            ctx.status(HttpStatus.BAD_REQUEST).html("<h1>400 Bad Request</h1>" +
+                    "<p>State mismatch: Invalid state parameter.</p>");
+            return true;
+        }
+        return false;
     }
 
     private DiscordTokenResponse refreshDiscordToken(String refreshToken) throws IOException, InterruptedException {
