@@ -1,6 +1,5 @@
 package com.github.lucasskywalker64.persistence;
 
-import com.github.lucasskywalker64.BotMain;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import org.tinylog.Logger;
@@ -12,7 +11,7 @@ import java.sql.*;
 
 public final class Database {
 
-    private static final Path DB_PATH = Paths.get(BotMain.getContext().botFile().getParent(),
+    private static final Path DB_PATH = Paths.get(System.getProperty("user.dir"),
             "bot_files", "bot.db");
     private final HikariDataSource dataSource;
 
@@ -115,6 +114,7 @@ public final class Database {
     }
 
     private Database() throws Exception {
+        Logger.info(DB_PATH);
         HikariConfig config = new HikariConfig();
         config.setJdbcUrl("jdbc:sqlite:" + DB_PATH.toAbsolutePath());
         config.addDataSourceProperty("journal_mode", "WAL");
