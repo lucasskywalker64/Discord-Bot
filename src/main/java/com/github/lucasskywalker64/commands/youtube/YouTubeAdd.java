@@ -54,7 +54,7 @@ public class YouTubeAdd implements SubcommandModule {
                     ""
             );
 
-            if (!repo.loadAll().contains(data)) {
+            if (repo.loadAll().contains(data)) {
                 event.getHook().sendMessage(String.format(
                         "The user %s is already in the list.", event.getOption("name").getAsString())).queue();
                 return;
