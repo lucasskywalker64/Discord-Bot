@@ -15,6 +15,7 @@ import gg.jte.resolve.DirectoryCodeResolver;
 import net.dv8tion.jda.api.entities.*;
 import net.dv8tion.jda.api.entities.channel.middleman.MessageChannel;
 
+import java.io.File;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.List;
@@ -29,7 +30,7 @@ public class TranscriptService {
         if ("prod".equals(System.getProperty("app.env", "prod"))) {
             templateEngine = TemplateEngine.createPrecompiled(Path.of("jte-classes"), ContentType.Html);
         } else {
-            CodeResolver codeResolver = new DirectoryCodeResolver(Path.of("src/main/jte"));
+            CodeResolver codeResolver = new DirectoryCodeResolver(Path.of(new File(System.getProperty("user.dir")).getParent(),"src/main/jte"));
             templateEngine = TemplateEngine.create(codeResolver, ContentType.Html);
         }
         objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());

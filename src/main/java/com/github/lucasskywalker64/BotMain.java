@@ -5,7 +5,6 @@ import com.github.lucasskywalker64.persistence.repository.SettingsRepository;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.exceptions.InvalidTokenException;
 
-import java.io.File;
 import java.io.IOException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -17,9 +16,6 @@ import org.tinylog.Logger;
 @SuppressWarnings({"DataFlowIssue"})
 public class BotMain {
 
-    private static final File botFile = new File(BotMain.class.getProtectionDomain()
-            .getCodeSource()
-            .getLocation().getPath());
     private static final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2);
     private static ScheduledFuture<?> memberCountFuture;
     private static String channel;
@@ -58,7 +54,7 @@ public class BotMain {
         long startTime = System.nanoTime();
         Logger.info("Starting Discord API...");
         try {
-            BotInitializer init = new BotInitializer(botFile, scheduler);
+            BotInitializer init = new BotInitializer(scheduler);
             init.start();
             jda = context.jda();
             scheduleUpdateMemberCount();

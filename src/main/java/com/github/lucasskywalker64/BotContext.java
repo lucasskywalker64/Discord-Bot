@@ -6,23 +6,20 @@ import com.github.lucasskywalker64.ticket.TicketModule;
 import io.github.cdimascio.dotenv.Dotenv;
 import net.dv8tion.jda.api.JDA;
 
-import java.io.File;
 import java.util.concurrent.CompletableFuture;
 
 public class BotContext {
 
     private final JDA jda;
     private final Dotenv config;
-    private final File botFile;
     private TwitchImpl twitch;
     private CompletableFuture<TwitchImpl> twitchFuture;
     private TicketModule ticketModule;
     private TwitchOAuthService twitchOAuthService;
 
-    public BotContext(JDA jda, Dotenv config, File botFile, TwitchImpl twitch) {
+    public BotContext(JDA jda, Dotenv config, TwitchImpl twitch) {
         this.jda = jda;
         this.config = config;
-        this.botFile = botFile;
         this.twitch = twitch;
     }
 
@@ -32,10 +29,6 @@ public class BotContext {
 
     public Dotenv config() {
         return config;
-    }
-
-    public File botFile() {
-        return botFile;
     }
 
     public TwitchImpl twitch() {

@@ -70,7 +70,7 @@ import java.util.concurrent.*;
 @SuppressWarnings("ResultOfMethodCallIgnored")
 public class BotInitializer {
 
-    private final File botFile;
+    private final File workingDir;
     private final ScheduledExecutorService scheduler;
     private Dotenv config;
     private JDA jda;
@@ -78,8 +78,8 @@ public class BotInitializer {
     private ReactionRoleListener reactionRoleListener;
     private TicketModule ticketModule;
 
-    public BotInitializer(File botFile, ScheduledExecutorService scheduler) {
-        this.botFile = botFile;
+    public BotInitializer(ScheduledExecutorService scheduler) {
+        this.workingDir = new File(System.getProperty("user.dir"));
         this.scheduler = scheduler;
     }
 
@@ -90,7 +90,7 @@ public class BotInitializer {
                 .setMemberCachePolicy(MemberCachePolicy.ALL)
                 .enableCache(CacheFlag.MEMBER_OVERRIDES)
                 .build();
-        BotMain.setContext(new BotContext(jda, config, botFile, null));
+        BotMain.setContext(new BotContext(jda, config, null));
 
         BotMain.getContext().setTwitchOAuthService(new TwitchOAuthService());
 
@@ -151,7 +151,7 @@ public class BotInitializer {
                 jda.shutdown();
                 jda.awaitShutdown(3, TimeUnit.SECONDS);
                 Database.getInstance().shutdown();
-                Files.deleteIfExists(Path.of(botFile.getParentFile() + "/nohup.out"));
+                Files.deleteIfExists(Path.of(workingDir.getParentFile() + "/nohup.out"));
             } catch (InterruptedException | IOException e) {
                 throw new RuntimeException(e);
             }
@@ -159,8 +159,8 @@ public class BotInitializer {
         scheduler.schedule(() -> {
             try {
                 ProcessBuilder restartBuilder = new ProcessBuilder("bash", "-c", "sleep 10 && "
-                        + "nohup java -jar " + botFile.getName() + " > nohup.out 2>&1");
-                restartBuilder.directory(botFile.getParentFile());
+                        + "nohup java -jar " + workingDir.getName() + " > nohup.out 2>&1");
+                restartBuilder.directory(workingDir.getParentFile());
                 restartBuilder.start();
                 System.exit(0);
             } catch (IOException e) {
@@ -232,7 +232,7 @@ public class BotInitializer {
     }
 
     private void setupFiles() throws IOException {
-        File botFiles = new File(botFile.getParentFile(), "bot_files");
+        File botFiles = new File(workingDir, "bot_files");
         if (!botFiles.exists()) {
             botFiles.mkdirs();
         }
