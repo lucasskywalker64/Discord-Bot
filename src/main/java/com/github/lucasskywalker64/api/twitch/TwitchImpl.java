@@ -208,9 +208,9 @@ public class TwitchImpl {
                                         embedBuilder.build())
                                 .setActionRow(Button.link(lastVod.getUrl(), "Watch VOD"))).queue();
                 Logger.info("Announcement updated");
-            }
-            Logger.error("Failed to locate %s in the data list " +
-                    "or we didn't yet catch a live event from this channel.", event.getChannel().getName());
+            } else
+                Logger.error("Failed to locate {} in the data list " +
+                        "or we didn't yet catch a live event from this channel.", event.getChannel().getName());
         } catch (Exception e) {
             Logger.error(e);
         }
