@@ -8,5 +8,6 @@ public record TranscriptData(
         String channelName,
         List<TranscriptMessage> messages,
         String ticketId,
+        String guildId,
         MarkdownService markdownService
 ) {}
