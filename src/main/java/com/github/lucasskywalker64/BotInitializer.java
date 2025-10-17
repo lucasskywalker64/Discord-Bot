@@ -151,22 +151,11 @@ public class BotInitializer {
                 jda.shutdown();
                 jda.awaitShutdown(3, TimeUnit.SECONDS);
                 Database.getInstance().shutdown();
-                Files.deleteIfExists(Path.of(workingDir.getParentFile() + "/nohup.out"));
             } catch (InterruptedException | IOException e) {
                 throw new RuntimeException(e);
             }
         }));
-        scheduler.schedule(() -> {
-            try {
-                ProcessBuilder restartBuilder = new ProcessBuilder("bash", "-c", "sleep 10 && "
-                        + "nohup java -jar " + workingDir.getName() + " > nohup.out 2>&1");
-                restartBuilder.directory(workingDir.getParentFile());
-                restartBuilder.start();
-                System.exit(0);
-            } catch (IOException e) {
-                Logger.error(e);
-            }
-        }, computeNextDelay(4, 0, 0), TimeUnit.SECONDS);
+        scheduler.schedule(() -> System.exit(1), computeNextDelay(4, 0, 0), TimeUnit.SECONDS);
     }
 
     private @NotNull CommandRegistry createCommands() {
