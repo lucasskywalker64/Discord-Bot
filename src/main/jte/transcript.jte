@@ -8,7 +8,7 @@
 <head>
     <title>Transcript for #${data.channelName()}</title>
     <meta charset="UTF-8">
-    <meta name="version" content="1.0.0">
+    <meta name="version" content="1.0.1">
     <link rel="icon" type="image/png" href="/icons/transcript-white.png" media="(prefers-color-scheme: dark)">
     <link rel="icon" type="image/png" href="/icons/transcript-black.png" media="(prefers-color-scheme: light)">
     <link rel="stylesheet" href="/css/transcript.css">
@@ -41,7 +41,7 @@
             @endfor
 
             @for(var attachment : msg.attachments)
-                !{String attachmentKey = String.format("ticket-%s/%s-%s", data.ticketId(), attachment.id(), attachment.fileName());}
+                !{String attachmentKey = String.format("guild-%s/ticket-%s/%s-%s", data.guildId(), data.ticketId(), attachment.id(), attachment.fileName());}
                 !{String fileSize;}
                 @if(attachment.size() >= 1_048_576)
                     !{fileSize = String.format("%d MB", attachment.size() / 1_048_576);}

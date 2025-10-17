@@ -23,7 +23,7 @@ public class AttachmentUploaderService {
         for (Message message : messages) {
             for (Attachment attachment : message.getAttachments()) {
                 String sanitizedFileName = attachment.getFileName().replaceAll("[^a-zA-Z0-9_.-]", "_");
-                String key = String.format("ticket-%d/%s-%s", ticketId, attachment.getId(), sanitizedFileName);
+                String key = String.format("guild-%d/ticket-%d/%s-%s", message.getGuild().getIdLong(), ticketId, attachment.getId(), sanitizedFileName);
 
                 if (!keys.add(key)) continue;
 

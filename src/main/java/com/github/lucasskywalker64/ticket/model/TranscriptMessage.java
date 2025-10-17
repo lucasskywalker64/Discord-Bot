@@ -16,6 +16,7 @@ public class TranscriptMessage {
     public String content;
     public List<TranscriptEmbed> embeds;
     public List<TranscriptAttachment> attachments;
+    public String guildId;
 
     public TranscriptMessage(Message message) {
         channelName = message.getChannel().getName();
@@ -30,5 +31,6 @@ public class TranscriptMessage {
         attachments = message.getAttachments().stream()
                 .map(TranscriptAttachment::new)
                 .toList();
+        guildId = message.getGuild().getId();
     }
 }

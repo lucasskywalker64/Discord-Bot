@@ -94,22 +94,25 @@ public class TranscriptService {
     private TranscriptResult buildTranscriptData(List<?> messages, String channelName) throws JsonProcessingException {
         List<TranscriptMessage> transcriptMessages;
         boolean isMessages = false;
+        String guildId;
         if (messages.getFirst() instanceof Message) {
             transcriptMessages = messages.stream()
                     .map(Message.class::cast)
                     .map(TranscriptMessage::new)
                     .toList();
             isMessages = true;
+            guildId = ((Message) messages.getFirst()).getGuildId();
         } else {
             transcriptMessages = messages.stream()
                     .map(TranscriptMessage.class::cast)
                     .toList();
+            guildId = ((TranscriptMessage) messages.getFirst()).guildId;
         }
 
         String json = objectMapper.writeValueAsString(transcriptMessages);
 
         String ticketId = channelName.substring(channelName.indexOf("-") + 1);
-        TranscriptData data = new TranscriptData(channelName, transcriptMessages, ticketId, new MarkdownService());
+        TranscriptData data = new TranscriptData(channelName, transcriptMessages, ticketId, guildId, new MarkdownService());
         StringOutput out = new StringOutput();
         templateEngine.render("transcript.jte", data, out);
         if (isMessages)
