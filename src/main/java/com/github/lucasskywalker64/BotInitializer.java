@@ -115,7 +115,8 @@ public class BotInitializer {
         }
         BotMain.getContext().setTwitchFuture(twitchFuture);
 
-        youTube = new YouTubeImpl(jda);
+        youTube = new YouTubeImpl();
+        BotMain.getContext().setYouTube(youTube);
         reactionRoleListener = new ReactionRoleListener();
         ticketModule = new TicketModule();
         ticketModule.init();
@@ -151,7 +152,7 @@ public class BotInitializer {
                 jda.shutdown();
                 jda.awaitShutdown(3, TimeUnit.SECONDS);
                 Database.getInstance().shutdown();
-            } catch (InterruptedException | IOException e) {
+            } catch (Exception e) {
                 throw new RuntimeException(e);
             }
         }));

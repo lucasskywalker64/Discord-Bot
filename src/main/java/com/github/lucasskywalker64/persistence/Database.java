@@ -26,13 +26,15 @@ public final class Database {
     private void initSchema(Connection conn) throws SQLException {
         try (Statement st = conn.createStatement()) {
             st.executeUpdate("CREATE TABLE IF NOT EXISTS youtube (" +
+                    "channelId TEXT NOT NULL, " +
+                    "name TEXT NOT NULL, " +
+                    "guildId TEXT NOT NULL, " +
                     "channel TEXT NOT NULL, " +
                     "message TEXT NOT NULL, " +
-                    "name TEXT NOT NULL, " +
-                    "playlistId TEXT NOT NULL PRIMARY KEY, " +
                     "roleId TEXT NOT NULL, " +
-                    "videoId TEXT, " +
-                    "streamId TEXT) ");
+                    "secret TEXT NOT NULL, " +
+                    "expirationTime INTEGER NOT NULL, " +
+                    "primary key (channelId, guildId))");
 
             st.executeUpdate("CREATE TABLE IF NOT EXISTS twitch (" +
                     "channel TEXT NOT NULL, " +

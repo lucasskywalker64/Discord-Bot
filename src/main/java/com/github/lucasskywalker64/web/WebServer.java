@@ -1,9 +1,12 @@
 package com.github.lucasskywalker64.web;
 
+import com.github.lucasskywalker64.BotContext;
 import com.github.lucasskywalker64.BotMain;
 import com.github.lucasskywalker64.api.twitch.TwitchImpl;
 import com.github.lucasskywalker64.api.twitch.auth.TwitchOAuthService;
+import com.github.lucasskywalker64.api.youtube.YouTubeImpl;
 import com.github.lucasskywalker64.persistence.Database;
+import com.github.lucasskywalker64.persistence.repository.YouTubeRepository;
 import com.github.lucasskywalker64.ticket.model.Ticket;
 import com.github.lucasskywalker64.ticket.persistence.TicketRepository;
 import com.github.lucasskywalker64.ticket.service.TicketService;
@@ -20,6 +23,8 @@ import org.eclipse.jetty.server.session.*;
 import org.jetbrains.annotations.Nullable;
 import org.tinylog.Logger;
 
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
@@ -27,14 +32,16 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.security.InvalidKeyException;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.sql.SQLException;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 public class WebServer {
@@ -52,18 +59,23 @@ public class WebServer {
     private final String TICKETS_BASE_PATH;
     private final String TICKETS_TRANSCRIPTS_PATH;
     private final String TICKETS_TRANSCRIPTS_ATTACHMENTS_PATH;
+    private final String YOUTUBE_CALLBACK_PATH;
     private final int port;
 
     private final TwitchOAuthService twitchOAuthService;
+    private final YouTubeRepository youTubeRepository;
+    private final YouTubeImpl youTube;
     private final TicketRepository ticketRepository;
     private final TicketService ticketService;
 
     private final HttpClient httpClient;
     private final PresignedUrlGenerator presignedUrlGenerator;
     private final Gson gson;
+    private final Map<String, CompletableFuture<Integer>> pendingChallenges;
 
     public WebServer() {
-        Dotenv config = BotMain.getContext().config();
+        BotContext context = BotMain.getContext();
+        Dotenv config = context.config();
         String serverBaseUrl = config.get("SERVER_BASE_URL");
         port = Integer.parseInt(config.get("SERVER_PORT"));
         TWITCH_LOGIN_PATH = config.get("TWITCH_LOGIN_PATH");
@@ -88,12 +100,16 @@ public class WebServer {
         TICKETS_BASE_PATH = config.get("TICKETS_BASE_PATH");
         TICKETS_TRANSCRIPTS_PATH = TICKETS_BASE_PATH + "/transcripts/{id}";
         TICKETS_TRANSCRIPTS_ATTACHMENTS_PATH = TICKETS_TRANSCRIPTS_PATH + "/attachments";
-        twitchOAuthService = BotMain.getContext().twitchOauthService();
+        YOUTUBE_CALLBACK_PATH = config.get("YOUTUBE_CALLBACK_PATH");
+        twitchOAuthService = context.twitchOauthService();
+        youTubeRepository = YouTubeRepository.getInstance();
+        youTube = context.youTube();
         ticketRepository = TicketRepository.getInstance();
-        ticketService = BotMain.getContext().ticketModule().getService();
+        ticketService = context.ticketModule().getService();
         httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
         presignedUrlGenerator = new PresignedUrlGenerator();
         gson = new Gson();
+        pendingChallenges = context.pendingChallenges();
     }
 
     public void start() {
@@ -139,6 +155,9 @@ public class WebServer {
         server.get(TICKETS_BASE_PATH, this::handleTicketList);
         server.get(TICKETS_TRANSCRIPTS_PATH, this::handleTranscriptRequest);
         server.get(TICKETS_TRANSCRIPTS_ATTACHMENTS_PATH, this::handleTranscriptAttachments);
+
+        server.get(YOUTUBE_CALLBACK_PATH, this::youTubeChallengeHandler);
+        server.post(YOUTUBE_CALLBACK_PATH, this::youTubeWebhookHandler);
     }
 
     private void handleTwitchLogin(Context ctx) {
@@ -338,6 +357,87 @@ public class WebServer {
             presignedUrls.put(attachmentKey, url);
         }
         ctx.json(presignedUrls);
+    }
+
+    private void youTubeChallengeHandler(Context ctx) {
+        String challenge = ctx.queryParam("hub.challenge");
+        String token = ctx.queryParam("token");
+
+        if (challenge == null) {
+            ctx.status(HttpStatus.NOT_FOUND).result("No challenge parameter found.");
+            return;
+        }
+
+        CompletableFuture<Integer> future = null;
+        if (token != null) {
+            future = pendingChallenges.remove(token);
+        }
+
+        String leaseSecondsStr = ctx.queryParam("hub.lease_seconds");
+
+        if (future == null) {
+            Logger.warn("Received challenge for an unknown or timed-out token: " + token);
+            ctx.status(HttpStatus.OK).result(challenge);
+            return;
+        }
+
+        if (leaseSecondsStr == null) {
+            future.completeExceptionally(new RuntimeException("No lease seconds provided"));
+            return;
+        }
+
+        try {
+            int leaseSeconds = Integer.parseInt(leaseSecondsStr);
+            future.complete(leaseSeconds);
+        } catch (NumberFormatException e) {
+            future.completeExceptionally(e);
+        }
+
+        ctx.status(HttpStatus.OK).result(challenge);
+    }
+
+    private void youTubeWebhookHandler(Context ctx) {
+        String hubSignature = ctx.header("X-Hub-Signature");
+        String channelId = ctx.queryParam("channel_id");
+        String guildId = ctx.queryParam("guild_id");
+        String discordChannelId = ctx.queryParam("discord_channel_id");
+        if (hubSignature == null) {
+            ctx.status(HttpStatus.BAD_REQUEST);
+            return;
+        }
+
+        byte[] requestBodyBytes = ctx.bodyAsBytes();
+        try {
+            String secret = youTubeRepository.getSecret(channelId, guildId);
+            if (secret == null) {
+                ctx.status(HttpStatus.BAD_REQUEST);
+                return;
+            }
+            String expectedSignature = "sha1=" + computeHmacSha1(requestBodyBytes, secret);
+            if (!MessageDigest.isEqual(expectedSignature.getBytes(), hubSignature.getBytes())) {
+                ctx.status(HttpStatus.BAD_REQUEST);
+                return;
+            }
+            ctx.status(HttpStatus.NO_CONTENT);
+            youTube.processNotification(new String(requestBodyBytes), discordChannelId);
+        } catch (InvalidKeyException | SQLException | NoSuchAlgorithmException e) {
+            Logger.error(e);
+            ctx.status(HttpStatus.INTERNAL_SERVER_ERROR).html("<h1>500 Internal Server Error</h1>" +
+                    "<p>Please try again. If this error persists contact the developer.</p>");
+        }
+    }
+
+    private String computeHmacSha1(byte[] data, String key) throws NoSuchAlgorithmException, InvalidKeyException {
+        SecretKeySpec signingKey = new SecretKeySpec(key.getBytes(), "HmacSHA1");
+        Mac mac = Mac.getInstance("HmacSHA1");
+        mac.init(signingKey);
+        byte[] rawHmac = mac.doFinal(data);
+
+        Formatter formatter = new Formatter();
+        for (byte b : rawHmac) {
+            formatter.format("%02x", b);
+        }
+        return formatter.toString();
     }
 
     private DiscordUser authorizeDiscordUser(Context ctx) throws IOException, InterruptedException {

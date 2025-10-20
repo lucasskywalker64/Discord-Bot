@@ -1,5 +1,10 @@
 package com.github.lucasskywalker64.api.youtube;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.dataformat.xml.XmlMapper;
+import com.github.lucasskywalker64.BotContext;
+import com.github.lucasskywalker64.api.youtube.model.Entry;
+import com.github.lucasskywalker64.api.youtube.model.Feed;
 import com.github.lucasskywalker64.exceptions.InvalidParameterException;
 import com.github.lucasskywalker64.persistence.data.YouTubeData;
 import com.github.lucasskywalker64.persistence.repository.YouTubeRepository;
@@ -11,10 +16,18 @@ import com.google.api.services.youtube.YouTube.Builder;
 
 import java.io.IOException;
 import java.net.HttpURLConnection;
+import java.net.URI;
+import java.net.URLEncoder;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -35,16 +48,45 @@ public class YouTubeImpl {
     private static final String APP_NAME = BotMain.getContext().config().get("YOUTUBE_APP_NAME");
     private static final String API_KEY = BotMain.getContext().config().get("YOUTUBE_API_KEY");
     private static final JsonFactory JSON_FACTORY = GsonFactory.getDefaultInstance();
-    private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
+    private final ExecutorService executor;
     private final List<YouTubeData> youTubeDataList = new ArrayList<>();
     private final JDA discordAPI;
     private final YouTube youTube;
     private final YouTubeRepository repository = YouTubeRepository.getInstance();
+    private final String HUB_URL;
+    private final String TOPIC_BASE_URL;
+    private final String CALLBACK_BASE_URL;
+    private final XmlMapper xmlMapper;
+
+    public void subscribeToChannel(
+            String ytChannelId,
+            String guildId,
+            String discordChannelId,
+            String secret,
+            String token) throws IOException, InterruptedException {
+        String callbackUrl = String.format("%s?channel_id=%s&guild_id=%s&discord_channel_id=%s&token=%s",
+                CALLBACK_BASE_URL, ytChannelId, guildId, discordChannelId, token);
+        String topicUrl = String.format("%s?channel_id=%s", TOPIC_BASE_URL, ytChannelId);
+        String formBody = "hub.mode=subscribe" +
+                "&hub.topic=" + URLEncoder.encode(topicUrl, StandardCharsets.UTF_8) +
+                "&hub.callback=" + URLEncoder.encode(callbackUrl, StandardCharsets.UTF_8) +
+                "&hub.secret=" + URLEncoder.encode(secret, StandardCharsets.UTF_8);
+
+        try (HttpClient client = HttpClient.newHttpClient()) {
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(HUB_URL))
+                    .header("Content-Type", "application/x-www-form-urlencoded")
+                    .POST(HttpRequest.BodyPublishers.ofString(formBody))
+                    .build();
+
+            client.send(request, HttpResponse.BodyHandlers.ofString());
+        }
+    }
 
     /**
      * Load the saved YouTube data and populate local lists.
      */
-    private void load() {
+    public void load() {
         youTubeDataList.clear();
         youTubeDataList.addAll(repository.loadAll());
     }
@@ -52,7 +94,7 @@ public class YouTubeImpl {
     /**
      * Saves YouTube data.
      */
-    private void save() throws IOException {
+    private void save() throws SQLException {
         repository.saveAll(youTubeDataList, false);
     }
 
@@ -60,52 +102,16 @@ public class YouTubeImpl {
      * Make a YouTube API call to check if there has been a new upload on the stored channels since the last call.
      * Calls {@link #load()} to check for channel IDs and last video ID.
      */
-    private void checkForNewUpload() throws IOException {
-        load();
-        List<YouTubeData> old = new ArrayList<>(youTubeDataList);
-        for (YouTubeData data : youTubeDataList) {
-            PlaylistItemListResponse playlistResponse = youTube.playlistItems()
-                    .list(Collections.singletonList("contentDetails"))
-                    .setPlaylistId(data.playlistId())
-                    .setMaxResults(1L)
-                    .setKey(API_KEY)
-                    .execute();
-
-            String videoId = playlistResponse.getItems()
-                    .getFirst()
-                    .getContentDetails()
-                    .getVideoId();
-
-            if (!videoId.equals(data.videoId()) && !videoId.equals(data.streamId())) {
-                Video video = youTube.videos()
-                        .list(Collections.singletonList("snippet,liveStreamingDetails"))
-                        .setId(Collections.singletonList(videoId))
-                        .setKey(API_KEY)
-                        .execute()
-                        .getItems()
-                        .getFirst();
-
-                Logger.info(video);
-                if (video.getLiveStreamingDetails() != null) {
-                    if (video.getLiveStreamingDetails().getActualEndTime() == null) {
-                        youTubeDataList.set(youTubeDataList.indexOf(data), data.withStreamId(videoId));
-                        discordAPI.getChannelById(MessageChannel.class, data.channel())
-                                .sendMessage(getUrl(videoId))
-                                .queue();
-                    }
-                } else {
-                    youTubeDataList.set(youTubeDataList.indexOf(data), data.withVideoId(videoId));
-                    discordAPI.getChannelById(MessageChannel.class, data.channel())
-                            .sendMessage(discordAPI.getRoleById(data.roleId())
-                                    .getAsMention() + " " + data.message().replace("\\n", "\n") + "\n"
-                                    + getUrl(videoId))
-                            .queue();
-                }
+    public void processNotification(String xmlPayload, String discordChannelId) {
+        executor.submit(() -> {
+            try {
+                load();
+                Feed feed = xmlMapper.readValue(xmlPayload, Feed.class);
+                Entry entry = feed.entry;
+            } catch (IOException e) {
+                throw new RuntimeException(e);
             }
-        }
-        if (!old.equals(youTubeDataList)) {
-            save();
-        }
+        });
     }
 
     private static String getUrl(String videoID) throws IOException {
@@ -122,61 +128,33 @@ public class YouTubeImpl {
         return url;
     }
 
-    /**
-     * Scheduler to periodically call {@link #checkForNewUpload()}.
-     */
-    private void scheduleUploadCheck() {
-        scheduler.scheduleAtFixedRate(() -> {
-            try {
-                checkForNewUpload();
-            } catch (IOException e) {
-                Logger.error(e);
-            }
-        }, 30, 5 * 60L, TimeUnit.SECONDS);
-    }
-
-    public String getPlaylistIdFromChannelName(String channelName) throws IOException, InvalidParameterException {
+    public String getChannelId(String channelName) throws IOException, InvalidParameterException {
         ChannelListResponse channelResponse;
         if (channelName.startsWith("@")) {
             channelResponse = youTube.channels()
-                    .list(Collections.singletonList("contentDetails"))
+                    .list(Collections.singletonList("id"))
                     .setForHandle(channelName)
                     .setKey(API_KEY)
                     .execute();
         } else {
             channelResponse = youTube.channels()
-                    .list(Collections.singletonList("contentDetails"))
+                    .list(Collections.singletonList("id"))
                     .setForUsername(channelName)
                     .setKey(API_KEY)
                     .execute();
         }
 
-        if (channelResponse.getItems().isEmpty())
+        if (channelResponse == null || channelResponse.getItems().isEmpty())
             throw new InvalidParameterException(1001, null);
 
-        String playlistId = channelResponse.getItems()
+        return channelResponse.getItems()
                 .getFirst()
-                .getContentDetails()
-                .getRelatedPlaylists()
-                .getUploads();
-
-        try {
-            youTube.playlistItems()
-                    .list(Collections.singletonList("contentDetails"))
-                    .setPlaylistId(playlistId)
-                    .setMaxResults(1L)
-                    .setKey(API_KEY)
-                    .execute();
-        } catch (Exception e) {
-            throw new InvalidParameterException(1001, e.getCause());
-        }
-
-        return playlistId;
+                .getId();
     }
 
-    public void shutdown() throws InterruptedException, IOException {
-        scheduler.shutdown();
-        scheduler.awaitTermination(3, TimeUnit.SECONDS);
+    public void shutdown() throws InterruptedException, SQLException {
+        executor.shutdown();
+        executor.awaitTermination(3, TimeUnit.SECONDS);
         save();
         Logger.info("YouTube API shutdown");
     }
@@ -184,13 +162,19 @@ public class YouTubeImpl {
     /**
      * Create new YoutubeImpl
      */
-    public YouTubeImpl(JDA discordAPI) throws GeneralSecurityException, IOException {
+    public YouTubeImpl() throws GeneralSecurityException, IOException {
         Logger.info("Starting YouTube API...");
-        this.discordAPI = discordAPI;
+        BotContext context = BotMain.getContext();
+        this.discordAPI = context.jda();
         youTube = new Builder(GoogleNetHttpTransport.newTrustedTransport(), JSON_FACTORY, null)
                 .setApplicationName(APP_NAME)
                 .build();
-        scheduleUploadCheck();
+        executor = context.taskExecutor();
+        HUB_URL = "https://pubsubhubbub.appspot.com/";
+        TOPIC_BASE_URL = "https://www.youtube.com/xml/feeds/videos.xml";
+        CALLBACK_BASE_URL = context.config().get("SERVER_BASE_URL") + context.config().get("YOUTUBE_CALLBACK_PATH");
+        xmlMapper = new XmlMapper();
+        xmlMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         Logger.info("YouTube API started");
     }
 }

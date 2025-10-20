@@ -9,6 +9,7 @@ import net.dv8tion.jda.api.interactions.commands.build.SubcommandData;
 import org.tinylog.Logger;
 
 import java.io.IOException;
+import java.sql.SQLException;
 import java.util.List;
 import java.util.stream.IntStream;
 
@@ -50,7 +51,7 @@ public class YouTubeEdit implements SubcommandModule {
         data.updateList(event, list, idx);
         try {
             repo.saveAll(list, false);
-        } catch (IOException e) {
+        } catch (SQLException e) {
             Logger.error(e);
             event.getHook().sendMessage("ERROR: Failed to edit YouTube notification. " +
                     "Please contact the developer.").queue();
