@@ -105,9 +105,13 @@ public class YouTubeImpl {
     public void processNotification(String xmlPayload, String discordChannelId) {
         executor.submit(() -> {
             try {
-                load();
-                Feed feed = xmlMapper.readValue(xmlPayload, Feed.class);
-                Entry entry = feed.entry;
+                System.out.println(xmlPayload);
+                Entry entry = xmlMapper.readValue(xmlPayload, Feed.class).entry;
+                VideoListResponse response = youTube.videos()
+                        .list(Collections.singletonList("contentDetails,fileDetails,id,liveStreamingDetails,localizations,paidProductPlacementDetails,player,processingDetails,recordingDetails,snippet,statistics,status,suggestions,topicDetails"))
+                        .setId(Collections.singletonList(entry.videoId))
+                        .execute();
+                System.out.println(response);
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }
