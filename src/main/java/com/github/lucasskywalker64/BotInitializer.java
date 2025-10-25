@@ -58,8 +58,6 @@ import org.tinylog.Logger;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -135,8 +133,7 @@ public class BotInitializer {
         if (!CommandUtil.commandListsMatch(existingCommands, registry.definitions())) {
             jda.getGuilds().getFirst().updateCommands().addCommands(registry.definitions()).queue();
         }
-        WebServer webServer = new WebServer();
-        webServer.start();
+        youTube.checkAndRenewSubscriptions();
         Logger.info("Discord API ready");
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             try {

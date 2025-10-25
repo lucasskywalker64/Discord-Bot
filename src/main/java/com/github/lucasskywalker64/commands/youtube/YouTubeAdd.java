@@ -14,8 +14,6 @@ import net.dv8tion.jda.api.interactions.commands.build.OptionData;
 import net.dv8tion.jda.api.interactions.commands.build.SubcommandData;
 import org.tinylog.Logger;
 
-import java.security.SecureRandom;
-import java.util.Base64;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -78,8 +76,8 @@ public class YouTubeAdd implements SubcommandModule {
         event.deferReply(true).queue();
 
         InteractionHook hook = event.getHook();
-        String token = generateRandomSecret();
-        String secret = generateRandomSecret();
+        String token = youtube.generateRandomToken();
+        String secret = youtube.generateRandomToken();
         String channelId;
         AtomicReference<YouTubeData> data = new AtomicReference<>();
         String name = event.getOption("name").getAsString();
@@ -145,12 +143,5 @@ public class YouTubeAdd implements SubcommandModule {
                 pendingChallenges.remove(token);
             }
         });
-    }
-
-    private static String generateRandomSecret() {
-        SecureRandom random = new SecureRandom();
-        byte[] randomBytes = new byte[64];
-        random.nextBytes(randomBytes);
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(randomBytes);
     }
 }

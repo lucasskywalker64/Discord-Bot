@@ -22,11 +22,11 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
+import java.security.SecureRandom;
 import java.sql.SQLException;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Objects;
+import java.time.Instant;
+import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 
@@ -51,6 +51,7 @@ public class YouTubeImpl {
     private final String TOPIC_BASE_URL;
     private final String CALLBACK_BASE_URL;
     private final XmlMapper xmlMapper;
+    private final Map<String, CompletableFuture<Integer>> pendingChallenges;
 
     public void subscribeToChannel(
             String ytChannelId,
@@ -72,7 +73,10 @@ public class YouTubeImpl {
                     .POST(HttpRequest.BodyPublishers.ofString(formBody))
                     .build();
 
-            client.send(request, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                Logger.warn("YouTube hub subscription request failed with status {}: {}", response.statusCode(), response.body());
+            } else Logger.info("YouTube hub subscription request succeeded with status {}", response.statusCode());
         }
     }
 
@@ -163,6 +167,70 @@ public class YouTubeImpl {
         Logger.info("YouTube API shutdown");
     }
 
+    public String generateRandomToken() {
+        SecureRandom random = new SecureRandom();
+        byte[] randomBytes = new byte[64];
+        random.nextBytes(randomBytes);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(randomBytes);
+    }
+
+    public void checkAndRenewSubscriptions() {
+        Logger.info("Checking for subscriptions to renew...");
+        long now = System.currentTimeMillis();
+        long renewalThreshold = now + TimeUnit.HOURS.toMillis(25);
+
+        List<YouTubeData> subscriptionsToRenew = youTubeDataList.stream()
+                .filter(data -> data.expirationTime() != null && data.expirationTime() < renewalThreshold)
+                .toList();
+
+        if (subscriptionsToRenew.isEmpty()) {
+            Logger.info("No subscriptions to renew");
+            return;
+        }
+
+        Logger.info("Found {} subscription(s) to renew", subscriptionsToRenew.size());
+
+        executor.submit(() -> {
+            for (YouTubeData data : subscriptionsToRenew) {
+                String token = null;
+                try {
+                    token = generateRandomToken();
+                    CompletableFuture<Integer> challengeFuture = new CompletableFuture<>();
+                    pendingChallenges.put(token, challengeFuture);
+
+                    Logger.info("Attempting renewal for channel: {}", data.name());
+
+                    subscribeToChannel(
+                            data.channelId(),
+                            data.guildId(),
+                            data.secret(),
+                            token
+                    );
+
+                    int leaseSeconds = challengeFuture.get(15, TimeUnit.SECONDS);
+                    long newExpirationTime = System.currentTimeMillis() + leaseSeconds * 1000L;
+
+                    data = data.withExpirationTime(newExpirationTime);
+                    repository.save(data);
+                    Logger.info("Successfully renewed subscription for channel {}. New expiry: {}",
+                            data.name(),
+                            Instant.ofEpochMilli(newExpirationTime));
+                } catch (Exception e) {
+                    Logger.error(e, "Failed to renew subscription for channel: {}", data.name());
+                } finally {
+                    if (token != null)
+                        pendingChallenges.remove(token);
+                }
+            }
+
+            try {
+                load();
+            } catch (SQLException e) {
+                Logger.error(e, "Failed to reload data after renewals.");
+            }
+        });
+    }
+
     /**
      * Create new YoutubeImpl
      */
@@ -171,6 +239,7 @@ public class YouTubeImpl {
         load();
         BotContext context = BotMain.getContext();
         this.discordAPI = context.jda();
+        pendingChallenges = context.pendingChallenges();
         youTube = new Builder(GoogleNetHttpTransport.newTrustedTransport(), JSON_FACTORY, null)
                 .setApplicationName(APP_NAME)
                 .build();
