@@ -118,7 +118,6 @@ public final class Database {
     }
 
     private Database() throws Exception {
-        Logger.info(DB_PATH);
         HikariConfig config = new HikariConfig();
         config.setJdbcUrl("jdbc:sqlite:" + DB_PATH.toAbsolutePath());
         config.addDataSourceProperty("journal_mode", "WAL");
