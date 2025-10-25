@@ -32,6 +32,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AccessDeniedException;
 import java.security.InvalidKeyException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -115,8 +116,16 @@ public class WebServer {
     public void start() {
         Javalin server = Javalin.create(config -> {
             config.useVirtualThreads = true;
-            config.requestLogger.http((ctx, ms) -> Logger.info("{} {} - {} ({} ms)",
-                    ctx.method(), ctx.path(), ctx.status(), ms.intValue()));
+            config.requestLogger.http((ctx, ms) -> {
+                if (!ctx.status().equals(HttpStatus.NOT_FOUND))
+                    Logger.info("{} {} {} {}, User Agent: \"{}\" ({}ms)",
+                            ctx.header("CF-Connecting-IP"),
+                            ctx.method(),
+                            ctx.path(),
+                            ctx.status(),
+                            ctx.userAgent() != null ? ctx.userAgent() : "-",
+                            ms);
+            });
             config.staticFiles.add("/public", Location.CLASSPATH);
 
             config.jetty.modifyServletContextHandler(servletContextHandler -> {
@@ -145,6 +154,25 @@ public class WebServer {
                 servletContextHandler.setSessionHandler(sessionHandler);
             });
         }).start(port);
+
+        server.exception(Exception.class, (e, ctx) -> {
+            Logger.error(
+                    "Unhandled exception for request: {} {}",
+                    ctx.method(),
+                    ctx.path(),
+                    e
+            );
+
+            ctx.status(HttpStatus.INTERNAL_SERVER_ERROR).result("An internal server error occurred.");
+        });
+
+        server.exception(AccessDeniedException.class, (e, ctx) -> {
+            Logger.warn(
+                    "Authorization Failed (403): User at {} tried to access {}",
+                    ctx.header("CF-Connecting-IP"),
+                    ctx.path()
+            );
+        });
 
         server.get(TWITCH_LOGIN_PATH, this::handleTwitchLogin);
         server.get(TWITCH_REDIRECT_PATH, this::handleTwitchCallback);
