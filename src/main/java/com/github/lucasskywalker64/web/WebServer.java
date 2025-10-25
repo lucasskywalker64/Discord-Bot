@@ -8,9 +8,9 @@ import com.github.lucasskywalker64.api.youtube.YouTubeImpl;
 import com.github.lucasskywalker64.persistence.Database;
 import com.github.lucasskywalker64.persistence.data.YouTubeData;
 import com.github.lucasskywalker64.persistence.repository.YouTubeRepository;
+import com.github.lucasskywalker64.ticket.TicketModule;
 import com.github.lucasskywalker64.ticket.model.Ticket;
 import com.github.lucasskywalker64.ticket.persistence.TicketRepository;
-import com.github.lucasskywalker64.ticket.service.TicketService;
 import com.google.gson.Gson;
 import com.google.gson.annotations.SerializedName;
 import io.github.cdimascio.dotenv.Dotenv;
@@ -67,7 +67,7 @@ public class WebServer {
     private final YouTubeRepository youTubeRepository;
     private final YouTubeImpl youTube;
     private final TicketRepository ticketRepository;
-    private final TicketService ticketService;
+    private final TicketModule ticketModule;
 
     private final HttpClient httpClient;
     private final PresignedUrlGenerator presignedUrlGenerator;
@@ -106,7 +106,7 @@ public class WebServer {
         youTubeRepository = YouTubeRepository.getInstance();
         youTube = context.youTube();
         ticketRepository = TicketRepository.getInstance();
-        ticketService = context.ticketModule().getService();
+        ticketModule = context.ticketModule();
         httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
         presignedUrlGenerator = new PresignedUrlGenerator();
         gson = new Gson();
@@ -153,7 +153,7 @@ public class WebServer {
                 sessionHandler.setSessionCache(sessionCache);
                 servletContextHandler.setSessionHandler(sessionHandler);
             });
-        }).start(port);
+        }).events(event -> event.serverStarted(() -> Logger.info("Webserver is ready"))).start(port);
 
         server.exception(Exception.class, (e, ctx) -> {
             Logger.error(
@@ -345,7 +345,7 @@ public class WebServer {
         if (discordUser == null) return;
 
         List<Ticket> tickets = ticketRepository.findByOpenerId(discordUser.id);
-        String html = ticketService.listTicketsHtml(tickets, guildId);
+        String html = ticketModule.getService().listTicketsHtml(tickets, guildId);
         if (html == null) {
             ctx.status(HttpStatus.INTERNAL_SERVER_ERROR).html("<h1>500 Internal Server Error</h1>" +
                     "<p>If this error persists, please contact the developer.</p>");

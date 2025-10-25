@@ -94,6 +94,9 @@ public class BotInitializer {
 
         BotMain.getContext().setTwitchOAuthService(new TwitchOAuthService());
 
+        WebServer webServer = new WebServer();
+        webServer.start();
+
         CompletableFuture<TwitchImpl> twitchFuture;
         if (TwitchRepository.getInstance().loadToken() != null) {
             ExecutorService executor = Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("twitch-init").factory());
