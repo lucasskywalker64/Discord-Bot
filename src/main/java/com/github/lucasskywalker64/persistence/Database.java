@@ -34,8 +34,8 @@ public final class Database {
                     "roleId TEXT NOT NULL, " +
                     "secret TEXT NOT NULL, " +
                     "expirationTime INTEGER NOT NULL, " +
-                    "videoId TEXT NOT NULL, " +
-                    "streamId TEXT NOT NULL, " +
+                    "videoId TEXT, " +
+                    "streamId TEXT, " +
                     "primary key (channelId, guildId))");
 
             st.executeUpdate("CREATE TABLE IF NOT EXISTS twitch (" +
