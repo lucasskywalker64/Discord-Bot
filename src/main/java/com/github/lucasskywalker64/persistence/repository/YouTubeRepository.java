@@ -2,10 +2,8 @@ package com.github.lucasskywalker64.persistence.repository;
 
 import com.github.lucasskywalker64.persistence.Database;
 import com.github.lucasskywalker64.persistence.data.YouTubeData;
-import org.tinylog.Logger;
 
 import javax.annotation.Nullable;
-import java.io.IOException;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -17,10 +15,11 @@ import java.util.List;
 public class YouTubeRepository {
 
     private final Connection conn = Database.getInstance().getConnection();
-    private final List<YouTubeData> localYouTubeData;
 
-    public List<YouTubeData> loadAll() {
-        return new ArrayList<>(localYouTubeData);
+    public List<YouTubeData> loadAll() throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement("SELECT * FROM youtube ORDER BY guildId")) {
+            return createYouTubeData(ps.executeQuery());
+        }
     }
 
     public void save(YouTubeData data) throws SQLException {
@@ -28,46 +27,47 @@ public class YouTubeRepository {
     }
 
     public void saveAll(List<YouTubeData> youtubeData) throws SQLException {
-        saveAll(youtubeData, true);
-    }
-
-    public void saveAll(List<YouTubeData> youtubeData, boolean append) throws SQLException {
-        if (!localYouTubeData.equals(youtubeData)) {
-            if (!append) {
-                conn.createStatement().executeUpdate("DELETE FROM youtube");
+        try (PreparedStatement ps = conn.prepareStatement(
+                "INSERT OR REPLACE INTO youtube (" +
+                        "channelId, " +
+                        "name, " +
+                        "guildId, " +
+                        "discordChannelId, " +
+                        "message, " +
+                        "roleId, " +
+                        "secret, " +
+                        "expirationTime, " +
+                        "videoId, " +
+                        "streamId) " +
+                        "VALUES (?,?,?,?,?,?,?,?,?,?)")) {
+            for (YouTubeData d : youtubeData) {
+                ps.setString(1, d.channelId());
+                ps.setString(2, d.name());
+                ps.setString(3, d.guildId());
+                ps.setString(4, d.discordChannelId());
+                ps.setString(5, d.message());
+                ps.setString(6, d.roleId());
+                ps.setString(7, d.secret());
+                ps.setLong(8, d.expirationTime());
+                ps.setString(9, d.videoId());
+                ps.setString(10, d.streamId());
+                ps.addBatch();
             }
-            try (PreparedStatement ps = conn.prepareStatement(
-                    "INSERT INTO youtube (channelId, name, guildId, channel, message, roleId, secret, expirationTime) " +
-                            "VALUES (?,?,?,?,?,?,?,?)")) {
-                for (YouTubeData d : youtubeData) {
-                    ps.setString(1, d.channelId());
-                    ps.setString(2, d.name());
-                    ps.setString(3, d.guildId());
-                    ps.setString(4, d.channel());
-                    ps.setString(5, d.message());
-                    ps.setString(6, d.roleId());
-                    ps.setString(7, d.secret());
-                    ps.setLong(8, d.expirationTime());
-                    ps.addBatch();
-                }
-                ps.executeBatch();
-            }
-            if (!append)
-                localYouTubeData.clear();
-            localYouTubeData.addAll(youtubeData);
-            Logger.info("YouTube data saved.");
+            ps.executeBatch();
         }
     }
 
-    public String getSecret(String channelId, String guildId) throws SQLException {
+    @Nullable
+    public YouTubeData get(String channelId, String guildId) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(
-                "SELECT secret FROM youtube WHERE channelId = ? AND guildId = ?")) {
+                "SELECT * FROM youtube WHERE channelId = ? AND guildId = ?")) {
             ps.setString(1, channelId);
             ps.setString(2, guildId);
-            try (ResultSet rs = ps.executeQuery()) {
-                rs.next();
-                return rs.getString("secret");
+            List<YouTubeData> list = createYouTubeData(ps.executeQuery());
+            if (list.isEmpty()) {
+                return null;
             }
+            return list.getFirst();
         }
     }
 
@@ -83,27 +83,6 @@ public class YouTubeRepository {
         }
     }
 
-    private YouTubeRepository() throws SQLException {
-        localYouTubeData = new ArrayList<>();
-        try (PreparedStatement ps = conn.prepareStatement(
-                "SELECT channelId, name, guildId, channel, message, roleId, secret, expirationTime FROM youtube");
-             ResultSet rs = ps.executeQuery()) {
-            while (rs.next()) {
-                localYouTubeData.add(new YouTubeData(
-                        rs.getString(1),
-                        rs.getString(2),
-                        rs.getString(3),
-                        rs.getString(4),
-                        rs.getString(5),
-                        rs.getString(6),
-                        rs.getString(7),
-                        rs.getLong(8)
-                ));
-            }
-        }
-        Logger.info("YouTube data loaded.");
-    }
-
     public boolean contains(YouTubeData data) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(
                 "SELECT 1 FROM youtube WHERE channelId = ? AND guildId = ? LIMIT 1")) {
@@ -114,6 +93,27 @@ public class YouTubeRepository {
             }
         }
     }
+
+    private List<YouTubeData> createYouTubeData(ResultSet rs) throws SQLException {
+        List<YouTubeData> list = new ArrayList<>();
+        while (rs.next()) {
+            list.add(new YouTubeData(
+                    rs.getString(1),
+                    rs.getString(2),
+                    rs.getString(3),
+                    rs.getString(4),
+                    rs.getString(5),
+                    rs.getString(6),
+                    rs.getString(7),
+                    rs.getLong(8),
+                    rs.getString(9),
+                    rs.getString(10)
+            ));
+        }
+        return list;
+    }
+
+    private YouTubeRepository() throws SQLException {}
 
     private static class Holder {
         private static final YouTubeRepository INSTANCE;

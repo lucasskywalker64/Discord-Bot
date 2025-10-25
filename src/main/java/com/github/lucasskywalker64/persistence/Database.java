@@ -29,11 +29,13 @@ public final class Database {
                     "channelId TEXT NOT NULL, " +
                     "name TEXT NOT NULL, " +
                     "guildId TEXT NOT NULL, " +
-                    "channel TEXT NOT NULL, " +
+                    "discordChannelId TEXT NOT NULL, " +
                     "message TEXT NOT NULL, " +
                     "roleId TEXT NOT NULL, " +
                     "secret TEXT NOT NULL, " +
                     "expirationTime INTEGER NOT NULL, " +
+                    "videoId TEXT NOT NULL, " +
+                    "streamId TEXT NOT NULL, " +
                     "primary key (channelId, guildId))");
 
             st.executeUpdate("CREATE TABLE IF NOT EXISTS twitch (" +

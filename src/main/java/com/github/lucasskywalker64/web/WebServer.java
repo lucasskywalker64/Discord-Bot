@@ -6,6 +6,7 @@ import com.github.lucasskywalker64.api.twitch.TwitchImpl;
 import com.github.lucasskywalker64.api.twitch.auth.TwitchOAuthService;
 import com.github.lucasskywalker64.api.youtube.YouTubeImpl;
 import com.github.lucasskywalker64.persistence.Database;
+import com.github.lucasskywalker64.persistence.data.YouTubeData;
 import com.github.lucasskywalker64.persistence.repository.YouTubeRepository;
 import com.github.lucasskywalker64.ticket.model.Ticket;
 import com.github.lucasskywalker64.ticket.persistence.TicketRepository;
@@ -42,7 +43,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 public class WebServer {
@@ -395,6 +395,7 @@ public class WebServer {
             ctx.status(HttpStatus.NOT_FOUND).result("No challenge parameter found.");
             return;
         }
+        ctx.status(HttpStatus.OK).result(challenge);
 
         CompletableFuture<Integer> future = null;
         if (token != null) {
@@ -405,7 +406,6 @@ public class WebServer {
 
         if (future == null) {
             Logger.warn("Received challenge for an unknown or timed-out token: " + token);
-            ctx.status(HttpStatus.OK).result(challenge);
             return;
         }
 
@@ -421,33 +421,37 @@ public class WebServer {
             future.completeExceptionally(e);
         }
 
-        ctx.status(HttpStatus.OK).result(challenge);
     }
 
     private void youTubeWebhookHandler(Context ctx) {
         String hubSignature = ctx.header("X-Hub-Signature");
         String channelId = ctx.queryParam("channel_id");
         String guildId = ctx.queryParam("guild_id");
-        String discordChannelId = ctx.queryParam("discord_channel_id");
         if (hubSignature == null) {
+            Logger.info("No secret");
             ctx.status(HttpStatus.BAD_REQUEST);
             return;
         }
 
         byte[] requestBodyBytes = ctx.bodyAsBytes();
         try {
-            String secret = youTubeRepository.getSecret(channelId, guildId);
-            if (secret == null) {
+            YouTubeData data = youTubeRepository.get(channelId, guildId);
+            if (data == null) {
+                Logger.info("No youtube data");
                 ctx.status(HttpStatus.BAD_REQUEST);
                 return;
             }
-            String expectedSignature = "sha1=" + computeHmacSha1(requestBodyBytes, secret);
-            if (!MessageDigest.isEqual(expectedSignature.getBytes(), hubSignature.getBytes())) {
+
+            String expectedSignature = "sha1=" + computeHmacSha1(requestBodyBytes, data.secret());
+            if (!MessageDigest.isEqual(expectedSignature.getBytes(StandardCharsets.UTF_8),
+                    hubSignature.getBytes(StandardCharsets.UTF_8))) {
+                Logger.info("Wrong signature");
                 ctx.status(HttpStatus.BAD_REQUEST);
                 return;
             }
+
             ctx.status(HttpStatus.NO_CONTENT);
-            youTube.processNotification(new String(requestBodyBytes), discordChannelId);
+            youTube.processNotification(new String(requestBodyBytes, StandardCharsets.UTF_8), data);
         } catch (InvalidKeyException | SQLException | NoSuchAlgorithmException e) {
             Logger.error(e);
             ctx.status(HttpStatus.INTERNAL_SERVER_ERROR).html("<h1>500 Internal Server Error</h1>" +

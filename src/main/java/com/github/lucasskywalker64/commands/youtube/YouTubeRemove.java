@@ -8,9 +8,10 @@ import net.dv8tion.jda.api.interactions.commands.OptionType;
 import net.dv8tion.jda.api.interactions.commands.build.SubcommandData;
 import org.tinylog.Logger;
 
-import java.io.IOException;
 import java.sql.SQLException;
 import java.util.List;
+
+import static com.github.lucasskywalker64.BotConstants.INTERNAL_ERROR;
 
 @SuppressWarnings("DataFlowIssue")
 public class YouTubeRemove implements SubcommandModule {
@@ -31,7 +32,14 @@ public class YouTubeRemove implements SubcommandModule {
     public void handle(SlashCommandInteractionEvent event) {
         event.deferReply(true).queue();
         String name = event.getOption("name").getAsString();
-        List<YouTubeData> list = repo.loadAll();
+        List<YouTubeData> list;
+        try {
+            list = repo.loadAll();
+        } catch (SQLException e) {
+            Logger.error(e);
+            event.getHook().sendMessage(INTERNAL_ERROR).queue();
+            return;
+        }
         var toBeRemoved = list.stream().filter(d -> d.name().equalsIgnoreCase(name)).findFirst();
         if (toBeRemoved.isEmpty()) {
             event.getHook().sendMessage(String.format("The user %s is not in the list.", name)).queue();
@@ -39,7 +47,7 @@ public class YouTubeRemove implements SubcommandModule {
         }
         list.remove(toBeRemoved.get());
         try {
-            repo.saveAll(list, false);
+            repo.saveAll(list);
         } catch (SQLException e) {
             Logger.error(e);
             event.getHook().sendMessage("ERROR: Failed to remove Youtube notification. Please contact the developer.").queue();

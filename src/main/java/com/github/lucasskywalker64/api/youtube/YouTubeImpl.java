@@ -15,7 +15,6 @@ import com.google.api.services.youtube.YouTube;
 import com.google.api.services.youtube.YouTube.Builder;
 
 import java.io.IOException;
-import java.net.HttpURLConnection;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -27,19 +26,14 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 import com.github.lucasskywalker64.BotMain;
 import com.google.api.services.youtube.model.*;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.entities.channel.middleman.MessageChannel;
-import org.apache.http.client.methods.CloseableHttpResponse;
-import org.apache.http.client.methods.HttpHead;
-import org.apache.http.impl.client.CloseableHttpClient;
-import org.apache.http.impl.client.HttpClientBuilder;
 import org.tinylog.Logger;
 
 @SuppressWarnings({"java:S1192", "DataFlowIssue"})
@@ -61,11 +55,10 @@ public class YouTubeImpl {
     public void subscribeToChannel(
             String ytChannelId,
             String guildId,
-            String discordChannelId,
             String secret,
             String token) throws IOException, InterruptedException {
-        String callbackUrl = String.format("%s?channel_id=%s&guild_id=%s&discord_channel_id=%s&token=%s",
-                CALLBACK_BASE_URL, ytChannelId, guildId, discordChannelId, token);
+        String callbackUrl = String.format("%s?channel_id=%s&guild_id=%s&token=%s",
+                CALLBACK_BASE_URL, ytChannelId, guildId, token);
         String topicUrl = String.format("%s?channel_id=%s", TOPIC_BASE_URL, ytChannelId);
         String formBody = "hub.mode=subscribe" +
                 "&hub.topic=" + URLEncoder.encode(topicUrl, StandardCharsets.UTF_8) +
@@ -86,7 +79,7 @@ public class YouTubeImpl {
     /**
      * Load the saved YouTube data and populate local lists.
      */
-    public void load() {
+    public void load() throws SQLException {
         youTubeDataList.clear();
         youTubeDataList.addAll(repository.loadAll());
     }
@@ -95,41 +88,48 @@ public class YouTubeImpl {
      * Saves YouTube data.
      */
     private void save() throws SQLException {
-        repository.saveAll(youTubeDataList, false);
+        repository.saveAll(youTubeDataList);
     }
 
-    /**
-     * Make a YouTube API call to check if there has been a new upload on the stored channels since the last call.
-     * Calls {@link #load()} to check for channel IDs and last video ID.
-     */
-    public void processNotification(String xmlPayload, String discordChannelId) {
+    public void processNotification(String xmlPayload, YouTubeData data) {
         executor.submit(() -> {
             try {
-                System.out.println(xmlPayload);
                 Entry entry = xmlMapper.readValue(xmlPayload, Feed.class).entry;
-                VideoListResponse response = youTube.videos()
-                        .list(Collections.singletonList("contentDetails,fileDetails,id,liveStreamingDetails,localizations,paidProductPlacementDetails,player,processingDetails,recordingDetails,snippet,statistics,status,suggestions,topicDetails"))
-                        .setId(Collections.singletonList(entry.videoId))
-                        .execute();
-                System.out.println(response);
-            } catch (IOException e) {
+                if (entry != null) {
+                    Video video = youTube.videos()
+                            .list(Collections.singletonList("liveStreamingDetails,snippet,contentDetails"))
+                            .setId(Collections.singletonList(Objects.requireNonNull(entry.videoId)))
+                            .setKey(API_KEY)
+                            .execute()
+                            .getItems()
+                            .getFirst();
+
+                    if (video.getSnippet().getLiveBroadcastContent().equals("upcoming"))
+                        return;
+
+                    if (video.getLiveStreamingDetails() != null
+                            && video.getLiveStreamingDetails().getActualEndTime() == null
+                            && video.getContentDetails().getDuration() != null
+                            && entry.videoId.equals(data.streamId())) {
+                        discordAPI.getChannelById(MessageChannel.class, data.discordChannelId())
+                                .sendMessage(entry.link.href)
+                                .queue();
+                        repository.save(data.withStreamId(entry.videoId));
+                    } else if (entry.videoId.equals(data.videoId())) {
+                        discordAPI.getChannelById(MessageChannel.class, data.discordChannelId())
+                                .sendMessage(discordAPI.getRoleById(data.roleId()).getAsMention()
+                                        + " " + data.message().replace("\\n", "\n")
+                                        + "\n" + entry.link.href)
+                                .queue();
+                        repository.save(data.withVideoId(entry.videoId));
+                    }
+                    load();
+                }
+            } catch (Exception e) {
+                Logger.error(e);
                 throw new RuntimeException(e);
             }
         });
-    }
-
-    private static String getUrl(String videoID) throws IOException {
-        CloseableHttpClient client = HttpClientBuilder.create().disableRedirectHandling().build();
-        HttpHead head = new HttpHead("https://www.youtube.com/shorts/" + videoID);
-        String url;
-        try (CloseableHttpResponse httpResponse = client.execute(head)) {
-            int statusCode = httpResponse.getStatusLine().getStatusCode();
-            if (statusCode == HttpURLConnection.HTTP_OK) {
-                url = "https://www.youtube.com/shorts/" + videoID;
-            } else url = "https://www.youtube.com/watch?v=" + videoID;
-            client.close();
-        }
-        return url;
     }
 
     public String getChannelId(String channelName) throws IOException, InvalidParameterException {
@@ -166,8 +166,9 @@ public class YouTubeImpl {
     /**
      * Create new YoutubeImpl
      */
-    public YouTubeImpl() throws GeneralSecurityException, IOException {
+    public YouTubeImpl() throws GeneralSecurityException, IOException, SQLException {
         Logger.info("Starting YouTube API...");
+        load();
         BotContext context = BotMain.getContext();
         this.discordAPI = context.jda();
         youTube = new Builder(GoogleNetHttpTransport.newTrustedTransport(), JSON_FACTORY, null)

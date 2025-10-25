@@ -6,9 +6,12 @@ import com.github.lucasskywalker64.persistence.repository.YouTubeRepository;
 import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
 import net.dv8tion.jda.api.interactions.commands.build.SubcommandData;
+import org.tinylog.Logger;
 
+import java.sql.SQLException;
 import java.util.List;
 
+import static com.github.lucasskywalker64.BotConstants.INTERNAL_ERROR;
 import static com.github.lucasskywalker64.commands.CommandUtil.addFieldSafe;
 
 public class YouTubeDisplay implements SubcommandModule {
@@ -23,7 +26,14 @@ public class YouTubeDisplay implements SubcommandModule {
 
     @Override
     public void handle(SlashCommandInteractionEvent event) {
-        List<YouTubeData> list = repo.loadAll();
+        List<YouTubeData> list;
+        try {
+            list = repo.loadAll();
+        } catch (SQLException e) {
+            Logger.error(e.getMessage());
+            event.reply(INTERNAL_ERROR).setEphemeral(true).queue();
+            return;
+        }
         if (list.isEmpty()) {
             event.reply("No YouTube notifications").setEphemeral(true).queue();
             return;

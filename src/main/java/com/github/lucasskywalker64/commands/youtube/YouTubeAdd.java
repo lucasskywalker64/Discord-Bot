@@ -23,6 +23,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static com.github.lucasskywalker64.BotConstants.INTERNAL_ERROR;
+
 @SuppressWarnings("DataFlowIssue")
 public class YouTubeAdd implements SubcommandModule {
 
@@ -91,6 +93,8 @@ public class YouTubeAdd implements SubcommandModule {
                     event.getOption("message").getAsString(),
                     event.getOption("role").getAsRole().getId(),
                     secret,
+                    null,
+                    null,
                     null
             ));
 
@@ -119,7 +123,6 @@ public class YouTubeAdd implements SubcommandModule {
                 youtube.subscribeToChannel(
                         channelId,
                         event.getGuild().getId(),
-                        event.getOption("channel").getAsChannel().getId(),
                         secret,
                         token
                 );
@@ -132,8 +135,8 @@ public class YouTubeAdd implements SubcommandModule {
 
                 hook.sendMessage("Youtube notification added.").queue();
             } catch (TimeoutException e) {
-                hook.sendMessage("Subscription request sent, but challenge confirmation timed out. " +
-                        "If this persists please contact the developer.").queue();
+                Logger.error(e);
+                hook.sendMessage(INTERNAL_ERROR).queue();
             } catch (Exception e) {
                 Logger.error(e);
                 hook.sendMessage("ERROR: Failed to add Youtube notification. " +
