@@ -56,6 +56,7 @@ public class TwitchAdd implements SubcommandModule {
                     null,
                     0L,
                     null,
+                    null,
                     null
             );
             if (repository.loadAll().contains(data)) {

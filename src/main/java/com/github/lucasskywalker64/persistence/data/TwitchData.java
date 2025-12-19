@@ -8,7 +8,8 @@ public record TwitchData(
         String announcementId,
         Long timestamp,
         String gameName,
-        String boxArtUrl
+        String boxArtUrl,
+        String streamId
 ) implements Data<TwitchData> {
     @Override
     public TwitchData self() {
@@ -17,19 +18,22 @@ public record TwitchData(
 
     @Override
     public TwitchData withMessage(String message) {
-        return new TwitchData(channel, message, username, roleId, announcementId, timestamp, gameName, boxArtUrl);
+        return new TwitchData(channel, message, username, roleId, announcementId, timestamp, gameName, boxArtUrl, streamId);
     }
     @Override
     public TwitchData withRoleId(String roleId) {
-        return new TwitchData(channel, message, username, roleId, announcementId, timestamp, gameName, boxArtUrl);
+        return new TwitchData(channel, message, username, roleId, announcementId, timestamp, gameName, boxArtUrl, streamId);
     }
     public TwitchData withAnnouncementId(String announcementId) {
-        return new TwitchData(channel, message, username, roleId, announcementId, timestamp, gameName, boxArtUrl);
+        return new TwitchData(channel, message, username, roleId, announcementId, timestamp, gameName, boxArtUrl, streamId);
     }
     public TwitchData withTimestamp(Long timestamp) {
-        return new TwitchData(channel, message, username, roleId, announcementId, timestamp, gameName, boxArtUrl);
+        return new TwitchData(channel, message, username, roleId, announcementId, timestamp, gameName, boxArtUrl, streamId);
     }
     public TwitchData withLastPlayed(String gameName, String boxArtUrl) {
-        return new TwitchData(channel, message, username, roleId, announcementId, timestamp, gameName, boxArtUrl);
+        return new TwitchData(channel, message, username, roleId, announcementId, timestamp, gameName, boxArtUrl, streamId);
+    }
+    public TwitchData withStreamId(String streamId) {
+        return new TwitchData(channel, message, username, roleId, announcementId, timestamp, gameName, boxArtUrl, streamId);
     }
 }
