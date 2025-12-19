@@ -58,8 +58,6 @@ import org.tinylog.Logger;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -94,6 +92,9 @@ public class BotInitializer {
 
         BotMain.getContext().setTwitchOAuthService(new TwitchOAuthService());
 
+        WebServer webServer = new WebServer();
+        webServer.start();
+
         CompletableFuture<TwitchImpl> twitchFuture;
         if (TwitchRepository.getInstance().loadToken() != null) {
             ExecutorService executor = Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("twitch-init").factory());
@@ -115,7 +116,8 @@ public class BotInitializer {
         }
         BotMain.getContext().setTwitchFuture(twitchFuture);
 
-        youTube = new YouTubeImpl(jda);
+        youTube = new YouTubeImpl();
+        BotMain.getContext().setYouTube(youTube);
         reactionRoleListener = new ReactionRoleListener();
         ticketModule = new TicketModule();
         ticketModule.init();
@@ -131,8 +133,7 @@ public class BotInitializer {
         if (!CommandUtil.commandListsMatch(existingCommands, registry.definitions())) {
             jda.getGuilds().getFirst().updateCommands().addCommands(registry.definitions()).queue();
         }
-        WebServer webServer = new WebServer();
-        webServer.start();
+        youTube.checkAndRenewSubscriptions();
         Logger.info("Discord API ready");
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             try {
@@ -151,7 +152,7 @@ public class BotInitializer {
                 jda.shutdown();
                 jda.awaitShutdown(3, TimeUnit.SECONDS);
                 Database.getInstance().shutdown();
-            } catch (InterruptedException | IOException e) {
+            } catch (Exception e) {
                 throw new RuntimeException(e);
             }
         }));

@@ -1,12 +1,13 @@
 package com.github.lucasskywalker64.web;
 
+import com.github.lucasskywalker64.BotContext;
 import com.github.lucasskywalker64.BotMain;
 import com.github.lucasskywalker64.api.twitch.TwitchImpl;
-import com.github.lucasskywalker64.api.twitch.auth.TwitchOAuthService;
 import com.github.lucasskywalker64.persistence.Database;
+import com.github.lucasskywalker64.persistence.data.YouTubeData;
+import com.github.lucasskywalker64.persistence.repository.YouTubeRepository;
 import com.github.lucasskywalker64.ticket.model.Ticket;
 import com.github.lucasskywalker64.ticket.persistence.TicketRepository;
-import com.github.lucasskywalker64.ticket.service.TicketService;
 import com.google.gson.Gson;
 import com.google.gson.annotations.SerializedName;
 import io.github.cdimascio.dotenv.Dotenv;
@@ -20,6 +21,8 @@ import org.eclipse.jetty.server.session.*;
 import org.jetbrains.annotations.Nullable;
 import org.tinylog.Logger;
 
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
@@ -27,15 +30,16 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AccessDeniedException;
+import java.security.InvalidKeyException;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.sql.SQLException;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
-import java.util.concurrent.TimeUnit;
+import java.util.*;
+import java.util.concurrent.*;
 
 public class WebServer {
 
@@ -52,18 +56,21 @@ public class WebServer {
     private final String TICKETS_BASE_PATH;
     private final String TICKETS_TRANSCRIPTS_PATH;
     private final String TICKETS_TRANSCRIPTS_ATTACHMENTS_PATH;
+    private final String YOUTUBE_CALLBACK_PATH;
     private final int port;
 
-    private final TwitchOAuthService twitchOAuthService;
+    private final BotContext botContext;
     private final TicketRepository ticketRepository;
-    private final TicketService ticketService;
+    private final YouTubeRepository youTubeRepository;
 
     private final HttpClient httpClient;
     private final PresignedUrlGenerator presignedUrlGenerator;
     private final Gson gson;
+    private final ConcurrentHashMap<String, ExecutorService> channelExecutors;
 
     public WebServer() {
-        Dotenv config = BotMain.getContext().config();
+        botContext = BotMain.getContext();
+        Dotenv config = botContext.config();
         String serverBaseUrl = config.get("SERVER_BASE_URL");
         port = Integer.parseInt(config.get("SERVER_PORT"));
         TWITCH_LOGIN_PATH = config.get("TWITCH_LOGIN_PATH");
@@ -88,19 +95,28 @@ public class WebServer {
         TICKETS_BASE_PATH = config.get("TICKETS_BASE_PATH");
         TICKETS_TRANSCRIPTS_PATH = TICKETS_BASE_PATH + "/transcripts/{id}";
         TICKETS_TRANSCRIPTS_ATTACHMENTS_PATH = TICKETS_TRANSCRIPTS_PATH + "/attachments";
-        twitchOAuthService = BotMain.getContext().twitchOauthService();
+        YOUTUBE_CALLBACK_PATH = config.get("YOUTUBE_CALLBACK_PATH");
         ticketRepository = TicketRepository.getInstance();
-        ticketService = BotMain.getContext().ticketModule().getService();
+        youTubeRepository = YouTubeRepository.getInstance();
         httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
         presignedUrlGenerator = new PresignedUrlGenerator();
         gson = new Gson();
+        channelExecutors = new ConcurrentHashMap<>();
     }
 
     public void start() {
         Javalin server = Javalin.create(config -> {
             config.useVirtualThreads = true;
-            config.requestLogger.http((ctx, ms) -> Logger.info("{} {} - {} ({} ms)",
-                    ctx.method(), ctx.path(), ctx.status(), ms.intValue()));
+            config.requestLogger.http((ctx, ms) -> {
+                if (!ctx.status().equals(HttpStatus.NOT_FOUND))
+                    Logger.info("{} {} {} {}, User Agent: \"{}\" ({}ms)",
+                            ctx.header("CF-Connecting-IP"),
+                            ctx.method(),
+                            ctx.path(),
+                            ctx.status(),
+                            ctx.userAgent() != null ? ctx.userAgent() : "-",
+                            ms);
+            });
             config.staticFiles.add("/public", Location.CLASSPATH);
 
             config.jetty.modifyServletContextHandler(servletContextHandler -> {
@@ -128,7 +144,26 @@ public class WebServer {
                 sessionHandler.setSessionCache(sessionCache);
                 servletContextHandler.setSessionHandler(sessionHandler);
             });
-        }).start(port);
+        }).events(event -> event.serverStarted(() -> Logger.info("Webserver is ready"))).start(port);
+
+        server.exception(Exception.class, (e, ctx) -> {
+            Logger.error(
+                    "Unhandled exception for request: {} {} {}",
+                    ctx.method(),
+                    ctx.path(),
+                    e
+            );
+
+            ctx.status(HttpStatus.INTERNAL_SERVER_ERROR).result("An internal server error occurred.");
+        });
+
+        server.exception(AccessDeniedException.class, (e, ctx) -> {
+            Logger.warn(
+                    "Authorization Failed (403): User at {} tried to access {}",
+                    ctx.header("CF-Connecting-IP"),
+                    ctx.path()
+            );
+        });
 
         server.get(TWITCH_LOGIN_PATH, this::handleTwitchLogin);
         server.get(TWITCH_REDIRECT_PATH, this::handleTwitchCallback);
@@ -139,6 +174,9 @@ public class WebServer {
         server.get(TICKETS_BASE_PATH, this::handleTicketList);
         server.get(TICKETS_TRANSCRIPTS_PATH, this::handleTranscriptRequest);
         server.get(TICKETS_TRANSCRIPTS_ATTACHMENTS_PATH, this::handleTranscriptAttachments);
+
+        server.get(YOUTUBE_CALLBACK_PATH, this::youTubeChallengeHandler);
+        server.post(YOUTUBE_CALLBACK_PATH, this::youTubeWebhookHandler);
     }
 
     private void handleTwitchLogin(Context ctx) {
@@ -166,8 +204,8 @@ public class WebServer {
         }
 
         try {
-            twitchOAuthService.onOAuthCallback(code);
-            BotMain.getContext().setTwitch(new TwitchImpl(BotMain.getContext().jda()));
+            botContext.twitchOauthService().onOAuthCallback(code);
+            botContext.setTwitch(new TwitchImpl(BotMain.getContext().jda()));
         } catch (Exception e) {
             Logger.error(e);
             ctx.status(HttpStatus.INTERNAL_SERVER_ERROR).html("<h1>500 Internal Server Error</h1>" +
@@ -298,7 +336,7 @@ public class WebServer {
         if (discordUser == null) return;
 
         List<Ticket> tickets = ticketRepository.findByOpenerId(discordUser.id);
-        String html = ticketService.listTicketsHtml(tickets, guildId);
+        String html = botContext.ticketModule().getService().listTicketsHtml(tickets, guildId);
         if (html == null) {
             ctx.status(HttpStatus.INTERNAL_SERVER_ERROR).html("<h1>500 Internal Server Error</h1>" +
                     "<p>If this error persists, please contact the developer.</p>");
@@ -338,6 +376,102 @@ public class WebServer {
             presignedUrls.put(attachmentKey, url);
         }
         ctx.json(presignedUrls);
+    }
+
+    private void youTubeChallengeHandler(Context ctx) {
+        String challenge = ctx.queryParam("hub.challenge");
+        String token = ctx.queryParam("token");
+
+        if (challenge == null) {
+            ctx.status(HttpStatus.NOT_FOUND).result("No challenge parameter found.");
+            return;
+        }
+        ctx.status(HttpStatus.OK).result(challenge);
+
+        CompletableFuture<Integer> future = null;
+        if (token != null) {
+            future = botContext.pendingChallenges().get(token);
+        }
+
+
+        if (future == null) {
+            Logger.warn("Received challenge for an unknown or timed-out token: " + token);
+            return;
+        }
+
+        String leaseSecondsStr = ctx.queryParam("hub.lease_seconds");
+        String hubMode = ctx.queryParam("hub.mode");
+
+        if (hubMode == null) {
+            future.completeExceptionally(new RuntimeException("No hub.mode provided."));
+            return;
+        }
+
+        if ("subscribe".equals(hubMode)) {
+            if (leaseSecondsStr == null || leaseSecondsStr.isEmpty()) {
+                future.completeExceptionally(new RuntimeException("No hub.lease_seconds provided."));
+                return;
+            }
+            try {
+                future.complete(Integer.parseInt(leaseSecondsStr));
+            } catch (NumberFormatException e) {
+                future.completeExceptionally(e);
+            }
+        } else {
+            future.complete(0);
+        }
+    }
+
+    private void youTubeWebhookHandler(Context ctx) {
+        String hubSignature = ctx.header("X-Hub-Signature");
+        String channelId = ctx.queryParam("channel_id");
+        String guildId = ctx.queryParam("guild_id");
+        if (hubSignature == null) {
+            Logger.info("No secret");
+            ctx.status(HttpStatus.BAD_REQUEST);
+            return;
+        }
+
+        byte[] requestBodyBytes = ctx.bodyAsBytes();
+        try {
+            YouTubeData data = youTubeRepository.get(channelId, guildId);
+            if (data == null) {
+                Logger.info("No youtube data");
+                ctx.status(HttpStatus.BAD_REQUEST);
+                return;
+            }
+
+            String expectedSignature = "sha1=" + computeHmacSha1(requestBodyBytes, data.secret());
+            if (!MessageDigest.isEqual(expectedSignature.getBytes(StandardCharsets.UTF_8),
+                    hubSignature.getBytes(StandardCharsets.UTF_8))) {
+                Logger.info("Wrong signature");
+                ctx.status(HttpStatus.BAD_REQUEST);
+                return;
+            }
+            ctx.status(HttpStatus.NO_CONTENT);
+
+            String executorKey = channelId + ":" + guildId;
+            channelExecutors.computeIfAbsent(executorKey, key -> Executors.newSingleThreadExecutor())
+                    .submit(() -> botContext.youTube()
+                            .processNotification(new String(requestBodyBytes, StandardCharsets.UTF_8), data));
+        } catch (InvalidKeyException | SQLException | NoSuchAlgorithmException e) {
+            Logger.error(e);
+            ctx.status(HttpStatus.INTERNAL_SERVER_ERROR).html("<h1>500 Internal Server Error</h1>" +
+                    "<p>Please try again. If this error persists contact the developer.</p>");
+        }
+    }
+
+    private String computeHmacSha1(byte[] data, String key) throws NoSuchAlgorithmException, InvalidKeyException {
+        SecretKeySpec signingKey = new SecretKeySpec(key.getBytes(), "HmacSHA1");
+        Mac mac = Mac.getInstance("HmacSHA1");
+        mac.init(signingKey);
+        byte[] rawHmac = mac.doFinal(data);
+
+        Formatter formatter = new Formatter();
+        for (byte b : rawHmac) {
+            formatter.format("%02x", b);
+        }
+        return formatter.toString();
     }
 
     private DiscordUser authorizeDiscordUser(Context ctx) throws IOException, InterruptedException {

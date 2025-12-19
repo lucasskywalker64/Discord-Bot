@@ -8,9 +8,11 @@ import net.dv8tion.jda.api.interactions.commands.OptionType;
 import net.dv8tion.jda.api.interactions.commands.build.SubcommandData;
 import org.tinylog.Logger;
 
-import java.io.IOException;
+import java.sql.SQLException;
 import java.util.List;
 import java.util.stream.IntStream;
+
+import static com.github.lucasskywalker64.BotConstants.INTERNAL_ERROR;
 
 @SuppressWarnings("DataFlowIssue")
 public class YouTubeEdit implements SubcommandModule {
@@ -33,7 +35,14 @@ public class YouTubeEdit implements SubcommandModule {
     public void handle(SlashCommandInteractionEvent event) {
         event.deferReply(true).queue();
 
-        List<YouTubeData> list = repo.loadAll();
+        List<YouTubeData> list;
+        try {
+            list = repo.loadAll();
+        } catch (SQLException e) {
+            Logger.error(e);
+            event.getHook().sendMessage(INTERNAL_ERROR).queue();
+            return;
+        }
         if (list.isEmpty()) {
             event.getHook().sendMessage("There are no YouTube notifications.").queue();
             return;
@@ -49,8 +58,8 @@ public class YouTubeEdit implements SubcommandModule {
         YouTubeData data = list.get(idx);
         data.updateList(event, list, idx);
         try {
-            repo.saveAll(list, false);
-        } catch (IOException e) {
+            repo.saveAll(list);
+        } catch (SQLException e) {
             Logger.error(e);
             event.getHook().sendMessage("ERROR: Failed to edit YouTube notification. " +
                     "Please contact the developer.").queue();

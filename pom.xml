@@ -6,7 +6,7 @@
 
     <groupId>com.github.lucasskywalker64</groupId>
     <artifactId>DiscordBot</artifactId>
-    <version>4.5.0</version>
+    <version>4.6.0</version>
 
     <properties>
         <maven.compiler.source>21</maven.compiler.source>
@@ -15,6 +15,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <aws.java.sdk.version>2.34.5</aws.java.sdk.version>
         <jte-version>3.2.1</jte-version>
+        <jackson.version>2.20.0</jackson.version>
     </properties>
 
     <dependencyManagement>
@@ -25,6 +26,22 @@
                 <version>${aws.java.sdk.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
+            </dependency>
+
+            <dependency>
+                <groupId>com.fasterxml.jackson.core</groupId>
+                <artifactId>jackson-core</artifactId>
+                <version>${jackson.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.fasterxml.jackson.core</groupId>
+                <artifactId>jackson-databind</artifactId>
+                <version>${jackson.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.fasterxml.jackson.dataformat</groupId>
+                <artifactId>jackson-dataformat-xml</artifactId>
+                <version>${jackson.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
@@ -130,6 +147,10 @@
             <groupId>com.github.zafarkhaja</groupId>
             <artifactId>java-semver</artifactId>
             <version>0.10.2</version>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.dataformat</groupId>
+            <artifactId>jackson-dataformat-xml</artifactId>
         </dependency>
     </dependencies>
 
