@@ -1,5 +1,7 @@
 package com.github.lucasskywalker64.persistence.data;
 
+import java.util.List;
+
 public record YouTubeData(
         String channelId,
         String name,
@@ -9,8 +11,7 @@ public record YouTubeData(
         String roleId,
         String secret,
         Long expirationTime,
-        String videoId,
-        String streamId) implements Data<YouTubeData> {
+        List<String> videoIds) implements Data<YouTubeData> {
     @Override
     public YouTubeData self() {
         return this;
@@ -18,23 +19,15 @@ public record YouTubeData(
 
     @Override
     public YouTubeData withMessage(String message) {
-        return new YouTubeData(channelId, name, guildId, discordChannelId, message, roleId, secret, expirationTime, videoId, streamId);
+        return new YouTubeData(channelId, name, guildId, discordChannelId, message, roleId, secret, expirationTime, videoIds);
     }
 
     @Override
     public YouTubeData withRoleId(String roleId) {
-        return new YouTubeData(channelId, name, guildId, discordChannelId, message, roleId, secret, expirationTime, videoId, streamId);
+        return new YouTubeData(channelId, name, guildId, discordChannelId, message, roleId, secret, expirationTime, videoIds);
     }
 
     public YouTubeData withExpirationTime(Long expirationTime) {
-        return new YouTubeData(channelId, name, guildId, discordChannelId, message, roleId, secret, expirationTime, videoId, streamId);
-    }
-
-    public YouTubeData withVideoId(String videoId) {
-        return new YouTubeData(channelId, name, guildId, discordChannelId, message, roleId, secret, expirationTime, videoId, streamId);
-    }
-
-    public YouTubeData withStreamId(String streamId) {
-        return new YouTubeData(channelId, name, guildId, discordChannelId, message, roleId, secret, expirationTime, videoId, streamId);
+        return new YouTubeData(channelId, name, guildId, discordChannelId, message, roleId, secret, expirationTime, videoIds);
     }
 }

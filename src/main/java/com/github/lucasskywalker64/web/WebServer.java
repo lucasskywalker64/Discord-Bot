@@ -3,12 +3,9 @@ package com.github.lucasskywalker64.web;
 import com.github.lucasskywalker64.BotContext;
 import com.github.lucasskywalker64.BotMain;
 import com.github.lucasskywalker64.api.twitch.TwitchImpl;
-import com.github.lucasskywalker64.api.twitch.auth.TwitchOAuthService;
-import com.github.lucasskywalker64.api.youtube.YouTubeImpl;
 import com.github.lucasskywalker64.persistence.Database;
 import com.github.lucasskywalker64.persistence.data.YouTubeData;
 import com.github.lucasskywalker64.persistence.repository.YouTubeRepository;
-import com.github.lucasskywalker64.ticket.TicketModule;
 import com.github.lucasskywalker64.ticket.model.Ticket;
 import com.github.lucasskywalker64.ticket.persistence.TicketRepository;
 import com.google.gson.Gson;
@@ -42,8 +39,7 @@ import java.sql.SQLException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 
 public class WebServer {
 
@@ -63,20 +59,18 @@ public class WebServer {
     private final String YOUTUBE_CALLBACK_PATH;
     private final int port;
 
-    private final TwitchOAuthService twitchOAuthService;
-    private final YouTubeRepository youTubeRepository;
-    private final YouTubeImpl youTube;
+    private final BotContext botContext;
     private final TicketRepository ticketRepository;
-    private final TicketModule ticketModule;
+    private final YouTubeRepository youTubeRepository;
 
     private final HttpClient httpClient;
     private final PresignedUrlGenerator presignedUrlGenerator;
     private final Gson gson;
-    private final Map<String, CompletableFuture<Integer>> pendingChallenges;
+    private final ConcurrentHashMap<String, ExecutorService> channelExecutors;
 
     public WebServer() {
-        BotContext context = BotMain.getContext();
-        Dotenv config = context.config();
+        botContext = BotMain.getContext();
+        Dotenv config = botContext.config();
         String serverBaseUrl = config.get("SERVER_BASE_URL");
         port = Integer.parseInt(config.get("SERVER_PORT"));
         TWITCH_LOGIN_PATH = config.get("TWITCH_LOGIN_PATH");
@@ -102,15 +96,12 @@ public class WebServer {
         TICKETS_TRANSCRIPTS_PATH = TICKETS_BASE_PATH + "/transcripts/{id}";
         TICKETS_TRANSCRIPTS_ATTACHMENTS_PATH = TICKETS_TRANSCRIPTS_PATH + "/attachments";
         YOUTUBE_CALLBACK_PATH = config.get("YOUTUBE_CALLBACK_PATH");
-        twitchOAuthService = context.twitchOauthService();
-        youTubeRepository = YouTubeRepository.getInstance();
-        youTube = context.youTube();
         ticketRepository = TicketRepository.getInstance();
-        ticketModule = context.ticketModule();
+        youTubeRepository = YouTubeRepository.getInstance();
         httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
         presignedUrlGenerator = new PresignedUrlGenerator();
         gson = new Gson();
-        pendingChallenges = context.pendingChallenges();
+        channelExecutors = new ConcurrentHashMap<>();
     }
 
     public void start() {
@@ -157,7 +148,7 @@ public class WebServer {
 
         server.exception(Exception.class, (e, ctx) -> {
             Logger.error(
-                    "Unhandled exception for request: {} {}",
+                    "Unhandled exception for request: {} {} {}",
                     ctx.method(),
                     ctx.path(),
                     e
@@ -213,8 +204,8 @@ public class WebServer {
         }
 
         try {
-            twitchOAuthService.onOAuthCallback(code);
-            BotMain.getContext().setTwitch(new TwitchImpl(BotMain.getContext().jda()));
+            botContext.twitchOauthService().onOAuthCallback(code);
+            botContext.setTwitch(new TwitchImpl(BotMain.getContext().jda()));
         } catch (Exception e) {
             Logger.error(e);
             ctx.status(HttpStatus.INTERNAL_SERVER_ERROR).html("<h1>500 Internal Server Error</h1>" +
@@ -345,7 +336,7 @@ public class WebServer {
         if (discordUser == null) return;
 
         List<Ticket> tickets = ticketRepository.findByOpenerId(discordUser.id);
-        String html = ticketModule.getService().listTicketsHtml(tickets, guildId);
+        String html = botContext.ticketModule().getService().listTicketsHtml(tickets, guildId);
         if (html == null) {
             ctx.status(HttpStatus.INTERNAL_SERVER_ERROR).html("<h1>500 Internal Server Error</h1>" +
                     "<p>If this error persists, please contact the developer.</p>");
@@ -399,28 +390,36 @@ public class WebServer {
 
         CompletableFuture<Integer> future = null;
         if (token != null) {
-            future = pendingChallenges.remove(token);
+            future = botContext.pendingChallenges().get(token);
         }
 
-        String leaseSecondsStr = ctx.queryParam("hub.lease_seconds");
 
         if (future == null) {
             Logger.warn("Received challenge for an unknown or timed-out token: " + token);
             return;
         }
 
-        if (leaseSecondsStr == null) {
-            future.completeExceptionally(new RuntimeException("No lease seconds provided"));
+        String leaseSecondsStr = ctx.queryParam("hub.lease_seconds");
+        String hubMode = ctx.queryParam("hub.mode");
+
+        if (hubMode == null) {
+            future.completeExceptionally(new RuntimeException("No hub.mode provided."));
             return;
         }
 
-        try {
-            int leaseSeconds = Integer.parseInt(leaseSecondsStr);
-            future.complete(leaseSeconds);
-        } catch (NumberFormatException e) {
-            future.completeExceptionally(e);
+        if ("subscribe".equals(hubMode)) {
+            if (leaseSecondsStr == null || leaseSecondsStr.isEmpty()) {
+                future.completeExceptionally(new RuntimeException("No hub.lease_seconds provided."));
+                return;
+            }
+            try {
+                future.complete(Integer.parseInt(leaseSecondsStr));
+            } catch (NumberFormatException e) {
+                future.completeExceptionally(e);
+            }
+        } else {
+            future.complete(0);
         }
-
     }
 
     private void youTubeWebhookHandler(Context ctx) {
@@ -449,9 +448,12 @@ public class WebServer {
                 ctx.status(HttpStatus.BAD_REQUEST);
                 return;
             }
-
             ctx.status(HttpStatus.NO_CONTENT);
-            youTube.processNotification(new String(requestBodyBytes, StandardCharsets.UTF_8), data);
+
+            String executorKey = channelId + ":" + guildId;
+            channelExecutors.computeIfAbsent(executorKey, key -> Executors.newSingleThreadExecutor())
+                    .submit(() -> botContext.youTube()
+                            .processNotification(new String(requestBodyBytes, StandardCharsets.UTF_8), data));
         } catch (InvalidKeyException | SQLException | NoSuchAlgorithmException e) {
             Logger.error(e);
             ctx.status(HttpStatus.INTERNAL_SERVER_ERROR).html("<h1>500 Internal Server Error</h1>" +

@@ -26,9 +26,7 @@ import java.security.SecureRandom;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 
 import com.github.lucasskywalker64.BotMain;
 import com.google.api.services.youtube.model.*;
@@ -53,15 +51,19 @@ public class YouTubeImpl {
     private final XmlMapper xmlMapper;
     private final Map<String, CompletableFuture<Integer>> pendingChallenges;
 
-    public void subscribeToChannel(
+    private enum HubMode { SUBSCRIBE, UNSUBSCRIBE }
+
+    private void sendHubRequest(
+            HubMode mode,
             String ytChannelId,
             String guildId,
             String secret,
-            String token) throws IOException, InterruptedException {
+            String token
+    ) throws IOException, InterruptedException {
         String callbackUrl = String.format("%s?channel_id=%s&guild_id=%s&token=%s",
                 CALLBACK_BASE_URL, ytChannelId, guildId, token);
         String topicUrl = String.format("%s?channel_id=%s", TOPIC_BASE_URL, ytChannelId);
-        String formBody = "hub.mode=subscribe" +
+        String formBody = "hub.mode=" + (mode == HubMode.SUBSCRIBE ? "subscribe" : "unsubscribe") +
                 "&hub.topic=" + URLEncoder.encode(topicUrl, StandardCharsets.UTF_8) +
                 "&hub.callback=" + URLEncoder.encode(callbackUrl, StandardCharsets.UTF_8) +
                 "&hub.secret=" + URLEncoder.encode(secret, StandardCharsets.UTF_8);
@@ -73,11 +75,62 @@ public class YouTubeImpl {
                     .POST(HttpRequest.BodyPublishers.ofString(formBody))
                     .build();
 
+            if (Thread.interrupted())
+                Logger.warn("Command thread arrived interrupted; clearing flag to proceed");
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                Logger.warn("YouTube hub subscription request failed with status {}: {}", response.statusCode(), response.body());
-            } else Logger.info("YouTube hub subscription request succeeded with status {}", response.statusCode());
+            boolean ok = response.statusCode() >= 200 && response.statusCode() < 300;
+            if (!ok) {
+                Logger.warn("YouTube hub {} request failed with status {}: {}",
+                        mode == HubMode.SUBSCRIBE ? "subscription" : "unsubscription",
+                        response.statusCode(), response.body());
+            } else {
+                Logger.info("YouTube hub {} request succeeded with status {}",
+                        mode == HubMode.SUBSCRIBE ? "subscription" : "unsubscription",
+                        response.statusCode());
+            }
         }
+    }
+
+    private Integer websubChallengeWithRetry(HubMode mode, int maxRetries, long initialDelay, String token, YouTubeData data)
+            throws IOException, InterruptedException, ExecutionException {
+        int attempts = 0;
+        long currentDelay = initialDelay;
+        final long MAX_DELAY = 10000;
+
+        try {
+            while (attempts < maxRetries) {
+                CompletableFuture<Integer> challengeFuture = new CompletableFuture<>();
+                pendingChallenges.put(token, challengeFuture);
+
+                try {
+                    Logger.info("Attempting Youtube {} {}/{}",
+                            mode == HubMode.SUBSCRIBE ? "subscription" : "unsubscription",
+                            (attempts + 1), maxRetries);
+
+                    sendHubRequest(mode, data.channelId(), data.guildId(), data.secret(), token);
+
+                    return challengeFuture.get(3, TimeUnit.SECONDS);
+                } catch (TimeoutException e) {
+                    attempts++;
+                    Logger.error("Websub {} timed out (Attempt {}/{})",
+                            mode == HubMode.SUBSCRIBE ? "subscription" : "unsubscription",
+                            attempts, maxRetries);
+
+                    if (attempts >= maxRetries) {
+                        break;
+                    }
+
+                    long exponentialDelay = Math.min(currentDelay * 2, MAX_DELAY);
+                    long jitteredDelay = ThreadLocalRandom.current().nextLong(currentDelay) + exponentialDelay;
+                    currentDelay = exponentialDelay;
+                    Logger.info("Retrying in {}ms", jitteredDelay);
+                    Thread.sleep(jitteredDelay);
+                }
+            }
+        } finally {
+            pendingChallenges.remove(token);
+        }
+        return null;
     }
 
     /**
@@ -95,45 +148,53 @@ public class YouTubeImpl {
         repository.saveAll(youTubeDataList);
     }
 
-    public void processNotification(String xmlPayload, YouTubeData data) {
-        executor.submit(() -> {
-            try {
-                Entry entry = xmlMapper.readValue(xmlPayload, Feed.class).entry;
-                if (entry != null) {
-                    Video video = youTube.videos()
-                            .list(Collections.singletonList("liveStreamingDetails,snippet,contentDetails"))
-                            .setId(Collections.singletonList(Objects.requireNonNull(entry.videoId)))
-                            .setKey(API_KEY)
-                            .execute()
-                            .getItems()
-                            .getFirst();
-
-                    if (video.getSnippet().getLiveBroadcastContent().equals("upcoming"))
-                        return;
-
-                    if (video.getLiveStreamingDetails() != null
-                            && video.getLiveStreamingDetails().getActualEndTime() == null
-                            && video.getContentDetails().getDuration() != null
-                            && entry.videoId.equals(data.streamId())) {
-                        discordAPI.getChannelById(MessageChannel.class, data.discordChannelId())
-                                .sendMessage(entry.link.href)
-                                .queue();
-                        repository.save(data.withStreamId(entry.videoId));
-                    } else if (entry.videoId.equals(data.videoId())) {
-                        discordAPI.getChannelById(MessageChannel.class, data.discordChannelId())
-                                .sendMessage(discordAPI.getRoleById(data.roleId()).getAsMention()
-                                        + " " + data.message().replace("\\n", "\n")
-                                        + "\n" + entry.link.href)
-                                .queue();
-                        repository.save(data.withVideoId(entry.videoId));
-                    }
-                    load();
-                }
-            } catch (Exception e) {
-                Logger.error(e);
-                throw new RuntimeException(e);
+    public void processNotification(String xmlPayload, YouTubeData staleData) {
+        try {
+            YouTubeData data = repository.get(staleData.channelId(), staleData.guildId());
+            if (data == null) {
+                Logger.warn("Data disappeared for {}", staleData.channelId());
+                return;
             }
-        });
+
+            Entry entry = xmlMapper.readValue(xmlPayload, Feed.class).entry;
+            if (entry != null) {
+                if (data.videoIds().contains(entry.videoId)) {
+                    Logger.info("Duplicate notification received, skipping: {}", entry.videoId);
+                    return;
+                }
+
+                Video video = youTube.videos()
+                        .list(Collections.singletonList("liveStreamingDetails,snippet,contentDetails"))
+                        .setId(Collections.singletonList(Objects.requireNonNull(entry.videoId)))
+                        .setKey(API_KEY)
+                        .execute()
+                        .getItems()
+                        .getFirst();
+
+                if (video.getSnippet().getLiveBroadcastContent().equals("upcoming"))
+                    return;
+
+                if (video.getLiveStreamingDetails() != null
+                        && video.getLiveStreamingDetails().getActualEndTime() == null
+                        && video.getContentDetails().getDuration() != null) {
+                    discordAPI.getChannelById(MessageChannel.class, data.discordChannelId())
+                            .sendMessage(entry.link.href)
+                            .queue();
+                } else {
+                    discordAPI.getChannelById(MessageChannel.class, data.discordChannelId())
+                            .sendMessage(discordAPI.getRoleById(data.roleId()).getAsMention()
+                                    + " " + data.message().replace("\\n", "\n")
+                                    + "\n" + entry.link.href)
+                            .queue();
+                }
+                data.videoIds().add(entry.videoId);
+                repository.save(data);
+                load();
+            }
+        } catch (Exception e) {
+            Logger.error(e);
+            throw new RuntimeException(e);
+        }
     }
 
     public String getChannelId(String channelName) throws IOException, InvalidParameterException {
@@ -174,6 +235,21 @@ public class YouTubeImpl {
         return Base64.getUrlEncoder().withoutPadding().encodeToString(randomBytes);
     }
 
+    public YouTubeData subscribeWithRetry(int maxRetries, long initialDelay, String token, YouTubeData data) throws IOException, InterruptedException, SQLException, ExecutionException {
+        Integer leaseSeconds = websubChallengeWithRetry(HubMode.SUBSCRIBE, maxRetries, initialDelay, token, data);
+        if (leaseSeconds == null) return null;
+        long expirationTime = System.currentTimeMillis() + leaseSeconds * 1000L;
+        data = data.withExpirationTime(expirationTime);
+        repository.save(data);
+        load();
+        return data;
+    }
+
+    public boolean unsubscribeWithRetry(int maxRetries, long initialDelay, String token, YouTubeData data) throws IOException, InterruptedException, ExecutionException {
+        Integer result = websubChallengeWithRetry(HubMode.UNSUBSCRIBE, maxRetries, initialDelay, token, data);
+        return result != null;
+    }
+
     public void checkAndRenewSubscriptions() {
         Logger.info("Checking for subscriptions to renew...");
         long now = System.currentTimeMillis();
@@ -192,41 +268,22 @@ public class YouTubeImpl {
 
         executor.submit(() -> {
             for (YouTubeData data : subscriptionsToRenew) {
-                String token = null;
+                String token = generateRandomToken();
                 try {
-                    token = generateRandomToken();
-                    CompletableFuture<Integer> challengeFuture = new CompletableFuture<>();
-                    pendingChallenges.put(token, challengeFuture);
-
-                    Logger.info("Attempting renewal for channel: {}", data.name());
-
-                    subscribeToChannel(
-                            data.channelId(),
-                            data.guildId(),
-                            data.secret(),
-                            token
-                    );
-
-                    int leaseSeconds = challengeFuture.get(15, TimeUnit.SECONDS);
-                    long newExpirationTime = System.currentTimeMillis() + leaseSeconds * 1000L;
-
-                    data = data.withExpirationTime(newExpirationTime);
-                    repository.save(data);
-                    Logger.info("Successfully renewed subscription for channel {}. New expiry: {}",
-                            data.name(),
-                            Instant.ofEpochMilli(newExpirationTime));
+                    data = subscribeWithRetry(5, 200, token, data);
+                    if (data != null) {
+                        Logger.info("Successfully renewed subscription for channel {}. New expiry: {}",
+                                data.name(),
+                                Instant.ofEpochMilli(data.expirationTime()));
+                    } else {
+                        Logger.error("Failed to renew subscription for channel {}", data.name());
+                    }
                 } catch (Exception e) {
                     Logger.error(e, "Failed to renew subscription for channel: {}", data.name());
                 } finally {
                     if (token != null)
                         pendingChallenges.remove(token);
                 }
-            }
-
-            try {
-                load();
-            } catch (SQLException e) {
-                Logger.error(e, "Failed to reload data after renewals.");
             }
         });
     }

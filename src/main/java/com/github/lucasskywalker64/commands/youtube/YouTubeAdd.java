@@ -14,11 +14,10 @@ import net.dv8tion.jda.api.interactions.commands.build.OptionData;
 import net.dv8tion.jda.api.interactions.commands.build.SubcommandData;
 import org.tinylog.Logger;
 
+import java.util.ArrayList;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static com.github.lucasskywalker64.BotConstants.INTERNAL_ERROR;
@@ -92,8 +91,7 @@ public class YouTubeAdd implements SubcommandModule {
                     event.getOption("role").getAsRole().getId(),
                     secret,
                     null,
-                    null,
-                    null
+                    new ArrayList<>()
             ));
 
             if (repo.contains(data.get())) {
@@ -114,26 +112,20 @@ public class YouTubeAdd implements SubcommandModule {
         }
 
         executor.submit(() -> {
+            final int MAX_RETRIES = 5;
+            final long initialDelay = 200;
+
             try {
-                CompletableFuture<Integer> challengeFuture = new CompletableFuture<>();
-                pendingChallenges.put(token, challengeFuture);
-
-                youtube.subscribeToChannel(
-                        channelId,
-                        event.getGuild().getId(),
-                        secret,
-                        token
-                );
-
-                int leaseSeconds = challengeFuture.get(15, TimeUnit.SECONDS);
-                long expirationTime = System.currentTimeMillis() + leaseSeconds * 1000L;
-                data.set(data.get().withExpirationTime(expirationTime));
-                repo.save(data.get());
-                youtube.load();
-
-                hook.sendMessage("Youtube notification added.").queue();
-            } catch (TimeoutException e) {
-                Logger.error(e);
+                data.set(youtube.subscribeWithRetry(MAX_RETRIES, initialDelay, token, data.get()));
+                if (data.get() != null) {
+                    hook.sendMessage("Youtube notification added.").queue();
+                } else {
+                    hook.sendMessage("ERROR: Googles servers did not respond after " +
+                            MAX_RETRIES + " attempts. Please try again.").queue();
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                Logger.warn("Subscription retry was interrupted.");
                 hook.sendMessage(INTERNAL_ERROR).queue();
             } catch (Exception e) {
                 Logger.error(e);

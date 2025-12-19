@@ -36,10 +36,10 @@ public class YouTubeRepository {
                         "message, " +
                         "roleId, " +
                         "secret, " +
-                        "expirationTime, " +
-                        "videoId, " +
-                        "streamId) " +
-                        "VALUES (?,?,?,?,?,?,?,?,?,?)")) {
+                        "expirationTime) " +
+                        "VALUES (?,?,?,?,?,?,?,?)");
+        PreparedStatement ps2 = conn.prepareStatement(
+                "INSERT OR REPLACE INTO youtube_video_ids (channelId, guildId, videoId) VALUES (?,?,?)")) {
             for (YouTubeData d : youtubeData) {
                 ps.setString(1, d.channelId());
                 ps.setString(2, d.name());
@@ -49,11 +49,25 @@ public class YouTubeRepository {
                 ps.setString(6, d.roleId());
                 ps.setString(7, d.secret());
                 ps.setLong(8, d.expirationTime());
-                ps.setString(9, d.videoId());
-                ps.setString(10, d.streamId());
                 ps.addBatch();
+                for (String videoId : d.videoIds()) {
+                    ps2.setString(1, d.channelId());
+                    ps2.setString(2, d.guildId());
+                    ps2.setString(3, videoId);
+                    ps2.addBatch();
+                }
             }
             ps.executeBatch();
+            ps2.executeBatch();
+        }
+    }
+
+    public void delete(YouTubeData data) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "DELETE FROM youtube WHERE channelId = ? AND guildId = ?")) {
+            ps.setString(1, data.channelId());
+            ps.setString(2, data.guildId());
+            ps.executeUpdate();
         }
     }
 
@@ -71,14 +85,16 @@ public class YouTubeRepository {
         }
     }
 
-    public Long getExpirationTime(String channelId, String guildId) throws SQLException {
+    public List<String> getVideoIds(String channelId) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(
-                "SELECT expirationTime FROM youtube WHERE channelId = ? AND guildId = ?")) {
+                "SELECT videoId FROM youtube_video_ids WHERE channelId = ?")) {
             ps.setString(1, channelId);
-            ps.setString(2, guildId);
             try (ResultSet rs = ps.executeQuery()) {
-                rs.next();
-                return rs.getLong("expirationTime");
+                List<String> list = new ArrayList<>();
+                while (rs.next()) {
+                    list.add(rs.getString(1));
+                }
+                return list;
             }
         }
     }
@@ -97,8 +113,9 @@ public class YouTubeRepository {
     private List<YouTubeData> createYouTubeData(ResultSet rs) throws SQLException {
         List<YouTubeData> list = new ArrayList<>();
         while (rs.next()) {
+            String channelId = rs.getString(1);
             list.add(new YouTubeData(
-                    rs.getString(1),
+                    channelId,
                     rs.getString(2),
                     rs.getString(3),
                     rs.getString(4),
@@ -106,8 +123,7 @@ public class YouTubeRepository {
                     rs.getString(6),
                     rs.getString(7),
                     rs.getLong(8),
-                    rs.getString(9),
-                    rs.getString(10)
+                    getVideoIds(channelId)
             ));
         }
         return list;
