@@ -107,7 +107,9 @@ public class TwitchImpl {
 
     private void postStreamAnnouncement(ChannelGoLiveEvent event, int index) {
         Logger.info("Posting stream announcement...");
-        twitchDataList.set(index, twitchDataList.get(index).withTimestamp(System.currentTimeMillis()));
+        twitchDataList.set(index, twitchDataList.get(index)
+                .withTimestamp(System.currentTimeMillis())
+                .withStreamId(event.getStream().getId()));
         try {
             MessageChannel textChannel = discordAPI.getChannelById(MessageChannel.class,
                             twitchDataList.get(index).channel());
@@ -171,48 +173,65 @@ public class TwitchImpl {
 
     private void handleChannelGoOfflineEvent(ChannelGoOfflineEvent event) {
         Logger.info("Caught Offline Event from: {}", event.getChannel().getName());
+
+        Optional<TwitchData> optionalData = twitchDataList.stream()
+                .filter(data -> data.channel().equals(event.getChannel().getId()))
+                .findFirst();
+
+        if (optionalData.isEmpty() || optionalData.get().announcementId() == null) {
+            Logger.error("Data missing for channel: {}", event.getChannel().getName());
+            return;
+        }
+
+        scheduler.schedule(() -> updateVodMessage(event, optionalData.get()), 2, TimeUnit.MINUTES);
+    }
+
+    private void updateVodMessage(ChannelGoOfflineEvent event, TwitchData data) {
         try {
-            int index = IntStream.range(0, twitchDataList.size())
-                    .filter(i -> twitchDataList.get(i).username().equalsIgnoreCase(event.getChannel().getName()))
-                    .findFirst()
-                    .orElse(-1);
+            var videoList = twitchClient.getHelix()
+                    .getVideos(getValidAccessToken(), (List<String>) null, event.getChannel().getId(), null,
+                            null, null, null, null, null, null, null)
+                    .execute().getVideos();
 
-            if (index > -1 && twitchDataList.get(index).announcementId() != null) {
-                Video lastVod = twitchClient.getHelix().getVideos(getValidAccessToken(),
-                        (List<String>) null, event.getChannel().getId(), null, null,
-                        null, null, null, null, null, null)
-                        .execute().getVideos().getFirst();
+            if (videoList.isEmpty()) {
+                Logger.error("No VOD found for channel {}", event.getChannel().getName());
+                return;
+            }
 
-                EmbedBuilder embedBuilder = new EmbedBuilder();
-                embedBuilder.setAuthor(event.getChannel().getName(), HTTPS_TWITCH_TV
-                        + event.getChannel().getName(), twitchClient.getHelix()
-                        .getUsers(null, Collections.singletonList(event.getChannel().getId()),
-                                Collections.singletonList(event.getChannel().getName())).execute().getUsers()
-                        .getFirst().getProfileImageUrl());
-                embedBuilder.setTitle(lastVod.getTitle());
-                embedBuilder.addField("Game", twitchDataList.get(index).gameName(), true);
-                embedBuilder.addField("Duration", lastVod.getDuration(), true);
-                embedBuilder.setImage(lastVod.getThumbnailUrl(852, 480)
-                        + "?t=" + CryptoUtils.generateNonce(4));
-                embedBuilder.setThumbnail(twitchDataList.get(index).boxArtUrl());
-                embedBuilder.setFooter("Last online");
-                embedBuilder.setTimestamp(event.getFiredAtInstant());
-                Logger.info("Embed builder set up");
+            Video lastVod = videoList.getFirst();
 
-                MessageChannel textChannel = discordAPI.getChannelById(MessageChannel.class,
-                        twitchDataList.get(index).channel());
-                textChannel.editMessageById(twitchDataList.get(index).announcementId(),
-                                event.getChannel().getName() + " was live")
-                        .and(textChannel.editMessageEmbedsById(
-                                        twitchDataList.get(index).announcementId(),
-                                        embedBuilder.build())
-                                .setActionRow(Button.link(lastVod.getUrl(), "Watch VOD"))).queue();
-                Logger.info("Announcement updated");
-            } else
-                Logger.error("Failed to locate {} in the data list " +
-                        "or we didn't yet catch a live event from this channel.", event.getChannel().getName());
+            if (!lastVod.getId().equals(data.streamId())) {
+                Logger.warn("Latest VOD for {} is old. Twitch probably hasn't published the new one yet.", event.getChannel().getName());
+                return;
+            }
+
+            EmbedBuilder embedBuilder = new EmbedBuilder();
+            embedBuilder.setAuthor(event.getChannel().getName(), HTTPS_TWITCH_TV
+                    + event.getChannel().getName(), twitchClient.getHelix()
+                    .getUsers(null, Collections.singletonList(event.getChannel().getId()),
+                            Collections.singletonList(event.getChannel().getName())).execute().getUsers()
+                    .getFirst().getProfileImageUrl());
+            embedBuilder.setTitle(lastVod.getTitle());
+            embedBuilder.addField("Game", data.gameName(), true);
+            embedBuilder.addField("Duration", lastVod.getDuration(), true);
+            embedBuilder.setImage(lastVod.getThumbnailUrl(852, 480)
+                    + "?t=" + CryptoUtils.generateNonce(4));
+            embedBuilder.setThumbnail(data.boxArtUrl());
+            embedBuilder.setFooter("Last online");
+            embedBuilder.setTimestamp(event.getFiredAtInstant());
+            Logger.info("Embed builder set up");
+
+            MessageChannel textChannel = discordAPI.getChannelById(MessageChannel.class,
+                    data.channel());
+            textChannel.editMessageById(data.announcementId(),
+                            event.getChannel().getName() + " was live")
+                    .and(textChannel.editMessageEmbedsById(
+                                    data.announcementId(),
+                                    embedBuilder.build())
+                            .setActionRow(Button.link(lastVod.getUrl(), "Watch VOD"))).queue();
+            Logger.info("Announcement updated");
         } catch (Exception e) {
-            Logger.error(e);
+            Logger.error("Failed to update VOD link in background task", e);
         }
     }
 
