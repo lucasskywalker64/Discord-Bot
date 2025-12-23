@@ -56,7 +56,8 @@ public final class Database {
                                 announcementId TEXT,
                                 timestamp INTEGER NOT NULL,
                                 gameName TEXT,
-                                boxArtUrl TEXT
+                                boxArtUrl TEXT,
+                                streamId TEXT
                             )""");
 
             st.executeUpdate("""
