@@ -33,7 +33,7 @@ public class TwitchRepository {
                 if (!append) conn.createStatement().executeUpdate("DELETE FROM twitch");
                 try (PreparedStatement ps = conn.prepareStatement(
                         "INSERT INTO twitch (channel, message, username, roleId, announcementId, " +
-                                "timestamp, gameName, boxArtUrl) VALUES (?,?,?,?,?,?,?,?)")) {
+                                "timestamp, gameName, boxArtUrl, streamId) VALUES (?,?,?,?,?,?,?,?,?)")) {
                     for (TwitchData d : twitchData) {
                         ps.setString(1, d.channel());
                         ps.setString(2, d.message());
@@ -43,6 +43,7 @@ public class TwitchRepository {
                         ps.setLong(6, d.timestamp());
                         ps.setString(7, d.gameName());
                         ps.setString(8, d.boxArtUrl());
+                        ps.setString(9, d.streamId());
                         ps.addBatch();
                     }
                     ps.executeBatch();
@@ -155,7 +156,7 @@ public class TwitchRepository {
         localTwitchData = new ArrayList<>();
         localShoutoutData = new ArrayList<>();
         try (PreparedStatement ps = conn.prepareStatement("SELECT channel, message, username, roleId, " +
-                "announcementId, timestamp, gameName, boxArtUrl FROM twitch");
+                "announcementId, timestamp, gameName, boxArtUrl, streamId FROM twitch");
              ResultSet rs = ps.executeQuery()) {
             while (rs.next()) {
                 localTwitchData.add(new TwitchData(
