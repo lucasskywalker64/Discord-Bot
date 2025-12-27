@@ -96,7 +96,8 @@ public class BotInitializer {
         webServer.start();
 
         CompletableFuture<TwitchImpl> twitchFuture;
-        if (TwitchRepository.getInstance().loadToken() != null) {
+        if (TwitchRepository.getInstance().loadToken() != null
+                && TwitchRepository.getInstance().loadToken(true) != null) {
             ExecutorService executor = Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("twitch-init").factory());
 
             twitchFuture = CompletableFuture.supplyAsync(() -> {
@@ -175,10 +176,12 @@ public class BotInitializer {
                 new ReactionRoleDisplay(),
 
                 new TwitchAdd(),
+                new TwitchAddRedeem(),
                 new TwitchEdit(),
                 new TwitchRemove(),
                 new TwitchDisplay(),
                 new TwitchAuth(),
+                new TwitchAuthStreamer(),
                 new TwitchRevoke(),
 
                 new YouTubeAdd(youTube),

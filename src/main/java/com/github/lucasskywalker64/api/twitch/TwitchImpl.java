@@ -15,10 +15,14 @@ import com.github.twitch4j.chat.events.channel.RaidEvent;
 import com.github.twitch4j.common.util.CryptoUtils;
 import com.github.twitch4j.events.ChannelGoLiveEvent;
 import com.github.twitch4j.events.ChannelGoOfflineEvent;
+import com.github.twitch4j.eventsub.events.ChannelPointsCustomRewardRedemptionEvent;
+import com.github.twitch4j.eventsub.subscriptions.SubscriptionTypes;
+import com.github.twitch4j.helix.domain.CustomReward;
 import com.github.twitch4j.helix.domain.Game;
 import com.github.twitch4j.helix.domain.Video;
 
 import java.io.IOException;
+import java.sql.SQLException;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.Executors;
@@ -42,14 +46,20 @@ public class TwitchImpl {
     private final TwitchOAuthService oAuthService;
     private final List<TwitchData> twitchDataList = new ArrayList<>();
     private final List<ShoutoutData> shoutoutNames = new ArrayList<>();
+    private final List<String> redemptionIds = new ArrayList<>();
     private final List<String> shoutedoutNames = new ArrayList<>();
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
     private final JDA discordAPI;
     private TwitchClient twitchClient;
     private Long shoutoutTimestamp = 0L;
-    private String streamerId;
+    private String broadcasterId;
     private String moderatorId;
-    private TokenData tokenData;
+    private volatile TokenData streamerTokenData;
+    private volatile TokenData chatTokenData;
+
+    public String getBroadcasterId() {
+        return broadcasterId;
+    }
 
     public void load() {
         twitchDataList.clear();
@@ -58,6 +68,15 @@ public class TwitchImpl {
         shoutoutNames.addAll(twitchRepo.loadAllShoutout());
         shoutedoutNames.clear();
         shoutedoutNames.addAll(twitchRepo.loadAllShoutedOutNames());
+        redemptionIds.clear();
+
+        try {
+            redemptionIds.addAll(twitchRepo.loadRedemptions());
+            streamerTokenData = twitchRepo.loadToken(true);
+            broadcasterId = streamerTokenData.userId();
+        } catch (SQLException e) {
+            Logger.error(e);
+        }
 
         if (!twitchDataList.isEmpty()) {
             twitchDataList.forEach(data -> {
@@ -72,16 +91,43 @@ public class TwitchImpl {
         scheduler.scheduleAtFixedRate(this::load, 1, 1, TimeUnit.DAYS);
     }
 
-    private synchronized String getValidAccessToken() throws Exception {
-        Instant now = Instant.now();
-        if (tokenData.bundle().expiresAt().isBefore(now.plusSeconds(60))) {
-            Logger.info("Access token expired, refreshing...");
-            TokenBundle refreshed = oAuthService.refreshToken(tokenData.bundle().refreshToken());
-            tokenData = tokenData.withTokenBundle(refreshed);
-            twitchRepo.saveToken(tokenData);
-        }
+    public List<CustomReward> fetchRewards() throws Exception {
+        return twitchClient.getHelix()
+                .getCustomRewards(getValidStreamerAccessToken(), broadcasterId, null, null)
+                .execute()
+                .getRewards();
+    }
 
-        return tokenData.bundle().accessToken();
+    private String getValidStreamerAccessToken() throws Exception {
+        Instant now = Instant.now();
+        if (streamerTokenData.bundle().expiresAt().isAfter(now.plusSeconds(60)))
+            return streamerTokenData.bundle().accessToken();
+
+        synchronized (this) {
+            if (streamerTokenData.bundle().expiresAt().isBefore(now.plusSeconds(60))) {
+                Logger.info("Streamer access token expired, refreshing...");
+                TokenBundle refreshed = oAuthService.refreshToken(streamerTokenData.bundle().refreshToken());
+                streamerTokenData = streamerTokenData.withTokenBundle(refreshed);
+                twitchRepo.saveToken(streamerTokenData);
+            }
+            return streamerTokenData.bundle().accessToken();
+        }
+    }
+
+    public String getValidChatAccessToken() throws Exception {
+        Instant now = Instant.now();
+        if (chatTokenData.bundle().expiresAt().isAfter(now.plusSeconds(60)))
+            return chatTokenData.bundle().accessToken();
+
+        synchronized (this) {
+            if (chatTokenData.bundle().expiresAt().isBefore(now.plusSeconds(60))) {
+                Logger.info("Access token expired, refreshing...");
+                TokenBundle refreshed = oAuthService.refreshToken(chatTokenData.bundle().refreshToken());
+                chatTokenData = chatTokenData.withTokenBundle(refreshed);
+                twitchRepo.saveToken(chatTokenData);
+            }
+            return chatTokenData.bundle().accessToken();
+        }
     }
 
     private void handleChannelGoLiveEvent(ChannelGoLiveEvent event) {
@@ -189,7 +235,7 @@ public class TwitchImpl {
     private void updateVodMessage(ChannelGoOfflineEvent event, TwitchData data) {
         try {
             var videoList = twitchClient.getHelix()
-                    .getVideos(getValidAccessToken(), (List<String>) null, event.getChannel().getId(), null,
+                    .getVideos(getValidChatAccessToken(), (List<String>) null, event.getChannel().getId(), null,
                             null, null, null, null, null, null, null)
                     .execute().getVideos();
 
@@ -253,8 +299,8 @@ public class TwitchImpl {
         if (shoutoutTimestamp + 120000L < System.currentTimeMillis()) {
             try {
                 twitchClient.getHelix().sendShoutout(
-                        getValidAccessToken(),
-                        streamerId,
+                        getValidChatAccessToken(),
+                        broadcasterId,
                         raidEvent.getRaider().getId(),
                         moderatorId).queue();
             } catch (Exception e) {
@@ -280,24 +326,39 @@ public class TwitchImpl {
         }
     }
 
+    private void handleChannelPointsRedemptionEvent(ChannelPointsCustomRewardRedemptionEvent event) {
+        if (redemptionIds.contains(event.getReward().getId())) {
+            try {
+                twitchRepo.incrementRedemptionCount(event.getReward().getId(), event.getUserId());
+            } catch (SQLException e) {
+                Logger.error(e);
+            }
+        }
+    }
+
     private void setup() throws Exception {
         twitchClient = TwitchClientBuilder.builder()
                 .withClientId(config.get("TWITCH_CLIENT_ID"))
                 .withClientSecret(config.get("TWITCH_CLIENT_SECRET"))
                 .withEnableChat(true)
-                .withChatAccount(new OAuth2Credential("twitch", getValidAccessToken()))
                 .withEnableHelix(true)
+                .withEnableEventSocket(true)
+                .withChatAccount(new OAuth2Credential("twitch", getValidChatAccessToken()))
                 .build();
 
         load();
 
-        if (!twitchDataList.isEmpty()) {
-            streamerId = twitchClient.getHelix().getUsers(null, null,
-                            Collections.singletonList(twitchDataList.getFirst().username()))
-                    .execute().getUsers().getFirst().getId();
-            Logger.info("Streamer ID setup");
+        twitchClient.getEventSocket().register(
+                new OAuth2Credential("twitch", getValidStreamerAccessToken()),
+                SubscriptionTypes.CHANNEL_POINTS_CUSTOM_REWARD_REDEMPTION_ADD
+                        .prepareSubscription(
+                                b -> b.broadcasterUserId(broadcasterId).build(),
+                                null
+                        )
+        );
 
-            moderatorId = tokenData.userId();
+        if (!twitchDataList.isEmpty()) {
+            moderatorId = chatTokenData.userId();
 
             twitchClient.getChat().joinChannel(twitchDataList.getFirst().username());
         }
@@ -317,9 +378,10 @@ public class TwitchImpl {
         Logger.info("Starting Twitch API...");
 
         this.discordAPI = discordAPI;
-        this.oAuthService = BotMain.getContext().twitchOauthService();
+        oAuthService = BotMain.getContext().twitchOauthService();
 
-        this.tokenData = twitchRepo.loadToken();
+        streamerTokenData = twitchRepo.loadToken(true);
+        chatTokenData = twitchRepo.loadToken();
 
         setup();
 
@@ -331,6 +393,8 @@ public class TwitchImpl {
                 .onEvent(ChannelGoLiveEvent.class, this::handleChannelGoLiveEvent);
         twitchClient.getEventManager()
                 .onEvent(ChannelGoOfflineEvent.class, this::handleChannelGoOfflineEvent);
+        twitchClient.getEventManager()
+                .onEvent(ChannelPointsCustomRewardRedemptionEvent.class, this::handleChannelPointsRedemptionEvent);
 
         scheduleLoad();
         Logger.info("Twitch API started");

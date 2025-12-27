@@ -61,12 +61,27 @@ public final class Database {
                             )""");
 
             st.executeUpdate("""
+                            CREATE TABLE IF NOT EXISTS twitch_redemption (
+                                redemptionId TEXT NOT NULL PRIMARY KEY
+                            )""");
+
+            st.executeUpdate("""
+                            CREATE TABLE IF NOT EXISTS twitch_redemption_leaderboard (
+                                redemptionId TEXT NOT NULL,
+                                userId INTEGER NOT NULL,
+                                count INTEGER NOT NULL,
+                                FOREIGN KEY (redemptionId) REFERENCES twitch_redemption (redemptionId) ON DELETE CASCADE,
+                                PRIMARY KEY (redemptionId, userId)
+                            )""");
+
+            st.executeUpdate("""
                             CREATE TABLE IF NOT EXISTS token_data (
                                 user_id INTEGER PRIMARY KEY,
                                 login TEXT NOT NULL,
                                 access_token TEXT NOT NULL,
                                 refresh_token TEXT NOT NULL,
-                                expires_at INTEGER NOT NULL
+                                expires_at INTEGER NOT NULL,
+                                streamer BOOLEAN NOT NULL
                             )""");
 
             st.executeUpdate("""

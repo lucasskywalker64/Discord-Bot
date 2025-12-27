@@ -9,7 +9,6 @@ import com.github.lucasskywalker64.persistence.repository.TwitchRepository;
 import io.github.cdimascio.dotenv.Dotenv;
 import org.jetbrains.annotations.NotNull;
 
-import java.io.IOException;
 import java.net.*;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -40,20 +39,13 @@ public class TwitchOAuthService {
         String serverBaseUrl = config.get("SERVER_BASE_URL");
         String loginPath = config.get("TWITCH_LOGIN_PATH");
         String redirectPath = config.get("TWITCH_REDIRECT_PATH");
-        String port = config.get("SERVER_PORT");
-        String redirectUri;
-        if ("prod".equals(System.getProperty("app.env", "prod"))) {
-            redirectUri = serverBaseUrl + redirectPath;
-            LOGIN_URI = serverBaseUrl + loginPath;
-        } else {
-            redirectUri = serverBaseUrl + ":" + port + redirectPath;
-            LOGIN_URI = serverBaseUrl + ":" + port + loginPath;
-        }
+        String redirectUri = serverBaseUrl + redirectPath;
+        LOGIN_URI = serverBaseUrl + loginPath;
         ENCODED_REDIRECT_URI = URLEncoder.encode(redirectUri, StandardCharsets.UTF_8);
     }
 
-    public String createAuthorizationLink() throws IOException {
-        return LOGIN_URI;
+    public String getAuthorizationLink(boolean streamerLogin) {
+        return LOGIN_URI + "?streamer=" + streamerLogin;
     }
 
     public void revokeToken(String token) throws Exception {
@@ -72,11 +64,11 @@ public class TwitchOAuthService {
         context.setTwitch(null);
     }
 
-    public void onOAuthCallback(String code) throws Exception {
+    public void onOAuthCallback(String code, boolean streamerLogin) throws Exception {
         TokenBundle tb = exchangeCodeForTokens(code);
         TwitchTokenInfo info = validate(tb.accessToken);
 
-        repository.saveToken(new TokenData(tb, info.userId(), info.login()));
+        repository.saveToken(new TokenData(tb, info.userId(), info.login(), streamerLogin));
     }
 
     public TokenBundle refreshToken(String refreshToken) throws Exception {

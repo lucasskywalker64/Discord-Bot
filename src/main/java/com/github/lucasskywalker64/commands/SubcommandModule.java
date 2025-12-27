@@ -1,5 +1,6 @@
 package com.github.lucasskywalker64.commands;
 
+import net.dv8tion.jda.api.events.interaction.command.CommandAutoCompleteInteractionEvent;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
 import net.dv8tion.jda.api.interactions.commands.build.SubcommandData;
 
@@ -12,4 +13,6 @@ public interface SubcommandModule {
     SubcommandData definition();
 
     void handle(SlashCommandInteractionEvent event);
+
+    default void handleAutoComplete(CommandAutoCompleteInteractionEvent event) {}
 }

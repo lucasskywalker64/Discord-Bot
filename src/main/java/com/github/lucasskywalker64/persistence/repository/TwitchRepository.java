@@ -5,6 +5,7 @@ import com.github.lucasskywalker64.persistence.Database;
 import com.github.lucasskywalker64.persistence.data.ShoutoutData;
 import com.github.lucasskywalker64.persistence.data.TokenData;
 import com.github.lucasskywalker64.persistence.data.TwitchData;
+import org.apache.commons.lang3.tuple.Pair;
 import org.tinylog.Logger;
 
 import java.io.IOException;
@@ -116,24 +117,78 @@ public class TwitchRepository {
         }
     }
 
+    public void saveRedemption(String redemptionId) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement("INSERT INTO twitch_redemption (redemptionId) VALUES (?)")) {
+            ps.setString(1, redemptionId);
+            ps.executeUpdate();
+        }
+    }
+
+    public List<String> loadRedemptions() throws SQLException {
+        List<String> redemptions = new ArrayList<>();
+        try (PreparedStatement ps = conn.prepareStatement("SELECT redemptionId FROM twitch_redemption")) {
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next())
+                    redemptions.add(rs.getString(1));
+            }
+        }
+        return redemptions;
+    }
+
+    public void deleteRedemption(String redemptionId) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement("DELETE FROM twitch_redemption WHERE redemptionId = ?")) {
+            ps.setString(1, redemptionId);
+            ps.executeUpdate();
+        }
+    }
+
+    public void incrementRedemptionCount(String redemptionId, String userId) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "INSERT INTO twitch_redemption_leaderboard (redemptionId, userId, count) " +
+                        "VALUES (?,?,1) ON CONFLICT (redemptionId, userId) " +
+                        "DO UPDATE SET count = twitch_redemption_leaderboard.count + 1")) {
+            ps.setString(1, redemptionId);
+            ps.setString(2, userId);
+            ps.executeUpdate();
+        }
+    }
+
+    public List<Pair<String, Integer>> loadRedemptionLeaderboard(String redemptionId) throws SQLException {
+        List<Pair<String, Integer>> leaderboard = new ArrayList<>();
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT userId, count FROM twitch_redemption_leaderboard WHERE redemptionId = ? ORDER BY count DESC")) {
+            ps.setString(1, redemptionId);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next())
+                    leaderboard.add(Pair.of(rs.getString(1), rs.getInt(2)));
+            }
+        }
+        return leaderboard;
+    }
+
     public void saveToken(TokenData data) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(
-                "INSERT INTO token_data (user_id, login, access_token, refresh_token, expires_at) " +
-                        "VALUES (?, ?, ?, ?, ?) " +
-                        "ON CONFLICT (user_id) DO UPDATE SET login = excluded.login, " +
-                        "access_token = excluded.access_token, refresh_token = excluded.refresh_token, " +
-                        "expires_at = excluded.expires_at")) {
+                "INSERT INTO token_data (user_id, login, access_token, refresh_token, expires_at, streamer) " +
+                        "VALUES (?, ?, ?, ?, ?,?) " +
+                        "ON CONFLICT (user_id) DO UPDATE SET access_token = excluded.access_token, " +
+                        "refresh_token = excluded.refresh_token, expires_at = excluded.expires_at")) {
             ps.setString(1, data.userId());
             ps.setString(2, data.login());
             ps.setString(3, data.bundle().accessToken());
             ps.setString(4, data.bundle().refreshToken());
             ps.setLong(5, data.bundle().expiresAt().toEpochMilli());
+            ps.setBoolean(6, data.streamer());
             ps.executeUpdate();
         }
     }
 
     public TokenData loadToken() throws SQLException {
-        try (PreparedStatement ps = conn.prepareStatement("SELECT * FROM token_data")) {
+        return loadToken(false);
+    }
+
+    public TokenData loadToken(boolean streamer) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement("SELECT * FROM token_data WHERE streamer = ?")) {
+            ps.setBoolean(1, streamer);
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
                     TokenBundle bundle = new TokenBundle(
@@ -141,7 +196,12 @@ public class TwitchRepository {
                             rs.getString("refresh_token"),
                             Instant.ofEpochMilli(rs.getLong("expires_at"))
                     );
-                    return new TokenData(bundle, rs.getString("user_id"), rs.getString("login"));
+                    return new TokenData(
+                            bundle,
+                            rs.getString("user_id"),
+                            rs.getString("login"),
+                            rs.getBoolean("streamer")
+                    );
                 }
             }
         }
