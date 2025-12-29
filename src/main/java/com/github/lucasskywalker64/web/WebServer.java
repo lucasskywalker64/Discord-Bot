@@ -213,7 +213,7 @@ public class WebServer {
             }
             boolean streamerLogin = ctx.sessionAttribute("streamer");
             botContext.twitchOauthService().onOAuthCallback(code, streamerLogin);
-            if (!streamerLogin)
+            if (botContext.twitch() == null)
                 botContext.setTwitch(new TwitchImpl(BotMain.getContext().jda()));
         } catch (Exception e) {
             Logger.error(e);
