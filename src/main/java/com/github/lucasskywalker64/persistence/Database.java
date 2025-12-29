@@ -85,6 +85,21 @@ public final class Database {
                             )""");
 
             st.executeUpdate("""
+                            CREATE TABLE IF NOT EXISTS checkin_config (
+                                rewardId TEXT PRIMARY KEY,
+                                requiredCount INTEGER NOT NULL,
+                                durationDays INTEGER NOT NULL
+                            )""");
+
+            st.executeUpdate("""
+                            CREATE TABLE IF NOT EXISTS active_vips (
+                                userId TEXT NOT NULL,
+                                channelId TEXT NOT NULL,
+                                expirationTimestamp INTEGER NOT NULL,
+                                PRIMARY KEY (userId, channelId)
+                            )""");
+
+            st.executeUpdate("""
                             CREATE TABLE IF NOT EXISTS shoutout (
                                 username TEXT PRIMARY KEY
                             )""");

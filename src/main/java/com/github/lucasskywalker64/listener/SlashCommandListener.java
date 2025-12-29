@@ -1,4 +1,4 @@
-package com.github.lucasskywalker64.listener.command;
+package com.github.lucasskywalker64.listener;
 
 import com.github.lucasskywalker64.commands.CommandRegistry;
 

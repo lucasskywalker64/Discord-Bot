@@ -2,7 +2,7 @@ package com.github.lucasskywalker64.commands.message;
 
 import com.github.lucasskywalker64.commands.CommandUtil;
 import com.github.lucasskywalker64.commands.SubcommandModule;
-import com.github.lucasskywalker64.listener.role.ReactionRoleListener;
+import com.github.lucasskywalker64.listener.ReactionRoleListener;
 import com.github.lucasskywalker64.persistence.data.ReactionRoleData;
 import com.github.lucasskywalker64.persistence.repository.ReactionRoleRepository;
 import net.dv8tion.jda.api.EmbedBuilder;

@@ -12,7 +12,9 @@ import java.io.IOException;
 import java.sql.*;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class TwitchRepository {
 
@@ -142,15 +144,19 @@ public class TwitchRepository {
         }
     }
 
-    public void incrementRedemptionCount(String redemptionId, String userId) throws SQLException {
+    public int incrementRedemptionCount(String redemptionId, String userId) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(
                 "INSERT INTO twitch_redemption_leaderboard (redemptionId, userId, count) " +
                         "VALUES (?,?,1) ON CONFLICT (redemptionId, userId) " +
-                        "DO UPDATE SET count = twitch_redemption_leaderboard.count + 1")) {
+                        "DO UPDATE SET count = twitch_redemption_leaderboard.count + 1 " +
+                        "RETURNING count")) {
             ps.setString(1, redemptionId);
             ps.setString(2, userId);
-            ps.executeUpdate();
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) return rs.getInt(1);
+            }
         }
+        return -1;
     }
 
     public List<Pair<String, Integer>> loadRedemptionLeaderboard(String redemptionId) throws SQLException {
@@ -164,6 +170,80 @@ public class TwitchRepository {
             }
         }
         return leaderboard;
+    }
+
+    public void saveCheckinConfig(String rewardId, int requiredCount, int durationDays) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "INSERT INTO checkin_config (rewardId, requiredCount, durationDays) VALUES (?,?,?) " +
+                        "ON CONFLICT(rewardId) DO UPDATE SET requiredCount=excluded.requiredCount, durationDays=excluded.durationDays")) {
+            ps.setString(1, rewardId);
+            ps.setInt(2, requiredCount);
+            ps.setInt(3, durationDays);
+            ps.executeUpdate();
+        }
+    }
+
+    public Map<String, Pair<Integer, Integer>> loadCheckinConfigs() throws SQLException {
+        Map<String, Pair<Integer, Integer>> configs = new HashMap<>();
+        try (Statement st = conn.createStatement(); ResultSet rs = st.executeQuery("SELECT * FROM checkin_config")) {
+            while (rs.next()) {
+                configs.put(rs.getString("rewardId"), Pair.of(rs.getInt("requiredCount"), rs.getInt("durationDays")));
+            }
+        }
+        return configs;
+    }
+
+    public void saveActiveVip(String userId, String channelId, long expiration) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "INSERT INTO active_vips (userId, channelId, expirationTimestamp) VALUES (?,?,?) " +
+                        "ON CONFLICT(userId, channelId) DO UPDATE SET expirationTimestamp = excluded.expirationTimestamp")) {
+            ps.setString(1, userId);
+            ps.setString(2, channelId);
+            ps.setLong(3, expiration);
+            ps.executeUpdate();
+        }
+    }
+
+    public void removeActiveVip(String userId, String channelId) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement("DELETE FROM active_vips WHERE userId=? AND channelId=?")) {
+            ps.setString(1, userId);
+            ps.setString(2, channelId);
+            ps.executeUpdate();
+        }
+    }
+
+    public List<Pair<String, String>> getExpiredVips(long currentTimestamp) throws SQLException {
+        List<Pair<String, String>> expired = new ArrayList<>();
+        try (PreparedStatement ps = conn.prepareStatement("SELECT userId, channelId FROM active_vips WHERE expirationTimestamp < ?")) {
+            ps.setLong(1, currentTimestamp);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    expired.add(Pair.of(rs.getString("userId"), rs.getString("channelId")));
+                }
+            }
+        }
+        return expired;
+    }
+
+    public boolean isTemporaryVip(String userId, String channelId) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement("SELECT 1 FROM active_vips WHERE userId = ? AND channelId = ?")) {
+            ps.setString(1, userId);
+            ps.setString(2, channelId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        }
+    }
+
+    public long getVipExpiration(String userId, String channelId) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement("SELECT expirationTimestamp FROM active_vips WHERE userId = ? AND channelId = ?")) {
+            ps.setString(1, userId);
+            ps.setString(2, channelId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) return rs.getLong(1);
+            }
+        }
+        return 0L;
     }
 
     public void saveToken(TokenData data) throws SQLException {

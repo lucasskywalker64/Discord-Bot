@@ -3,7 +3,9 @@ package com.github.lucasskywalker64;
 import com.github.lucasskywalker64.api.twitch.TwitchImpl;
 import com.github.lucasskywalker64.api.twitch.auth.TwitchOAuthService;
 import com.github.lucasskywalker64.api.youtube.YouTubeImpl;
+import com.github.lucasskywalker64.service.TwitchModeratorsCacheService;
 import com.github.lucasskywalker64.service.TwitchRedeemCacheService;
+import com.github.lucasskywalker64.service.TwitchVipsCacheService;
 import com.github.lucasskywalker64.ticket.TicketModule;
 import io.github.cdimascio.dotenv.Dotenv;
 import net.dv8tion.jda.api.JDA;
@@ -17,7 +19,9 @@ public class BotContext {
     private final Dotenv config;
     private final Map<String, CompletableFuture<Integer>> pendingChallenges;
     private final ExecutorService taskExecutor;
-    private final TwitchRedeemCacheService twitchCacheService;
+    private final TwitchRedeemCacheService twitchRedeemCacheService;
+    private final TwitchModeratorsCacheService twitchModeratorsCacheService;
+    private final TwitchVipsCacheService twitchVipsCacheService;
     private TwitchImpl twitch;
     private CompletableFuture<TwitchImpl> twitchFuture;
     private TicketModule ticketModule;
@@ -30,7 +34,9 @@ public class BotContext {
         this.twitch = twitch;
         pendingChallenges = new ConcurrentHashMap<>();
         taskExecutor = Executors.newCachedThreadPool();
-        twitchCacheService = new TwitchRedeemCacheService();
+        twitchRedeemCacheService = new TwitchRedeemCacheService();
+        twitchModeratorsCacheService = new TwitchModeratorsCacheService();
+        twitchVipsCacheService = new TwitchVipsCacheService();
     }
 
     public JDA jda() {
@@ -49,8 +55,16 @@ public class BotContext {
         return taskExecutor;
     }
 
-    public TwitchRedeemCacheService twitchCacheService() {
-        return twitchCacheService;
+    public TwitchRedeemCacheService twitchRedeemCacheService() {
+        return twitchRedeemCacheService;
+    }
+
+    public TwitchModeratorsCacheService twitchModeratorsCacheService() {
+        return twitchModeratorsCacheService;
+    }
+
+    public TwitchVipsCacheService twitchVipsCacheService() {
+        return twitchVipsCacheService;
     }
 
     public TwitchImpl twitch() {

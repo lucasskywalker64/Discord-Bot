@@ -16,9 +16,8 @@ public class TwitchRedeemCacheService {
 
     public TwitchRedeemCacheService() {
         this.redeemCache = Caffeine.newBuilder()
-                .expireAfterWrite(Duration.ofMinutes(5))
+                .expireAfterWrite(Duration.ofMinutes(15))
                 .maximumSize(1000)
-                .recordStats()
                 .build();
     }
 

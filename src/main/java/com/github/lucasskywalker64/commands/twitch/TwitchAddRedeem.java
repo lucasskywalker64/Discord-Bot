@@ -11,10 +11,12 @@ import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEve
 import net.dv8tion.jda.api.interactions.commands.Command;
 import net.dv8tion.jda.api.interactions.commands.OptionType;
 import net.dv8tion.jda.api.interactions.commands.build.SubcommandData;
+import net.dv8tion.jda.api.interactions.components.selections.StringSelectMenu;
 import org.tinylog.Logger;
 
 import java.sql.SQLException;
 import java.util.List;
+import java.util.NoSuchElementException;
 
 import static com.github.lucasskywalker64.BotConstants.INTERNAL_ERROR;
 
@@ -43,7 +45,7 @@ public class TwitchAddRedeem implements SubcommandModule {
         if (context.twitch() == null) return;
         String broadcasterId = context.twitch().getBroadcasterId();
 
-        List<CustomReward> rewards = context.twitchCacheService().getOrFetch(broadcasterId);
+        List<CustomReward> rewards = context.twitchRedeemCacheService().getOrFetch(broadcasterId);
         String input = event.getFocusedOption().getValue().toLowerCase();
 
         List<Command.Choice> choices = rewards.stream()
@@ -51,6 +53,7 @@ public class TwitchAddRedeem implements SubcommandModule {
                 .limit(25)
                 .map(reward -> new Command.Choice(reward.getTitle(), reward.getId()))
                 .toList();
+
         event.replyChoices(choices).queue();
     }
 
@@ -61,6 +64,7 @@ public class TwitchAddRedeem implements SubcommandModule {
             CommandUtil.handleNoTwitchService(event);
             return;
         }
+
         List<String> existingRedemptionIds;
         try {
             existingRedemptionIds = repo.loadRedemptions();
@@ -69,19 +73,34 @@ public class TwitchAddRedeem implements SubcommandModule {
             event.getHook().sendMessage(INTERNAL_ERROR).queue();
             return;
         }
-        String redemptionId = event.getOption("redeem").getAsString();
-        if (existingRedemptionIds.contains(redemptionId)) {
+
+        String rewardId = event.getOption("redeem").getAsString();
+        if (existingRedemptionIds.contains(rewardId)) {
             event.getHook().sendMessage("This redemption is already being tracked.").queue();
             return;
         }
+        
+        List<CustomReward> rewards = context.twitchRedeemCacheService().getOrFetch(context.twitch().getBroadcasterId());
+        String rewardName;
         try {
-            repo.saveRedemption(redemptionId);
-        } catch (SQLException e) {
-            Logger.error(e);
+            rewardName = rewards.stream()
+                    .filter(reward -> reward.getId().equals(rewardId))
+                    .findFirst()
+                    .orElseThrow()
+                    .getTitle();
+        } catch (NoSuchElementException e) {
             event.getHook().sendMessage(INTERNAL_ERROR).queue();
             return;
         }
-        context.twitch().load();
-        event.getHook().sendMessage("Redemption added.").queue();
+
+        StringSelectMenu menu = StringSelectMenu.create("twitch:redeem:type:" + rewardId)
+                .setPlaceholder("Select Reward Type")
+                .addOption("First / Leaderboard", "FIRST", "Simply tracks counts for a leaderboard")
+                .addOption("Check-in (VIP Reward)", "CHECKIN", "Grants VIP after X redemptions for Y days")
+                .build();
+
+        event.getHook().sendMessageFormat("Setting up **%s**. Which type is this?", rewardName)
+                .addActionRow(menu)
+                .queue();
     }
 }
