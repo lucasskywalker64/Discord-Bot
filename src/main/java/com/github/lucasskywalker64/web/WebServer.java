@@ -1,8 +1,8 @@
 package com.github.lucasskywalker64.web;
 
 import com.github.lucasskywalker64.BotContext;
+import com.github.lucasskywalker64.BotInitializer;
 import com.github.lucasskywalker64.BotMain;
-import com.github.lucasskywalker64.api.twitch.TwitchImpl;
 import com.github.lucasskywalker64.persistence.Database;
 import com.github.lucasskywalker64.persistence.data.YouTubeData;
 import com.github.lucasskywalker64.persistence.repository.YouTubeRepository;
@@ -173,7 +173,12 @@ public class WebServer {
     }
 
     private void handleTwitchLogin(Context ctx) {
-        String state = UUID.randomUUID().toString();
+        String state = ctx.queryParam("state");
+        if (state == null || !botContext.twitchOauthService().consumeAuthState(state)) {
+            Logger.warn("Twitch login state mismatch: {}", state);
+            ctx.status(HttpStatus.FORBIDDEN).result("Invalid or expired session. Please try again.");
+            return;
+        }
         ctx.sessionAttribute("state", new ExpiringSessionAttribute(state, TimeUnit.MINUTES.toSeconds(10)));
 
         if (ctx.queryParam("streamer") == null) {
@@ -214,7 +219,7 @@ public class WebServer {
             boolean streamerLogin = ctx.sessionAttribute("streamer");
             botContext.twitchOauthService().onOAuthCallback(code, streamerLogin);
             if (botContext.twitch() == null)
-                botContext.setTwitch(new TwitchImpl(BotMain.getContext().jda()));
+                BotInitializer.tryTwitchStart();
         } catch (Exception e) {
             Logger.error(e);
             ctx.status(HttpStatus.INTERNAL_SERVER_ERROR).html("<h1>500 Internal Server Error</h1>" +

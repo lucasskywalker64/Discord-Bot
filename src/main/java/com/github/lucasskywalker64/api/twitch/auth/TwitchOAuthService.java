@@ -18,6 +18,9 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 public class TwitchOAuthService {
 
@@ -31,6 +34,8 @@ public class TwitchOAuthService {
     private final String CLIENT_SECRET;
     private final String LOGIN_URI;
     private final String ENCODED_REDIRECT_URI;
+    private final Set<String> pendingAuthStates = new HashSet<>();
+    private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
 
     public TwitchOAuthService() {
         Dotenv config = context.config();
@@ -45,7 +50,18 @@ public class TwitchOAuthService {
     }
 
     public String getAuthorizationLink(boolean streamerLogin) {
-        return LOGIN_URI + "?streamer=" + streamerLogin;
+        return LOGIN_URI + "?streamer=" + streamerLogin + "&state=" + createAuthState();
+    }
+
+    private String createAuthState() {
+        String state = UUID.randomUUID().toString();
+        pendingAuthStates.add(state);
+        scheduler.schedule(() -> pendingAuthStates.remove(state), 10, TimeUnit.MINUTES);
+        return state;
+    }
+
+    public boolean consumeAuthState(String state) {
+        return pendingAuthStates.remove(state);
     }
 
     public void revokeToken(String token) throws Exception {
