@@ -1,4 +1,4 @@
-package com.github.lucasskywalker64.listener.role;
+package com.github.lucasskywalker64.listener;
 
 import java.util.ArrayList;
 import java.util.List;

@@ -1,5 +1,6 @@
 package com.github.lucasskywalker64.commands;
 
+import net.dv8tion.jda.api.events.interaction.command.CommandAutoCompleteInteractionEvent;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
 import net.dv8tion.jda.api.interactions.commands.DefaultMemberPermissions;
 import net.dv8tion.jda.api.interactions.commands.build.CommandData;
@@ -100,6 +101,30 @@ public class CommandRegistry {
         } catch (Exception e) {
             Logger.error(e);
             event.reply("ERROR: Command failed. Please contact the developer.").setEphemeral(true).queue();
+        }
+    }
+
+    public void dispatchAutoComplete(CommandAutoCompleteInteractionEvent event) {
+        String root = event.getName();
+        String group = Objects.toString(event.getSubcommandGroup(), "");
+        String sub = event.getSubcommandName();
+
+        Map<String, List<SubcommandModule>> byGroup = tree.get(root);
+        if (byGroup == null) return;
+
+        List<SubcommandModule> modules = byGroup.get(group);
+        if (modules == null) return;
+
+        SubcommandModule target = modules.stream()
+                .filter(m -> Objects.equals(m.getSubcommandName(), sub))
+                .findFirst().orElse(null);
+
+        if (target == null) return;
+
+        try {
+            target.handleAutoComplete(event);
+        } catch (Exception e) {
+            Logger.error(e, "Error handling autocomplete for {} {} {}", root, group, sub);
         }
     }
 

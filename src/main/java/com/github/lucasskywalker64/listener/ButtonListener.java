@@ -1,4 +1,4 @@
-package com.github.lucasskywalker64.listener.button;
+package com.github.lucasskywalker64.listener;
 
 import com.github.lucasskywalker64.buttons.ButtonRegistry;
 import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent;

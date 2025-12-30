@@ -20,7 +20,18 @@ public class ModalRegistry {
     }
 
     public void dispatch(ModalInteractionEvent event) {
+        String id = event.getModalId();
         ModalModule target = modules.get(event.getModalId());
+
+        if (target == null) {
+            for (ModalModule module : modules.values()) {
+                if (id.startsWith(module.getId())) {
+                    target = module;
+                    break;
+                }
+            }
+        }
+
         if (target == null) {
             Logger.error("Cannot find ModalModule with id {}", event.getModalId());
             event.reply(INTERNAL_ERROR).setEphemeral(true).queue();

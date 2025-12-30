@@ -13,11 +13,6 @@ import com.github.lucasskywalker64.commands.general.GeneralPing;
 import com.github.lucasskywalker64.commands.message.MessageCreate;
 import com.github.lucasskywalker64.commands.message.MessageEdit;
 import com.github.lucasskywalker64.commands.message.MessageRemove;
-import com.github.lucasskywalker64.commands.twitch.*;
-import com.github.lucasskywalker64.commands.youtube.YouTubeAdd;
-import com.github.lucasskywalker64.commands.youtube.YouTubeDisplay;
-import com.github.lucasskywalker64.commands.youtube.YouTubeEdit;
-import com.github.lucasskywalker64.commands.youtube.YouTubeRemove;
 import com.github.lucasskywalker64.commands.reaction.ReactionRoleAdd;
 import com.github.lucasskywalker64.commands.reaction.ReactionRoleDisplay;
 import com.github.lucasskywalker64.commands.reaction.ReactionRoleRemove;
@@ -25,15 +20,20 @@ import com.github.lucasskywalker64.commands.shoutout.ShoutoutAdd;
 import com.github.lucasskywalker64.commands.shoutout.ShoutoutDisplay;
 import com.github.lucasskywalker64.commands.shoutout.ShoutoutRemove;
 import com.github.lucasskywalker64.commands.shoutout.ShoutoutRemoveAll;
-import com.github.lucasskywalker64.listener.button.ButtonListener;
-import com.github.lucasskywalker64.listener.command.SlashCommandListener;
-import com.github.lucasskywalker64.listener.message.MessageListener;
-import com.github.lucasskywalker64.listener.modal.ModalListener;
-import com.github.lucasskywalker64.listener.role.ReactionRoleListener;
+import com.github.lucasskywalker64.commands.twitch.*;
+import com.github.lucasskywalker64.commands.youtube.YouTubeAdd;
+import com.github.lucasskywalker64.commands.youtube.YouTubeDisplay;
+import com.github.lucasskywalker64.commands.youtube.YouTubeEdit;
+import com.github.lucasskywalker64.commands.youtube.YouTubeRemove;
+import com.github.lucasskywalker64.listener.*;
 import com.github.lucasskywalker64.modals.ModalModule;
 import com.github.lucasskywalker64.modals.ModalRegistry;
+import com.github.lucasskywalker64.modals.twitch.TwitchCheckinModal;
 import com.github.lucasskywalker64.persistence.Database;
 import com.github.lucasskywalker64.persistence.repository.TwitchRepository;
+import com.github.lucasskywalker64.selectmenus.SelectMenuModule;
+import com.github.lucasskywalker64.selectmenus.SelectMenuRegistry;
+import com.github.lucasskywalker64.selectmenus.twitch.TwitchRedeemTypeMenu;
 import com.github.lucasskywalker64.ticket.TicketModule;
 import com.github.lucasskywalker64.ticket.interaction.buttons.*;
 import com.github.lucasskywalker64.ticket.interaction.commands.TicketCreate;
@@ -96,7 +96,8 @@ public class BotInitializer {
         webServer.start();
 
         CompletableFuture<TwitchImpl> twitchFuture;
-        if (TwitchRepository.getInstance().loadToken() != null) {
+        if (TwitchRepository.getInstance().loadToken() != null
+                && TwitchRepository.getInstance().loadToken(true) != null) {
             ExecutorService executor = Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("twitch-init").factory());
 
             twitchFuture = CompletableFuture.supplyAsync(() -> {
@@ -128,6 +129,7 @@ public class BotInitializer {
         jda.addEventListener(new ButtonListener(createButtons()));
         jda.addEventListener(new ModalListener(createModals()));
         jda.addEventListener(new MessageListener());
+        jda.addEventListener(new SelectMenuListener(createStringSelectMenus()));
         jda.awaitReady();
         List<Command> existingCommands = jda.getGuilds().getFirst().retrieveCommands().complete();
         if (!CommandUtil.commandListsMatch(existingCommands, registry.definitions())) {
@@ -175,10 +177,12 @@ public class BotInitializer {
                 new ReactionRoleDisplay(),
 
                 new TwitchAdd(),
+                new TwitchAddRedeem(),
                 new TwitchEdit(),
                 new TwitchRemove(),
                 new TwitchDisplay(),
                 new TwitchAuth(),
+                new TwitchAuthStreamer(),
                 new TwitchRevoke(),
 
                 new YouTubeAdd(youTube),
@@ -216,9 +220,17 @@ public class BotInitializer {
 
     private @NotNull ModalRegistry createModals() {
         List<ModalModule> modules = List.of(
-                new TicketCloseModal(ticketModule.getService())
+                new TicketCloseModal(ticketModule.getService()),
+                new TwitchCheckinModal()
         );
         return new ModalRegistry(modules);
+    }
+
+    private @NotNull SelectMenuRegistry createStringSelectMenus() {
+        List<SelectMenuModule> modules = List.of(
+                new TwitchRedeemTypeMenu()
+        );
+        return new SelectMenuRegistry(modules);
     }
 
     private void setupFiles() throws IOException {

@@ -1,7 +1,8 @@
-package com.github.lucasskywalker64.listener.command;
+package com.github.lucasskywalker64.listener;
 
 import com.github.lucasskywalker64.commands.CommandRegistry;
 
+import net.dv8tion.jda.api.events.interaction.command.CommandAutoCompleteInteractionEvent;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
 import org.jetbrains.annotations.NotNull;
@@ -17,5 +18,10 @@ public class SlashCommandListener extends ListenerAdapter {
     @Override
     public void onSlashCommandInteraction(@NotNull SlashCommandInteractionEvent event) {
         registry.dispatch(event);
+    }
+
+    @Override
+    public void onCommandAutoCompleteInteraction(@NotNull CommandAutoCompleteInteractionEvent event) {
+        registry.dispatchAutoComplete(event);
     }
 }

@@ -1,14 +1,12 @@
 package com.github.lucasskywalker64.commands.message;
 
 import com.github.lucasskywalker64.commands.SubcommandModule;
-import com.github.lucasskywalker64.listener.role.ReactionRoleListener;
+import com.github.lucasskywalker64.listener.ReactionRoleListener;
 import com.github.lucasskywalker64.persistence.data.ReactionRoleData;
 import com.github.lucasskywalker64.persistence.repository.ReactionRoleRepository;
-import net.dv8tion.jda.api.entities.channel.ChannelType;
 import net.dv8tion.jda.api.entities.channel.middleman.StandardGuildMessageChannel;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
 import net.dv8tion.jda.api.interactions.commands.OptionType;
-import net.dv8tion.jda.api.interactions.commands.build.OptionData;
 import net.dv8tion.jda.api.interactions.commands.build.SubcommandData;
 import org.tinylog.Logger;
 

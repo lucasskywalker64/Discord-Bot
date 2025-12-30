@@ -1,4 +1,4 @@
-package com.github.lucasskywalker64.listener.message;
+package com.github.lucasskywalker64.listener;
 
 import com.github.lucasskywalker64.BotMain;
 import com.github.lucasskywalker64.ticket.service.TicketService;

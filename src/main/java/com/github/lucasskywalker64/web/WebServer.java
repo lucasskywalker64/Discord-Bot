@@ -48,6 +48,7 @@ public class WebServer {
     private final String ENCODED_TWITCH_REDIRECT_URI;
     private final String TWITCH_CLIENT_ID;
     private final String TWITCH_SCOPES;
+    private final String TWITCH_STREAMER_SCOPES;
     private final String DISCORD_LOGIN_PATH;
     private final String DISCORD_REDIRECT_PATH;
     private final String ENCODED_DISCORD_REDIRECT_URI;
@@ -77,17 +78,11 @@ public class WebServer {
         TWITCH_REDIRECT_PATH = config.get("TWITCH_REDIRECT_PATH");
         TWITCH_CLIENT_ID = config.get("TWITCH_CLIENT_ID");
         TWITCH_SCOPES = config.get("TWITCH_SCOPE");
+        TWITCH_STREAMER_SCOPES = config.get("TWITCH_STREAMER_SCOPE");
         DISCORD_LOGIN_PATH = config.get("DISCORD_LOGIN_PATH");
         DISCORD_REDIRECT_PATH = config.get("DISCORD_REDIRECT_PATH");
-        String twitchRedirectUri;
-        String discordRedirectUri;
-        if ("prod".equals(System.getProperty("app.env", "prod"))) {
-            twitchRedirectUri = serverBaseUrl + TWITCH_REDIRECT_PATH;
-            discordRedirectUri = serverBaseUrl + DISCORD_REDIRECT_PATH;
-        } else {
-            twitchRedirectUri = serverBaseUrl + ":" + port + TWITCH_REDIRECT_PATH;
-            discordRedirectUri = serverBaseUrl + ":" + port + DISCORD_REDIRECT_PATH;
-        }
+        String twitchRedirectUri = serverBaseUrl + TWITCH_REDIRECT_PATH;
+        String discordRedirectUri = serverBaseUrl + DISCORD_REDIRECT_PATH;
         ENCODED_TWITCH_REDIRECT_URI = URLEncoder.encode(twitchRedirectUri, StandardCharsets.UTF_8);
         ENCODED_DISCORD_REDIRECT_URI = URLEncoder.encode(discordRedirectUri, StandardCharsets.UTF_8);
         DISCORD_CLIENT_ID = config.get("DISCORD_CLIENT_ID");
@@ -157,13 +152,11 @@ public class WebServer {
             ctx.status(HttpStatus.INTERNAL_SERVER_ERROR).result("An internal server error occurred.");
         });
 
-        server.exception(AccessDeniedException.class, (e, ctx) -> {
-            Logger.warn(
-                    "Authorization Failed (403): User at {} tried to access {}",
-                    ctx.header("CF-Connecting-IP"),
-                    ctx.path()
-            );
-        });
+        server.exception(AccessDeniedException.class, (e, ctx) -> Logger.warn(
+                "Authorization Failed (403): User at {} tried to access {}",
+                ctx.header("CF-Connecting-IP"),
+                ctx.path()
+        ));
 
         server.get(TWITCH_LOGIN_PATH, this::handleTwitchLogin);
         server.get(TWITCH_REDIRECT_PATH, this::handleTwitchCallback);
@@ -183,11 +176,20 @@ public class WebServer {
         String state = UUID.randomUUID().toString();
         ctx.sessionAttribute("state", new ExpiringSessionAttribute(state, TimeUnit.MINUTES.toSeconds(10)));
 
+        if (ctx.queryParam("streamer") == null) {
+            ctx.status(HttpStatus.BAD_REQUEST).html("<h1>400 Bad Request</h1>" +
+                    "<p>Missing streamer parameter.</p>");
+            return;
+        }
+        boolean streamerLogin = Boolean.parseBoolean(ctx.queryParam("streamer"));
+        ctx.sessionAttribute("streamer", streamerLogin);
+
         String twitchAuthUrl = "https://id.twitch.tv/oauth2/authorize" +
                 "?client_id=" + TWITCH_CLIENT_ID +
                 "&redirect_uri=" + ENCODED_TWITCH_REDIRECT_URI +
                 "&response_type=code" +
-                "&scope=" + URLEncoder.encode(TWITCH_SCOPES, StandardCharsets.UTF_8) +
+                "&scope=" + URLEncoder.encode(streamerLogin ? TWITCH_STREAMER_SCOPES : TWITCH_SCOPES,
+                StandardCharsets.UTF_8) +
                 "&state=" + state;
         ctx.redirect(twitchAuthUrl);
     }
@@ -204,8 +206,15 @@ public class WebServer {
         }
 
         try {
-            botContext.twitchOauthService().onOAuthCallback(code);
-            botContext.setTwitch(new TwitchImpl(BotMain.getContext().jda()));
+            if (ctx.sessionAttribute("streamer") == null) {
+                ctx.status(HttpStatus.BAD_REQUEST).html("<h1>400 Bad Request</h1>" +
+                        "<p>Missing streamer attribute.</p>");
+                return;
+            }
+            boolean streamerLogin = ctx.sessionAttribute("streamer");
+            botContext.twitchOauthService().onOAuthCallback(code, streamerLogin);
+            if (botContext.twitch() == null)
+                botContext.setTwitch(new TwitchImpl(BotMain.getContext().jda()));
         } catch (Exception e) {
             Logger.error(e);
             ctx.status(HttpStatus.INTERNAL_SERVER_ERROR).html("<h1>500 Internal Server Error</h1>" +

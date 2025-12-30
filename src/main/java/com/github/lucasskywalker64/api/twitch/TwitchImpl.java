@@ -15,23 +15,25 @@ import com.github.twitch4j.chat.events.channel.RaidEvent;
 import com.github.twitch4j.common.util.CryptoUtils;
 import com.github.twitch4j.events.ChannelGoLiveEvent;
 import com.github.twitch4j.events.ChannelGoOfflineEvent;
-import com.github.twitch4j.helix.domain.Game;
-import com.github.twitch4j.helix.domain.Video;
+import com.github.twitch4j.eventsub.events.ChannelPointsCustomRewardRedemptionEvent;
+import com.github.twitch4j.eventsub.subscriptions.SubscriptionTypes;
+import com.github.twitch4j.helix.domain.*;
+import io.github.cdimascio.dotenv.Dotenv;
+import net.dv8tion.jda.api.EmbedBuilder;
+import net.dv8tion.jda.api.JDA;
+import net.dv8tion.jda.api.entities.channel.middleman.MessageChannel;
+import net.dv8tion.jda.api.interactions.components.buttons.Button;
+import org.apache.commons.lang3.tuple.Pair;
+import org.tinylog.Logger;
 
 import java.io.IOException;
+import java.sql.SQLException;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.IntStream;
-
-import io.github.cdimascio.dotenv.Dotenv;
-import net.dv8tion.jda.api.EmbedBuilder;
-import net.dv8tion.jda.api.JDA;
-import net.dv8tion.jda.api.entities.channel.middleman.MessageChannel;
-import net.dv8tion.jda.api.interactions.components.buttons.Button;
-import org.tinylog.Logger;
 
 @SuppressWarnings({"java:S1192", "DataFlowIssue"})
 public class TwitchImpl {
@@ -42,14 +44,21 @@ public class TwitchImpl {
     private final TwitchOAuthService oAuthService;
     private final List<TwitchData> twitchDataList = new ArrayList<>();
     private final List<ShoutoutData> shoutoutNames = new ArrayList<>();
+    private final List<String> redemptionIds = new ArrayList<>();
+    private final Map<String, Pair<Integer, Integer>> checkinConfigs = new HashMap<>();
     private final List<String> shoutedoutNames = new ArrayList<>();
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
     private final JDA discordAPI;
     private TwitchClient twitchClient;
     private Long shoutoutTimestamp = 0L;
-    private String streamerId;
+    private String broadcasterId;
     private String moderatorId;
-    private TokenData tokenData;
+    private volatile TokenData streamerTokenData;
+    private volatile TokenData chatTokenData;
+
+    public String getBroadcasterId() {
+        return broadcasterId;
+    }
 
     public void load() {
         twitchDataList.clear();
@@ -58,6 +67,17 @@ public class TwitchImpl {
         shoutoutNames.addAll(twitchRepo.loadAllShoutout());
         shoutedoutNames.clear();
         shoutedoutNames.addAll(twitchRepo.loadAllShoutedOutNames());
+        redemptionIds.clear();
+        checkinConfigs.clear();
+
+        try {
+            redemptionIds.addAll(twitchRepo.loadRedemptions());
+            checkinConfigs.putAll(twitchRepo.loadCheckinConfigs());
+            streamerTokenData = twitchRepo.loadToken(true);
+            broadcasterId = streamerTokenData.userId();
+        } catch (SQLException e) {
+            Logger.error(e);
+        }
 
         if (!twitchDataList.isEmpty()) {
             twitchDataList.forEach(data -> {
@@ -70,18 +90,117 @@ public class TwitchImpl {
 
     public void scheduleLoad() {
         scheduler.scheduleAtFixedRate(this::load, 1, 1, TimeUnit.DAYS);
+        scheduler.scheduleAtFixedRate(this::checkExpiredVips, 0, 1, TimeUnit.HOURS);
     }
 
-    private synchronized String getValidAccessToken() throws Exception {
-        Instant now = Instant.now();
-        if (tokenData.bundle().expiresAt().isBefore(now.plusSeconds(60))) {
-            Logger.info("Access token expired, refreshing...");
-            TokenBundle refreshed = oAuthService.refreshToken(tokenData.bundle().refreshToken());
-            tokenData = tokenData.withTokenBundle(refreshed);
-            twitchRepo.saveToken(tokenData);
-        }
+    public List<CustomReward> fetchRewards() throws Exception {
+        return twitchClient.getHelix()
+                .getCustomRewards(getValidStreamerAccessToken(), broadcasterId, null, null)
+                .execute()
+                .getRewards();
+    }
 
-        return tokenData.bundle().accessToken();
+    public List<Moderator> fetchModerators() throws Exception {
+        List<Moderator> moderators = new ArrayList<>();
+        String cursor = null;
+
+        do {
+            ModeratorList result = twitchClient.getHelix().getModerators(
+                    getValidStreamerAccessToken(),
+                    broadcasterId,
+                    null,
+                    cursor,
+                    100
+            ).execute();
+
+            moderators.addAll(result.getModerators());
+
+            if (result.getPagination() != null && result.getPagination().getCursor() != null)
+                cursor = result.getPagination().getCursor();
+            else
+                cursor = null;
+        } while (cursor != null);
+
+        return moderators;
+    }
+
+    public List<ChannelVip> fetchVips() throws Exception {
+        List<ChannelVip> vips = new ArrayList<>();
+        String cursor = null;
+
+        do {
+            ChannelVipList result = twitchClient.getHelix().getChannelVips(
+                    getValidStreamerAccessToken(),
+                    broadcasterId,
+                    null,
+                    100,
+                    cursor
+            ).execute();
+
+            vips.addAll(result.getData());
+
+            if (result.getPagination() != null && result.getPagination().getCursor() != null)
+                cursor = result.getPagination().getCursor();
+            else
+                cursor = null;
+        } while (cursor != null);
+
+        return vips;
+    }
+
+    private void checkExpiredVips() {
+        try {
+            long now = System.currentTimeMillis();
+            List<Pair<String, String>> expired = twitchRepo.getExpiredVips(now);
+
+            for (Pair<String, String> vip : expired) {
+                String userId = vip.getKey();
+                String channelId = vip.getValue();
+
+                try {
+                    twitchClient.getHelix().removeChannelVip(getValidStreamerAccessToken(), channelId, userId).execute();
+                    Logger.info("Removed expired VIP from user: " + userId);
+
+                    twitchRepo.removeActiveVip(userId, channelId);
+                } catch (Exception e) {
+                    Logger.error("Failed to remove VIP for user " + userId, e);
+                }
+            }
+        } catch (SQLException e) {
+            Logger.error("Database error checking expired VIPs", e);
+        }
+    }
+
+    private String getValidStreamerAccessToken() throws Exception {
+        Instant now = Instant.now();
+        if (streamerTokenData.bundle().expiresAt().isAfter(now.plusSeconds(60)))
+            return streamerTokenData.bundle().accessToken();
+
+        synchronized (this) {
+            if (streamerTokenData.bundle().expiresAt().isBefore(now.plusSeconds(60))) {
+                Logger.info("Streamer access token expired, refreshing...");
+                TokenBundle refreshed = oAuthService.refreshToken(streamerTokenData.bundle().refreshToken());
+                streamerTokenData = streamerTokenData.withTokenBundle(refreshed);
+                twitchRepo.saveToken(streamerTokenData);
+            }
+            return streamerTokenData.bundle().accessToken();
+        }
+    }
+
+    public String getValidChatAccessToken() throws Exception {
+        Instant now = Instant.now();
+        if (chatTokenData.bundle().expiresAt().isAfter(now.plusSeconds(60)))
+            return chatTokenData.bundle().accessToken();
+
+        synchronized (this) {
+            if (chatTokenData.bundle().expiresAt().isBefore(now.plusSeconds(60))) {
+                Logger.info("Access token expired, refreshing...");
+                TokenBundle refreshed = oAuthService.refreshToken(chatTokenData.bundle().refreshToken());
+                chatTokenData = chatTokenData.withTokenBundle(refreshed);
+                twitchRepo.saveToken(chatTokenData);
+            }
+            return chatTokenData.bundle().accessToken();
+        }
     }
 
     private void handleChannelGoLiveEvent(ChannelGoLiveEvent event) {
@@ -189,7 +308,7 @@ public class TwitchImpl {
     private void updateVodMessage(ChannelGoOfflineEvent event, TwitchData data) {
         try {
             var videoList = twitchClient.getHelix()
-                    .getVideos(getValidAccessToken(), (List<String>) null, event.getChannel().getId(), null,
+                    .getVideos(getValidChatAccessToken(), (List<String>) null, event.getChannel().getId(), null,
                             null, null, null, null, null, null, null)
                     .execute().getVideos();
 
@@ -253,8 +372,8 @@ public class TwitchImpl {
         if (shoutoutTimestamp + 120000L < System.currentTimeMillis()) {
             try {
                 twitchClient.getHelix().sendShoutout(
-                        getValidAccessToken(),
-                        streamerId,
+                        getValidChatAccessToken(),
+                        broadcasterId,
                         raidEvent.getRaider().getId(),
                         moderatorId).queue();
             } catch (Exception e) {
@@ -280,24 +399,116 @@ public class TwitchImpl {
         }
     }
 
+    private void handleChannelPointsRedemptionEvent(ChannelPointsCustomRewardRedemptionEvent event) {
+        String rewardId = event.getReward().getId();
+        String userId = event.getUserId();
+
+        if (redemptionIds.contains(rewardId) || checkinConfigs.containsKey(rewardId)) {
+            try {
+                int newCount = twitchRepo.incrementRedemptionCount(rewardId, userId);
+
+                if (checkinConfigs.containsKey(rewardId)) {
+                    Pair<Integer, Integer> config = checkinConfigs.get(rewardId);
+                    int required = config.getKey();
+                    int days = config.getValue();
+
+                    if (newCount > 0 && newCount % required == 0) {
+                        if (grantVip(userId, days)) {
+                            twitchClient.getChat().sendMessage(event.getBroadcasterUserName(),
+                                    "@" + event.getUserName() + " has reached " + newCount + " "
+                                            + event.getReward().getTitle() + " redeems and earned VIP for " + days +
+                                            (days > 1 ?
+                                                    " days!"
+                                                    : " day!"));
+                            return;
+                        }
+                    }
+                }
+                twitchClient.getChat().sendMessage(event.getBroadcasterUserName(),
+                        "@" + event.getUserName() + " has redeemed \"" + event.getReward().getTitle()
+                                + "\" " + newCount + (newCount > 1 ? " times!" : " time!"));
+            } catch (SQLException e) {
+                Logger.error(e);
+            }
+        }
+    }
+
+    private boolean grantVip(String userId, int days) {
+        try {
+            boolean isTrackedTemp = twitchRepo.isTemporaryVip(userId, broadcasterId);
+
+            if (!isTrackedTemp) {
+                if (broadcasterId.equals(userId)) {
+                    Logger.info("User {} is the broadcaster. The bot will not interfere.", userId);
+                    return false;
+                }
+
+                var vips = BotMain.getContext().twitchVipsCacheService().getOrFetch(broadcasterId);
+
+                if (vips.stream().anyMatch(vip -> vip.getUserId().equals(userId))) {
+                    Logger.info("User {} is already a permanent VIP. The bot will not interfere.", userId);
+                    return false;
+                }
+
+                var moderators = BotMain.getContext().twitchModeratorsCacheService().getOrFetch(broadcasterId);
+
+                if (moderators.stream().anyMatch(moderator -> moderator.getUserId().equals(userId))) {
+                    Logger.info("User {} is a moderator. The bot will not interfere.", userId);
+                    return false;
+                }
+            }
+
+            long millisInDay = 86_400_000L;
+            long newExpiration;
+
+            if (isTrackedTemp) {
+                long currentExp = twitchRepo.getVipExpiration(userId, broadcasterId);
+                long base = Math.max(currentExp, System.currentTimeMillis());
+                newExpiration = base + (days * millisInDay);
+
+                Logger.info("Extending VIP for user {} by {} days.", userId, days);
+            } else {
+                newExpiration = System.currentTimeMillis() + (days * millisInDay);
+
+                try {
+                    twitchClient.getHelix().addChannelVip(getValidStreamerAccessToken(), broadcasterId, userId).execute();
+                    Logger.info("Granted new VIP to user {}.", userId);
+                } catch (Exception e) {
+                    Logger.error("Failed to add VIP role on Twitch for " + userId, e);
+                    return false;
+                }
+            }
+
+            twitchRepo.saveActiveVip(userId, broadcasterId, newExpiration);
+        } catch (Exception e) {
+            Logger.error("Error in grantVip logic for user " + userId, e);
+        }
+        return true;
+    }
+
     private void setup() throws Exception {
         twitchClient = TwitchClientBuilder.builder()
                 .withClientId(config.get("TWITCH_CLIENT_ID"))
                 .withClientSecret(config.get("TWITCH_CLIENT_SECRET"))
                 .withEnableChat(true)
-                .withChatAccount(new OAuth2Credential("twitch", getValidAccessToken()))
                 .withEnableHelix(true)
+                .withEnableEventSocket(true)
+                .withChatAccount(new OAuth2Credential("twitch", getValidChatAccessToken()))
                 .build();
 
         load();
 
-        if (!twitchDataList.isEmpty()) {
-            streamerId = twitchClient.getHelix().getUsers(null, null,
-                            Collections.singletonList(twitchDataList.getFirst().username()))
-                    .execute().getUsers().getFirst().getId();
-            Logger.info("Streamer ID setup");
+        twitchClient.getEventSocket().register(
+                new OAuth2Credential("twitch", getValidStreamerAccessToken()),
+                SubscriptionTypes.CHANNEL_POINTS_CUSTOM_REWARD_REDEMPTION_ADD
+                        .prepareSubscription(
+                                b -> b.broadcasterUserId(broadcasterId).build(),
+                                null
+                        )
+        );
 
-            moderatorId = tokenData.userId();
+        if (!twitchDataList.isEmpty()) {
+            moderatorId = chatTokenData.userId();
 
             twitchClient.getChat().joinChannel(twitchDataList.getFirst().username());
         }
@@ -317,9 +528,10 @@ public class TwitchImpl {
         Logger.info("Starting Twitch API...");
 
         this.discordAPI = discordAPI;
-        this.oAuthService = BotMain.getContext().twitchOauthService();
+        oAuthService = BotMain.getContext().twitchOauthService();
 
-        this.tokenData = twitchRepo.loadToken();
+        streamerTokenData = twitchRepo.loadToken(true);
+        chatTokenData = twitchRepo.loadToken();
 
         setup();
 
@@ -331,6 +543,8 @@ public class TwitchImpl {
                 .onEvent(ChannelGoLiveEvent.class, this::handleChannelGoLiveEvent);
         twitchClient.getEventManager()
                 .onEvent(ChannelGoOfflineEvent.class, this::handleChannelGoOfflineEvent);
+        twitchClient.getEventManager()
+                .onEvent(ChannelPointsCustomRewardRedemptionEvent.class, this::handleChannelPointsRedemptionEvent);
 
         scheduleLoad();
         Logger.info("Twitch API started");

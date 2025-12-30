@@ -10,7 +10,6 @@ import net.dv8tion.jda.api.interactions.commands.build.SubcommandData;
 import net.dv8tion.jda.api.interactions.components.buttons.Button;
 import org.tinylog.Logger;
 
-import java.io.IOException;
 import java.sql.SQLException;
 import java.util.List;
 
@@ -29,7 +28,7 @@ public class TwitchAuth implements SubcommandModule {
     @Override
     public String getSubcommandName() { return "auth"; }
     @Override
-    public String getDescription() { return "Authorize this bot to access your Twitch stream"; }
+    public String getDescription() { return "Authorize this bot to access your chat bot account"; }
 
     @Override
     public SubcommandData definition() {
@@ -51,14 +50,14 @@ public class TwitchAuth implements SubcommandModule {
                         "please revoke it first with </twitch revoke:%s", twitchCommand.getId())).queue();
                 return;
             }
-            link = oauth.createAuthorizationLink();
-        } catch (IOException | SQLException e) {
+            link = oauth.getAuthorizationLink(false);
+        } catch (SQLException e) {
             Logger.error(e);
             event.getHook().sendMessage(INTERNAL_ERROR).queue();
             return;
         }
 
-        event.getHook().sendMessage("Click the button below to authorize this bot to access your Twitch account")
+        event.getHook().sendMessage("Click the button below to authorize this bot to access your chat bot account")
                 .addActionRow(Button.link(link, "Authorize on Twitch"))
                 .queue();
     }

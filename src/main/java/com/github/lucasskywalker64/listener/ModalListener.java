@@ -1,4 +1,4 @@
-package com.github.lucasskywalker64.listener.modal;
+package com.github.lucasskywalker64.listener;
 
 import com.github.lucasskywalker64.modals.ModalRegistry;
 import net.dv8tion.jda.api.events.interaction.ModalInteractionEvent;
