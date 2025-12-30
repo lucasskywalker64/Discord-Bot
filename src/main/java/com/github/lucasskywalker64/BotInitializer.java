@@ -58,6 +58,7 @@ import org.tinylog.Logger;
 
 import java.io.File;
 import java.io.IOException;
+import java.sql.SQLException;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -95,27 +96,7 @@ public class BotInitializer {
         WebServer webServer = new WebServer();
         webServer.start();
 
-        CompletableFuture<TwitchImpl> twitchFuture;
-        if (TwitchRepository.getInstance().loadToken() != null
-                && TwitchRepository.getInstance().loadToken(true) != null) {
-            ExecutorService executor = Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("twitch-init").factory());
-
-            twitchFuture = CompletableFuture.supplyAsync(() -> {
-                try {
-                    return new TwitchImpl(jda);
-                } catch (Exception e) {
-                    throw new RuntimeException(e);
-                }
-            }, executor).whenComplete((twitch, err) -> {
-                if (err != null) {
-                    Logger.error(err);
-                }  else
-                    BotMain.getContext().setTwitch(twitch);
-            });
-        } else {
-            twitchFuture = null;
-        }
-        BotMain.getContext().setTwitchFuture(twitchFuture);
+        tryTwitchStart();
 
         youTube = new YouTubeImpl();
         BotMain.getContext().setYouTube(youTube);
@@ -139,6 +120,7 @@ public class BotInitializer {
         Logger.info("Discord API ready");
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             try {
+                CompletableFuture<TwitchImpl> twitchFuture = BotMain.getContext().twitchFuture();
                 if (twitchFuture != null) {
                     TwitchImpl twitch = twitchFuture.getNow(null);
                     if (twitch != null)
@@ -159,6 +141,30 @@ public class BotInitializer {
             }
         }));
         scheduler.schedule(() -> System.exit(1), computeNextDelay(4, 0, 0), TimeUnit.SECONDS);
+    }
+
+    public static void tryTwitchStart() throws SQLException {
+        CompletableFuture<TwitchImpl> twitchFuture;
+        if (TwitchRepository.getInstance().loadToken() != null
+                && TwitchRepository.getInstance().loadToken(true) != null) {
+            ExecutorService executor = Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("twitch-init").factory());
+
+            twitchFuture = CompletableFuture.supplyAsync(() -> {
+                try {
+                    return new TwitchImpl(BotMain.getContext().jda());
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            }, executor).whenComplete((twitch, err) -> {
+                if (err != null) {
+                    Logger.error(err);
+                }  else
+                    BotMain.getContext().setTwitch(twitch);
+            });
+        } else {
+            twitchFuture = null;
+        }
+        BotMain.getContext().setTwitchFuture(twitchFuture);
     }
 
     private @NotNull CommandRegistry createCommands() {
