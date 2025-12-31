@@ -294,7 +294,7 @@ public class TwitchImpl {
         Logger.info("Caught Offline Event from: {}", event.getChannel().getName());
 
         Optional<TwitchData> optionalData = twitchDataList.stream()
-                .filter(data -> data.channel().equals(event.getChannel().getId()))
+                .filter(data -> data.username().equals(event.getChannel().getId()))
                 .findFirst();
 
         if (optionalData.isEmpty() || optionalData.get().announcementId() == null) {
@@ -308,21 +308,17 @@ public class TwitchImpl {
     private void updateVodMessage(ChannelGoOfflineEvent event, TwitchData data) {
         try {
             var videoList = twitchClient.getHelix()
-                    .getVideos(getValidChatAccessToken(), (List<String>) null, event.getChannel().getId(), null,
-                            null, null, null, null, null, null, null)
+                    .getVideos(getValidChatAccessToken(), Collections.singletonList(data.streamId()),
+                            event.getChannel().getId(), null, null, null, null,
+                            null, null, null, null)
                     .execute().getVideos();
 
             if (videoList.isEmpty()) {
-                Logger.error("No VOD found for channel {}", event.getChannel().getName());
+                Logger.error("No VOD found for the latest stream of channel {}", event.getChannel().getName());
                 return;
             }
 
             Video lastVod = videoList.getFirst();
-
-            if (!lastVod.getId().equals(data.streamId())) {
-                Logger.warn("Latest VOD for {} is old. Twitch probably hasn't published the new one yet.", event.getChannel().getName());
-                return;
-            }
 
             EmbedBuilder embedBuilder = new EmbedBuilder();
             embedBuilder.setAuthor(event.getChannel().getName(), HTTPS_TWITCH_TV
