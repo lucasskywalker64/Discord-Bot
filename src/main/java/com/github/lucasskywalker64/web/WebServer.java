@@ -1,5 +1,7 @@
 package com.github.lucasskywalker64.web;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.github.lucasskywalker64.BotContext;
 import com.github.lucasskywalker64.BotInitializer;
 import com.github.lucasskywalker64.BotMain;
@@ -8,6 +10,8 @@ import com.github.lucasskywalker64.persistence.data.YouTubeData;
 import com.github.lucasskywalker64.persistence.repository.YouTubeRepository;
 import com.github.lucasskywalker64.ticket.model.Ticket;
 import com.github.lucasskywalker64.ticket.persistence.TicketRepository;
+import com.github.twitch4j.common.util.TypeConvert;
+import com.github.twitch4j.eventsub.events.CustomRewardRedemptionAddEvent;
 import com.google.gson.Gson;
 import com.google.gson.annotations.SerializedName;
 import io.github.cdimascio.dotenv.Dotenv;
@@ -46,6 +50,8 @@ public class WebServer {
     private final String TWITCH_LOGIN_PATH;
     private final String TWITCH_REDIRECT_PATH;
     private final String ENCODED_TWITCH_REDIRECT_URI;
+    private final String TWITCH_EVENTSUB_PATH;
+    private final String TWITCH_EVENTSUB_SECRET;
     private final String TWITCH_CLIENT_ID;
     private final String TWITCH_SCOPES;
     private final String TWITCH_STREAMER_SCOPES;
@@ -68,6 +74,7 @@ public class WebServer {
     private final PresignedUrlGenerator presignedUrlGenerator;
     private final Gson gson;
     private final ConcurrentHashMap<String, ExecutorService> channelExecutors;
+    private final Set<String> processedEventSubMessageIds = ConcurrentHashMap.newKeySet();
 
     public WebServer() {
         botContext = BotMain.getContext();
@@ -76,6 +83,8 @@ public class WebServer {
         port = Integer.parseInt(config.get("SERVER_PORT"));
         TWITCH_LOGIN_PATH = config.get("TWITCH_LOGIN_PATH");
         TWITCH_REDIRECT_PATH = config.get("TWITCH_REDIRECT_PATH");
+        TWITCH_EVENTSUB_PATH = config.get("TWITCH_EVENTSUB_PATH");
+        TWITCH_EVENTSUB_SECRET = config.get("TWITCH_EVENTSUB_SECRET");
         TWITCH_CLIENT_ID = config.get("TWITCH_CLIENT_ID");
         TWITCH_SCOPES = config.get("TWITCH_SCOPE");
         TWITCH_STREAMER_SCOPES = config.get("TWITCH_STREAMER_SCOPE");
@@ -160,6 +169,7 @@ public class WebServer {
 
         server.get(TWITCH_LOGIN_PATH, this::handleTwitchLogin);
         server.get(TWITCH_REDIRECT_PATH, this::handleTwitchCallback);
+        server.post(TWITCH_EVENTSUB_PATH, this::handleTwitchEventsub);
 
         server.get(DISCORD_LOGIN_PATH, this::handleDiscordLogin);
         server.get(DISCORD_REDIRECT_PATH, this::handleDiscordCallback);
@@ -216,7 +226,7 @@ public class WebServer {
                         "<p>Missing streamer attribute.</p>");
                 return;
             }
-            boolean streamerLogin = ctx.sessionAttribute("streamer");
+            boolean streamerLogin = Boolean.TRUE.equals(ctx.sessionAttribute("streamer"));
             botContext.twitchOauthService().onOAuthCallback(code, streamerLogin);
             if (botContext.twitch() == null)
                 BotInitializer.tryTwitchStart();
@@ -228,6 +238,79 @@ public class WebServer {
         }
         ctx.status(HttpStatus.OK).html("<h1>Authorization successful</h1>" +
                 "<p>You can now leave this page.</p>");
+    }
+
+    private void handleTwitchEventsub(Context ctx) {
+        Logger.info("Received Twitch EventSub request.");
+        String messageId = ctx.header("Twitch-Eventsub-Message-Id");
+        String timestamp = ctx.header("Twitch-Eventsub-Message-Timestamp");
+        String signature = ctx.header("Twitch-Eventsub-Message-Signature");
+        String messageType = ctx.header("Twitch-Eventsub-Message-Type");
+
+        if (messageId == null || timestamp == null || signature == null || messageType == null) {
+            Logger.warn("Missing required headers in Twitch EventSub request. Headers: {}, {}, {}, {}",
+                    messageId, timestamp, signature, messageType);
+            ctx.status(HttpStatus.BAD_REQUEST);
+            return;
+        }
+
+        try {
+            Instant messageTime = Instant.parse(timestamp);
+            if (messageTime.isBefore(Instant.now().minus(Duration.ofMinutes(10)))) {
+                Logger.warn("Received an expired Twitch Webhook message (Possible replay attack). Dropping.");
+                ctx.status(HttpStatus.OK).result("");
+                return;
+            }
+        } catch (Exception e) {
+            Logger.error(e);
+            ctx.status(HttpStatus.BAD_REQUEST);
+            return;
+        }
+
+        if (!processedEventSubMessageIds.add(messageId)) {
+            Logger.info("Duplicate Twitch EventSub message received. Ignoring.");
+            ctx.status(HttpStatus.OK).result("");
+            return;
+        }
+
+        String rawBody = ctx.body();
+        if (!verifyTwitchSignature(signature, messageId, timestamp, rawBody)) {
+            Logger.warn("Invalid Twitch EventSub signature from IP: {}", ctx.header("CF-Connecting-IP"));
+            ctx.status(HttpStatus.FORBIDDEN);
+            return;
+        }
+
+        try {
+            JsonNode jsonNode = TypeConvert.getObjectMapper().readTree(rawBody);
+
+            switch (messageType) {
+                case "webhook_callback_verification" -> {
+                    String challenge = jsonNode.get("challenge").asText();
+                    ctx.contentType("text/plain").result(challenge).status(HttpStatus.OK);
+                    Logger.info("Successfully verified Twitch EventSub webhook.");
+                }
+                case "notification" -> {
+                    ctx.status(HttpStatus.OK).result("");
+
+                    String eventType = jsonNode.get("subscription").get("type").asText();
+                    if ("channel.channel_points_custom_reward_redemption.add".equals(eventType)) {
+                        CustomRewardRedemptionAddEvent event = TypeConvert.getObjectMapper()
+                                .treeToValue(jsonNode.get("event"), CustomRewardRedemptionAddEvent.class);
+
+                        botContext.twitch().publishEvent(event);
+                    }
+                }
+                case "revocation" -> {
+                    ctx.status(HttpStatus.OK).result("");
+                    Logger.warn("Twitch revoked webhook subscription: {}",
+                            jsonNode.get("subscription").toPrettyString());
+                }
+                default -> ctx.status(HttpStatus.OK).result("");
+            }
+        } catch (JsonProcessingException e) {
+            Logger.error(e, "Error processing Twitch EventSub webhook");
+            ctx.status(HttpStatus.INTERNAL_SERVER_ERROR);
+        }
     }
 
     private void handleDiscordLogin(Context ctx) {
@@ -472,6 +555,37 @@ public class WebServer {
             Logger.error(e);
             ctx.status(HttpStatus.INTERNAL_SERVER_ERROR).html("<h1>500 Internal Server Error</h1>" +
                     "<p>Please try again. If this error persists contact the developer.</p>");
+        }
+    }
+
+    private boolean verifyTwitchSignature(
+            String signatureHeader,
+            String messageId,
+            String timestamp,
+            String rawBody) {
+        try {
+            String messageToSign = messageId + timestamp + rawBody;
+
+            Mac mac = Mac.getInstance("HmacSHA256");
+            SecretKeySpec secretKey = new SecretKeySpec(TWITCH_EVENTSUB_SECRET.getBytes(), "HmacSHA256");
+            mac.init(secretKey);
+
+            byte[] rawHmac = mac.doFinal(messageToSign.getBytes(StandardCharsets.UTF_8));
+
+            StringBuilder hexString = new StringBuilder("sha256=");
+            for (byte b : rawHmac) {
+                String hex = Integer.toHexString(0xff & b);
+                if (hex.length() == 1) hexString.append('0');
+                hexString.append(hex);
+            }
+
+            return MessageDigest.isEqual(
+                    hexString.toString().getBytes(StandardCharsets.UTF_8),
+                    signatureHeader.getBytes(StandardCharsets.UTF_8)
+            );
+        } catch (NoSuchAlgorithmException | InvalidKeyException e) {
+            Logger.error(e, "Failed to verify Twitch signature");
+            return false;
         }
     }
 
