@@ -6,7 +6,7 @@
 
     <groupId>com.github.lucasskywalker64</groupId>
     <artifactId>DiscordBot</artifactId>
-    <version>4.9.1</version>
+    <version>5.0.0</version>
 
     <properties>
         <maven.compiler.source>21</maven.compiler.source>
@@ -81,7 +81,7 @@
         <dependency>
             <groupId>com.github.twitch4j</groupId>
             <artifactId>twitch4j</artifactId>
-            <version>1.25.0</version>
+            <version>1.26.0</version>
         </dependency>
         <dependency>
             <groupId>org.tinylog</groupId>
