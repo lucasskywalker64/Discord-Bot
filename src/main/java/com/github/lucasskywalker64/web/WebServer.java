@@ -18,10 +18,12 @@ import io.github.cdimascio.dotenv.Dotenv;
 import io.javalin.Javalin;
 import io.javalin.http.Context;
 import io.javalin.http.HttpStatus;
-import io.javalin.http.staticfiles.Location;
+import org.eclipse.jetty.ee10.servlet.SessionHandler;
 import org.eclipse.jetty.http.HttpCookie.SameSite;
-import org.eclipse.jetty.server.Server;
-import org.eclipse.jetty.server.session.*;
+import org.eclipse.jetty.session.DatabaseAdaptor;
+import org.eclipse.jetty.session.DefaultSessionCache;
+import org.eclipse.jetty.session.JDBCSessionDataStoreFactory;
+import org.eclipse.jetty.session.SessionCache;
 import org.jetbrains.annotations.Nullable;
 import org.tinylog.Logger;
 
@@ -32,38 +34,32 @@ import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
+import java.net.http.HttpRequest.BodyPublishers;
 import java.net.http.HttpResponse;
+import java.net.http.HttpResponse.BodyHandlers;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AccessDeniedException;
 import java.security.InvalidKeyException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.security.SecureRandom;
 import java.sql.SQLException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
 
+import static io.javalin.apibuilder.ApiBuilder.*;
+
 public class WebServer {
 
-    private final String TWITCH_LOGIN_PATH;
-    private final String TWITCH_REDIRECT_PATH;
     private final String ENCODED_TWITCH_REDIRECT_URI;
-    private final String TWITCH_EVENTSUB_PATH;
     private final String TWITCH_EVENTSUB_SECRET;
     private final String TWITCH_CLIENT_ID;
     private final String TWITCH_SCOPES;
     private final String TWITCH_STREAMER_SCOPES;
-    private final String DISCORD_LOGIN_PATH;
-    private final String DISCORD_REDIRECT_PATH;
     private final String ENCODED_DISCORD_REDIRECT_URI;
     private final String DISCORD_CLIENT_ID;
     private final String DISCORD_CLIENT_SECRET;
-    private final String TICKETS_BASE_PATH;
-    private final String TICKETS_TRANSCRIPTS_PATH;
-    private final String TICKETS_TRANSCRIPTS_ATTACHMENTS_PATH;
-    private final String YOUTUBE_CALLBACK_PATH;
     private final int port;
 
     private final BotContext botContext;
@@ -74,43 +70,35 @@ public class WebServer {
     private final PresignedUrlGenerator presignedUrlGenerator;
     private final Gson gson;
     private final ConcurrentHashMap<String, ExecutorService> channelExecutors;
-    private final Set<String> processedEventSubMessageIds = ConcurrentHashMap.newKeySet();
+    private final Set<String> processedEventSubMessageIds;
 
     public WebServer() {
         botContext = BotMain.getContext();
         Dotenv config = botContext.config();
         String serverBaseUrl = config.get("SERVER_BASE_URL");
         port = Integer.parseInt(config.get("SERVER_PORT"));
-        TWITCH_LOGIN_PATH = config.get("TWITCH_LOGIN_PATH");
-        TWITCH_REDIRECT_PATH = config.get("TWITCH_REDIRECT_PATH");
-        TWITCH_EVENTSUB_PATH = config.get("TWITCH_EVENTSUB_PATH");
         TWITCH_EVENTSUB_SECRET = config.get("TWITCH_EVENTSUB_SECRET");
         TWITCH_CLIENT_ID = config.get("TWITCH_CLIENT_ID");
         TWITCH_SCOPES = config.get("TWITCH_SCOPE");
         TWITCH_STREAMER_SCOPES = config.get("TWITCH_STREAMER_SCOPE");
-        DISCORD_LOGIN_PATH = config.get("DISCORD_LOGIN_PATH");
-        DISCORD_REDIRECT_PATH = config.get("DISCORD_REDIRECT_PATH");
-        String twitchRedirectUri = serverBaseUrl + TWITCH_REDIRECT_PATH;
-        String discordRedirectUri = serverBaseUrl + DISCORD_REDIRECT_PATH;
-        ENCODED_TWITCH_REDIRECT_URI = URLEncoder.encode(twitchRedirectUri, StandardCharsets.UTF_8);
-        ENCODED_DISCORD_REDIRECT_URI = URLEncoder.encode(discordRedirectUri, StandardCharsets.UTF_8);
+        ENCODED_TWITCH_REDIRECT_URI = URLEncoder.encode(serverBaseUrl + Routes.AUTH_TWITCH_CALLBACK,
+                StandardCharsets.UTF_8);
+        ENCODED_DISCORD_REDIRECT_URI = URLEncoder.encode(serverBaseUrl + Routes.AUTH_DISCORD_CALLBACK,
+                StandardCharsets.UTF_8);
         DISCORD_CLIENT_ID = config.get("DISCORD_CLIENT_ID");
         DISCORD_CLIENT_SECRET = config.get("DISCORD_CLIENT_SECRET");
-        TICKETS_BASE_PATH = config.get("TICKETS_BASE_PATH");
-        TICKETS_TRANSCRIPTS_PATH = TICKETS_BASE_PATH + "/transcripts/{id}";
-        TICKETS_TRANSCRIPTS_ATTACHMENTS_PATH = TICKETS_TRANSCRIPTS_PATH + "/attachments";
-        YOUTUBE_CALLBACK_PATH = config.get("YOUTUBE_CALLBACK_PATH");
         ticketRepository = TicketRepository.getInstance();
         youTubeRepository = YouTubeRepository.getInstance();
         httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
         presignedUrlGenerator = new PresignedUrlGenerator();
         gson = new Gson();
         channelExecutors = new ConcurrentHashMap<>();
+        processedEventSubMessageIds = ConcurrentHashMap.newKeySet();
     }
 
     public void start() {
-        Javalin server = Javalin.create(config -> {
-            config.useVirtualThreads = true;
+        Javalin.create(config -> {
+            config.concurrency.useVirtualThreads = true;
             config.requestLogger.http((ctx, ms) -> {
                 if (!ctx.status().equals(HttpStatus.NOT_FOUND))
                     Logger.info("{} {} {} {}, User Agent: \"{}\" ({}ms)",
@@ -121,15 +109,18 @@ public class WebServer {
                             ctx.userAgent() != null ? ctx.userAgent() : "-",
                             ms);
             });
-            config.staticFiles.add("/public", Location.CLASSPATH);
+            config.staticFiles.add(staticFiles -> {
+                staticFiles.hostedPath = "/public";
+                staticFiles.directory = "/public";
+            });
 
             config.jetty.modifyServletContextHandler(servletContextHandler -> {
                 SessionHandler sessionHandler = new SessionHandler();
                 sessionHandler.setHttpOnly(true);
                 sessionHandler.setSecureRequestOnly(true);
                 sessionHandler.setSameSite(SameSite.LAX);
-                sessionHandler.getSessionCookieConfig().setMaxAge((int) TimeUnit.DAYS.toSeconds(90));
-                sessionHandler.setSessionIdManager(new DefaultSessionIdManager(new Server(), new SecureRandom()));
+                sessionHandler.setMaxCookieAge((int) TimeUnit.DAYS.toSeconds(90));
+                sessionHandler.setMaxInactiveInterval((int) TimeUnit.DAYS.toSeconds(90));
 
                 SessionCache sessionCache = new DefaultSessionCache(sessionHandler);
 
@@ -148,38 +139,56 @@ public class WebServer {
                 sessionHandler.setSessionCache(sessionCache);
                 servletContextHandler.setSessionHandler(sessionHandler);
             });
-        }).events(event -> event.serverStarted(() -> Logger.info("Webserver is ready"))).start(port);
 
-        server.exception(Exception.class, (e, ctx) -> {
-            Logger.error(
-                    "Unhandled exception for request: {} {} {}",
-                    ctx.method(),
-                    ctx.path(),
-                    e
-            );
+            config.routes.exception(Exception.class, (e, ctx) -> {
+                Logger.error(
+                        "Unhandled exception for request: {} {} {}",
+                        ctx.method(),
+                        ctx.path(),
+                        e
+                );
 
-            ctx.status(HttpStatus.INTERNAL_SERVER_ERROR).result("An internal server error occurred.");
-        });
+                ctx.status(HttpStatus.INTERNAL_SERVER_ERROR).result("An internal server error occurred.");
+            });
+            config.routes.exception(AccessDeniedException.class, (e, ctx) -> Logger.warn(
+                    "Authorization Failed (403): User at {} tried to access {}",
+                    ctx.header("CF-Connecting-IP"),
+                    ctx.path()
+            ));
 
-        server.exception(AccessDeniedException.class, (e, ctx) -> Logger.warn(
-                "Authorization Failed (403): User at {} tried to access {}",
-                ctx.header("CF-Connecting-IP"),
-                ctx.path()
-        ));
+            config.routes.apiBuilder(() -> {
+                path("api", () -> {
+                    path("auth", () -> {
+                        path("twitch", () -> {
+                            get(this::handleTwitchLogin);
+                            get("callback", this::handleTwitchCallback);
+                        });
+                        path("discord", () -> {
+                            get(this::handleDiscordLogin);
+                            get("callback", this::handleDiscordCallback);
+                        });
+                    });
 
-        server.get(TWITCH_LOGIN_PATH, this::handleTwitchLogin);
-        server.get(TWITCH_REDIRECT_PATH, this::handleTwitchCallback);
-        server.post(TWITCH_EVENTSUB_PATH, this::handleTwitchEventsub);
+                    path("webhooks", () -> {
+                        post("twitch", this::handleTwitchEventsub);
+                        path("youtube", () -> {
+                            get(this::youTubeChallengeHandler);
+                            post(this::youTubeWebhookHandler);
+                        });
+                    });
 
-        server.get(DISCORD_LOGIN_PATH, this::handleDiscordLogin);
-        server.get(DISCORD_REDIRECT_PATH, this::handleDiscordCallback);
+                    path("tickets", () -> {
+                        get(this::handleTicketList);
+                        path("transcripts/{id}", () -> {
+                            get(this::handleTranscriptRequest);
+                            get("attachments", this::handleTranscriptAttachments);
+                        });
+                    });
+                });
+            });
 
-        server.get(TICKETS_BASE_PATH, this::handleTicketList);
-        server.get(TICKETS_TRANSCRIPTS_PATH, this::handleTranscriptRequest);
-        server.get(TICKETS_TRANSCRIPTS_ATTACHMENTS_PATH, this::handleTranscriptAttachments);
-
-        server.get(YOUTUBE_CALLBACK_PATH, this::youTubeChallengeHandler);
-        server.post(YOUTUBE_CALLBACK_PATH, this::youTubeWebhookHandler);
+            config.events.serverStarted(() -> Logger.info("Webserver is ready"));
+        }).start(port);
     }
 
     private void handleTwitchLogin(Context ctx) {
@@ -350,10 +359,10 @@ public class WebServer {
         HttpRequest tokenRequest = HttpRequest.newBuilder()
                 .uri(URI.create("https://discord.com/api/v10/oauth2/token"))
                 .header("Content-Type", "application/x-www-form-urlencoded")
-                .POST(HttpRequest.BodyPublishers.ofString(body))
+                .POST(BodyPublishers.ofString(body))
                 .build();
 
-        HttpResponse<String> tokenResponse = httpClient.send(tokenRequest, HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> tokenResponse = httpClient.send(tokenRequest, BodyHandlers.ofString());
         if (tokenResponse.statusCode() != 200) {
             Logger.error("Failed to get Discord access token: {}", tokenResponse.body());
             ctx.status(HttpStatus.INTERNAL_SERVER_ERROR).html("<h1>Error: Could not verify with Discord.</h1>");
@@ -409,10 +418,10 @@ public class WebServer {
         HttpRequest refreshRequest = HttpRequest.newBuilder()
                 .uri(URI.create("https://discord.com/api/v10/oauth2/token"))
                 .header("Content-Type", "application/x-www-form-urlencoded")
-                .POST(HttpRequest.BodyPublishers.ofString(body))
+                .POST(BodyPublishers.ofString(body))
                 .build();
 
-        HttpResponse<String> response = httpClient.send(refreshRequest, HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> response = httpClient.send(refreshRequest, BodyHandlers.ofString());
 
         if (response.statusCode() == 200) {
             Logger.info("Successfully refreshed Discord token.");
@@ -605,7 +614,7 @@ public class WebServer {
     private DiscordUser authorizeDiscordUser(Context ctx) throws IOException, InterruptedException {
         String accessToken = ctx.sessionAttribute("access_token");
         if (accessToken == null) {
-            ctx.redirect(DISCORD_LOGIN_PATH + "?redirect_path=" + ctx.path());
+            ctx.redirect(Routes.AUTH_DISCORD + "?redirect_path=" + ctx.path());
             return null;
         }
 
@@ -623,7 +632,7 @@ public class WebServer {
         if (discordUser == null) {
             ctx.sessionAttribute("access_token", null);
             ctx.sessionAttribute("refresh_token", null);
-            ctx.redirect(DISCORD_LOGIN_PATH + "?redirect_path=" + ctx.path());
+            ctx.redirect(Routes.AUTH_DISCORD + "?redirect_path=" + ctx.path());
             return null;
         }
 
@@ -663,7 +672,7 @@ public class WebServer {
                 .header("Authorization", "Bearer " + accessToken)
                 .build();
 
-        HttpResponse<String> userResponse = httpClient.send(userRequest, HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> userResponse = httpClient.send(userRequest, BodyHandlers.ofString());
         if (userResponse.statusCode() != 200) {
             Logger.warn("Failed to get user info, token may be invalid. Status: {}, Body: {}",
                     userResponse.statusCode(), userResponse.body());

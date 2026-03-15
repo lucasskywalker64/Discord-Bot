@@ -3,6 +3,7 @@ package com.github.lucasskywalker64.ticket.service;
 import com.github.lucasskywalker64.BotContext;
 import com.github.lucasskywalker64.BotMain;
 import com.github.lucasskywalker64.ticket.model.Ticket;
+import com.github.lucasskywalker64.web.Routes;
 import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.entities.Guild;
@@ -52,10 +53,10 @@ public class TicketLogger {
 
         String transcriptUri;
         if ("prod".equals(System.getProperty("app.env", "prod"))) {
-            transcriptUri = String.format("%s/tickets/transcripts/%d", botContext.config().get("SERVER_BASE_URL"), ticket.id());
+            transcriptUri = Routes.buildTranscriptUrl(botContext.config().get("SERVER_BASE_URL"), ticket.id());
         } else
-            transcriptUri = String.format("%s:%s/tickets/transcripts/%d",
-                    botContext.config().get("SERVER_BASE_URL"), botContext.config().get("SERVER_PORT"), ticket.id());
+            transcriptUri = Routes.buildTranscriptUrl(botContext.config().get("SERVER_BASE_URL")
+                    + ":" + botContext.config().get("SERVER_PORT"), ticket.id());
 
         ActionRow actionRow = ActionRow.of(
                 Button.link(transcriptUri, "View Online Transcript")

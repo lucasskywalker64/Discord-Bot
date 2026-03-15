@@ -1,6 +1,7 @@
 @import com.github.lucasskywalker64.ticket.model.Ticket
 @import java.time.format.DateTimeFormatter
 @import java.util.List
+@import com.github.lucasskywalker64.web.Routes
 @import net.dv8tion.jda.api.entities.Guild
 @import io.github.cdimascio.dotenv.Dotenv
 
@@ -61,9 +62,10 @@
                 <td style="white-space: nowrap;">
                     !{String transcriptListUrl;}
                     @if("prod".equals(System.getProperty("app.env", "prod")))
-                        !{transcriptListUrl = String.format("%s/tickets/transcripts/%s", config.get("SERVER_BASE_URL"), ticket.id());}
+                        !{transcriptListUrl = Routes.buildTranscriptUrl(config.get("SERVER_BASE_URL"), ticket.id());}
                     @else
-                        !{transcriptListUrl = String.format("%s:%s/tickets/transcripts/%s", config.get("SERVER_BASE_URL"), config.get("SERVER_PORT"), ticket.id());}
+                        !{transcriptListUrl = Routes.buildTranscriptUrl(config.get("SERVER_BASE_URL")
+                            + ":" + config.get("SERVER_PORT"), ticket.id());}
                     @endif
                     <a href="${transcriptListUrl}" target="_blank">link</a>
                 </td>
