@@ -3,16 +3,23 @@ package com.github.lucasskywalker64.api.youtube;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.dataformat.xml.XmlMapper;
 import com.github.lucasskywalker64.BotContext;
+import com.github.lucasskywalker64.BotMain;
 import com.github.lucasskywalker64.api.youtube.model.Entry;
 import com.github.lucasskywalker64.api.youtube.model.Feed;
 import com.github.lucasskywalker64.exceptions.InvalidParameterException;
 import com.github.lucasskywalker64.persistence.data.YouTubeData;
 import com.github.lucasskywalker64.persistence.repository.YouTubeRepository;
+import com.github.lucasskywalker64.web.Routes;
 import com.google.api.client.googleapis.javanet.GoogleNetHttpTransport;
 import com.google.api.client.json.JsonFactory;
 import com.google.api.client.json.gson.GsonFactory;
 import com.google.api.services.youtube.YouTube;
 import com.google.api.services.youtube.YouTube.Builder;
+import com.google.api.services.youtube.model.ChannelListResponse;
+import com.google.api.services.youtube.model.Video;
+import net.dv8tion.jda.api.JDA;
+import net.dv8tion.jda.api.entities.channel.middleman.MessageChannel;
+import org.tinylog.Logger;
 
 import java.io.IOException;
 import java.net.URI;
@@ -27,12 +34,6 @@ import java.sql.SQLException;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
-
-import com.github.lucasskywalker64.BotMain;
-import com.google.api.services.youtube.model.*;
-import net.dv8tion.jda.api.JDA;
-import net.dv8tion.jda.api.entities.channel.middleman.MessageChannel;
-import org.tinylog.Logger;
 
 @SuppressWarnings({"java:S1192", "DataFlowIssue"})
 public class YouTubeImpl {
@@ -303,7 +304,7 @@ public class YouTubeImpl {
         executor = context.taskExecutor();
         HUB_URL = "https://pubsubhubbub.appspot.com/";
         TOPIC_BASE_URL = "https://www.youtube.com/xml/feeds/videos.xml";
-        CALLBACK_BASE_URL = context.config().get("SERVER_BASE_URL") + context.config().get("YOUTUBE_CALLBACK_PATH");
+        CALLBACK_BASE_URL = context.config().get("SERVER_BASE_URL") + Routes.WEBHOOK_YOUTUBE;
         xmlMapper = new XmlMapper();
         xmlMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         Logger.info("YouTube API started");

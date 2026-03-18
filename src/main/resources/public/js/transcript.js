@@ -17,7 +17,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     try {
         const ticketId = document.body.dataset.ticketId;
-        const response = await fetch(`${ticketId}/attachments`);
+        const response = await fetch(`/api/tickets/transcripts/${ticketId}/attachments`);
         if (!response.ok) throw new Error('Failed to fetch attachment URLs');
         const urls = await response.json();
 

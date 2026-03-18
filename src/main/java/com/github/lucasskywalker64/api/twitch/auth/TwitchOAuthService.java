@@ -6,6 +6,7 @@ import com.github.lucasskywalker64.BotContext;
 import com.github.lucasskywalker64.BotMain;
 import com.github.lucasskywalker64.persistence.data.TokenData;
 import com.github.lucasskywalker64.persistence.repository.TwitchRepository;
+import com.github.lucasskywalker64.web.Routes;
 import io.github.cdimascio.dotenv.Dotenv;
 import org.jetbrains.annotations.NotNull;
 
@@ -42,10 +43,8 @@ public class TwitchOAuthService {
         this.CLIENT_ID = config.get("TWITCH_CLIENT_ID");
         this.CLIENT_SECRET = config.get("TWITCH_CLIENT_SECRET");
         String serverBaseUrl = config.get("SERVER_BASE_URL");
-        String loginPath = config.get("TWITCH_LOGIN_PATH");
-        String redirectPath = config.get("TWITCH_REDIRECT_PATH");
-        String redirectUri = serverBaseUrl + redirectPath;
-        LOGIN_URI = serverBaseUrl + loginPath;
+        String redirectUri = serverBaseUrl + Routes.AUTH_TWITCH_CALLBACK;
+        LOGIN_URI = serverBaseUrl + Routes.AUTH_TWITCH;
         ENCODED_REDIRECT_URI = URLEncoder.encode(redirectUri, StandardCharsets.UTF_8);
     }
 

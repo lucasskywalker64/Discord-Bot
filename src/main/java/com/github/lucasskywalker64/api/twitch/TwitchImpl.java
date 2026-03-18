@@ -7,6 +7,7 @@ import com.github.lucasskywalker64.persistence.data.ShoutoutData;
 import com.github.lucasskywalker64.persistence.data.TokenData;
 import com.github.lucasskywalker64.persistence.data.TwitchData;
 import com.github.lucasskywalker64.persistence.repository.TwitchRepository;
+import com.github.lucasskywalker64.web.Routes;
 import com.github.philippheuer.credentialmanager.domain.OAuth2Credential;
 import com.github.twitch4j.TwitchClient;
 import com.github.twitch4j.TwitchClientBuilder;
@@ -552,7 +553,7 @@ public class TwitchImpl {
                 builder -> builder.broadcasterUserId(broadcasterId).build(),
                 EventSubTransport.builder()
                         .method(EventSubTransportMethod.WEBHOOK)
-                        .callback(config.get("SERVER_BASE_URL") + config.get("TWITCH_EVENTSUB_PATH"))
+                        .callback(config.get("SERVER_BASE_URL") + Routes.WEBHOOK_TWITCH)
                         .secret(config.get("TWITCH_EVENTSUB_SECRET"))
                         .build()
         );

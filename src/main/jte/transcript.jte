@@ -8,10 +8,10 @@
 <head>
     <title>Transcript for #${data.channelName()}</title>
     <meta charset="UTF-8">
-    <meta name="version" content="1.0.1">
+    <meta name="version" content="2.0.0">
     <link rel="icon" type="image/png" href="/icons/transcript-white.png" media="(prefers-color-scheme: dark)">
     <link rel="icon" type="image/png" href="/icons/transcript-black.png" media="(prefers-color-scheme: light)">
-    <link rel="stylesheet" href="/css/transcript.css">
+    <link rel="stylesheet" href="/public/css/transcript.css">
 </head>
 <body data-ticket-id="${data.ticketId()}">
 <div class="header">
@@ -101,6 +101,6 @@
     </div>
 @endfor
 
-<script src="/js/transcript.js"></script>
+<script src="/public/js/transcript.js"></script>
 </body>
 </html>

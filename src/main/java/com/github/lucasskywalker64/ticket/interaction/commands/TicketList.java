@@ -5,6 +5,7 @@ import com.github.lucasskywalker64.commands.SubcommandModule;
 import com.github.lucasskywalker64.ticket.TicketModule;
 import com.github.lucasskywalker64.ticket.model.Ticket;
 import com.github.lucasskywalker64.ticket.persistence.TicketRepository;
+import com.github.lucasskywalker64.web.Routes;
 import io.github.cdimascio.dotenv.Dotenv;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
 import net.dv8tion.jda.api.interactions.commands.build.SubcommandData;
@@ -59,11 +60,12 @@ public class TicketList implements SubcommandModule {
 
         String url;
         if ("prod".equals(System.getProperty("app.env", "prod"))) {
-            url = String.format("%s/tickets?guild_id=%d",
-                    config.get("SERVER_BASE_URL"), event.getGuild().getIdLong());
+            url = String.format("%s%s?guild_id=%d",
+                    config.get("SERVER_BASE_URL"), Routes.TICKETS_BASE, event.getGuild().getIdLong());
         } else
-            url = String.format("%s:%s/tickets?guild_id=%d",
-                    config.get("SERVER_BASE_URL"), config.get("SERVER_PORT"), event.getGuild().getIdLong());
+            url = String.format("%s:%s%s?guild_id=%d",
+                    config.get("SERVER_BASE_URL"), config.get("SERVER_PORT"), Routes.TICKETS_BASE,
+                    event.getGuild().getIdLong());
 
         ActionRow link = ActionRow.of(
                 Button.link(url, "View Your Tickets")
