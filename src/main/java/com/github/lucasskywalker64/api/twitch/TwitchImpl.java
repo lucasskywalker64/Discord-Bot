@@ -172,7 +172,7 @@ public class TwitchImpl {
                 Logger.error(e, "Failed to refresh streamer access token");
             }
             try {
-                getValidAccessToken(streamerTokenData, streamerCredential);
+                getValidAccessToken(chatTokenData, chatCredential);
             } catch (Exception e) {
                 Logger.error(e, "Failed to refresh chat access token");
             }
@@ -543,8 +543,6 @@ public class TwitchImpl {
                 .withEnableChat(true)
                 .withEnableHelix(true)
                 .withChatAccount(chatCredential)
-                .withFeignLogLevel(feign.Logger.Level.FULL)
-                .withTimeout(60_000)
                 .build();
 
         load();
@@ -615,7 +613,7 @@ public class TwitchImpl {
         chatTokenData = twitchRepo.loadToken();
 
         getValidAccessToken(streamerTokenData, streamerCredential);
-        getValidAccessToken(streamerTokenData, streamerCredential);
+        getValidAccessToken(chatTokenData, chatCredential);
 
         setup();
 
