@@ -34,6 +34,7 @@ import com.github.lucasskywalker64.persistence.repository.TwitchRepository;
 import com.github.lucasskywalker64.selectmenus.SelectMenuModule;
 import com.github.lucasskywalker64.selectmenus.SelectMenuRegistry;
 import com.github.lucasskywalker64.selectmenus.twitch.TwitchRedeemTypeMenu;
+import com.github.lucasskywalker64.service.SystemEventProcessor;
 import com.github.lucasskywalker64.ticket.TicketModule;
 import com.github.lucasskywalker64.ticket.interaction.buttons.*;
 import com.github.lucasskywalker64.ticket.interaction.commands.TicketCreate;
@@ -95,6 +96,7 @@ public class BotInitializer {
 
         WebServer webServer = new WebServer();
         webServer.start();
+        BotMain.getContext().setWebServer(webServer);
 
         tryTwitchStart();
 
@@ -117,6 +119,7 @@ public class BotInitializer {
             jda.getGuilds().getFirst().updateCommands().addCommands(registry.definitions()).queue();
         }
         youTube.checkAndRenewSubscriptions();
+        new SystemEventProcessor().start();
         Logger.info("Discord API ready");
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             try {

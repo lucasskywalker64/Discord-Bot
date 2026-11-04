@@ -7,6 +7,7 @@ import com.github.lucasskywalker64.service.TwitchModeratorsCacheService;
 import com.github.lucasskywalker64.service.TwitchRedeemCacheService;
 import com.github.lucasskywalker64.service.TwitchVipsCacheService;
 import com.github.lucasskywalker64.ticket.TicketModule;
+import com.github.lucasskywalker64.web.WebServer;
 import io.github.cdimascio.dotenv.Dotenv;
 import net.dv8tion.jda.api.JDA;
 
@@ -27,6 +28,7 @@ public class BotContext {
     private TicketModule ticketModule;
     private TwitchOAuthService twitchOAuthService;
     private YouTubeImpl youTube;
+    private WebServer webServer;
 
     public BotContext(JDA jda, Dotenv config, TwitchImpl twitch) {
         this.jda = jda;
@@ -87,6 +89,10 @@ public class BotContext {
         return youTube;
     }
 
+    public WebServer webServer() {
+        return webServer;
+    }
+
     public void setTwitch(TwitchImpl twitch) {
         this.twitch = twitch;
     }
@@ -105,5 +111,9 @@ public class BotContext {
 
     public void setYouTube(YouTubeImpl youTube) {
         this.youTube = youTube;
+    }
+
+    public void setWebServer(WebServer webServer) {
+        this.webServer = webServer;
     }
 }

@@ -79,11 +79,13 @@ public class TwitchOAuthService {
         context.setTwitch(null);
     }
 
-    public void onOAuthCallback(String code, boolean streamerLogin) throws Exception {
+    public TokenData onOAuthCallback(String code, boolean streamerLogin) throws Exception {
         TokenBundle tb = exchangeCodeForTokens(code);
         TwitchTokenInfo info = validate(tb.accessToken);
 
-        repository.saveToken(new TokenData(tb, info.userId(), info.login(), streamerLogin));
+        TokenData tokenData = new TokenData(tb, info.userId(), info.login(), streamerLogin);
+        repository.saveToken(tokenData);
+        return tokenData;
     }
 
     public TokenBundle refreshToken(String refreshToken) throws Exception {

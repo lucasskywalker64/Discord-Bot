@@ -6,6 +6,7 @@ import com.github.lucasskywalker64.api.twitch.auth.TwitchOAuthService.TokenBundl
 import com.github.lucasskywalker64.persistence.data.ShoutoutData;
 import com.github.lucasskywalker64.persistence.data.TokenData;
 import com.github.lucasskywalker64.persistence.data.TwitchData;
+import com.github.lucasskywalker64.persistence.repository.SystemEventRepository;
 import com.github.lucasskywalker64.persistence.repository.TwitchRepository;
 import com.github.lucasskywalker64.web.Routes;
 import com.github.philippheuer.credentialmanager.domain.OAuth2Credential;
@@ -21,7 +22,9 @@ import com.github.twitch4j.eventsub.EventSubSubscription;
 import com.github.twitch4j.eventsub.EventSubSubscriptionStatus;
 import com.github.twitch4j.eventsub.EventSubTransport;
 import com.github.twitch4j.eventsub.EventSubTransportMethod;
-import com.github.twitch4j.eventsub.events.ChannelPointsCustomRewardRedemptionEvent;
+import com.github.twitch4j.eventsub.domain.RedemptionStatus;
+import com.github.twitch4j.eventsub.events.CustomRewardRedemptionAddEvent;
+import com.github.twitch4j.eventsub.events.CustomRewardRedemptionUpdateEvent;
 import com.github.twitch4j.eventsub.events.EventSubEvent;
 import com.github.twitch4j.eventsub.subscriptions.SubscriptionTypes;
 import com.github.twitch4j.helix.domain.*;
@@ -33,6 +36,7 @@ import net.dv8tion.jda.api.entities.channel.middleman.MessageChannel;
 import net.dv8tion.jda.api.interactions.components.buttons.Button;
 import org.apache.commons.lang3.tuple.Pair;
 import org.tinylog.Logger;
+import software.amazon.awssdk.utils.MapUtils;
 
 import java.io.IOException;
 import java.sql.SQLException;
@@ -49,6 +53,7 @@ public class TwitchImpl {
 
     private static final String HTTPS_TWITCH_TV = "https://twitch.tv/";
     private static final TwitchRepository twitchRepo = TwitchRepository.getInstance();
+    private static final SystemEventRepository systemEventRepo = SystemEventRepository.getInstance();
     private static final Dotenv config = BotMain.getContext().config();
     private final TwitchOAuthService oAuthService;
     private final List<TwitchData> twitchDataList = Collections.synchronizedList(new ArrayList<>());
@@ -61,6 +66,8 @@ public class TwitchImpl {
     private final OAuth2Credential streamerCredential = new OAuth2Credential("twitch", "");
     private final OAuth2Credential chatCredential = new OAuth2Credential("twitch", "");
     private final AtomicLong shoutoutTimestamp = new AtomicLong(0L);
+    private final List<CustomReward> rewards = new ArrayList<>();
+    private final Map<String, String> idToUsernameMap = new HashMap<>();
     private final OAuth2Credential appAccessCredential = new TwitchIdentityProvider(
             config.get("TWITCH_CLIENT_ID"),
             config.get("TWITCH_CLIENT_SECRET"),
@@ -69,6 +76,7 @@ public class TwitchImpl {
     private TwitchClient twitchClient;
     private String broadcasterId;
     private String moderatorId;
+    private Instant lastTopCommand = Instant.now();
     private volatile TokenData streamerTokenData;
     private volatile TokenData chatTokenData;
 
@@ -105,7 +113,12 @@ public class TwitchImpl {
 
     public List<CustomReward> fetchRewards() throws Exception {
         return twitchClient.getHelix()
-                .getCustomRewards(getValidAccessToken(streamerTokenData, streamerCredential), broadcasterId, null, null)
+                .getCustomRewards(
+                        getValidAccessToken(streamerTokenData, streamerCredential),
+                        broadcasterId,
+                        null,
+                        false
+                )
                 .execute()
                 .getRewards();
     }
@@ -438,15 +451,106 @@ public class TwitchImpl {
         if (!shoutedoutNames.contains(event.getUser().getName().toLowerCase())) {
             shoutout(event);
         }
+        if (event.getMessage().startsWith("!top5")) {
+            Instant now = Instant.now();
+            if (lastTopCommand.plusSeconds(30).isAfter(now))
+                return;
+            lastTopCommand = now;
+            String rewardName = event.getMessage().substring(5).trim();
+            if (rewardName.isEmpty()) {
+                event.reply(event.getTwitchChat(), "Usage: !top <reward name>");
+                return;
+            }
+
+            CustomReward reward = rewards.stream()
+                    .filter(r -> r.getTitle().equalsIgnoreCase(rewardName))
+                    .findFirst()
+                    .orElse(null);
+
+            if (reward == null) {
+                event.reply(event.getTwitchChat(), "Reward not found");
+                return;
+            }
+
+            List<Pair<String, Integer>> leaderboard;
+            try {
+                leaderboard = twitchRepo.loadRedemptionLeaderboard(reward.getId());
+            } catch (SQLException e) {
+                Logger.error(e);
+                return;
+            }
+
+            List<Pair<String, Integer>> top5 = leaderboard.stream()
+                    .map(pair -> {
+                        String userId = pair.getKey();
+                        Integer count = pair.getValue();
+
+                        String username = idToUsernameMap.getOrDefault(userId, "[Unknown ID: " + userId + "]");
+
+                        return Pair.of(username, count);
+                    })
+                    .sorted(Map.Entry.comparingByValue(Comparator.reverseOrder()))
+                    .limit(5)
+                    .toList();
+
+            StringBuilder sb = new StringBuilder();
+            sb.append("Top 5 redeemed ").append(reward.getTitle()).append(": ");
+            boolean first = true;
+            for (Pair<String, Integer> entry : top5) {
+                if (!first) {
+                    sb.append(", ");
+                }
+                sb.append(entry.getKey()).append(": ").append(entry.getValue());
+                first = false;
+            }
+            event.reply(event.getTwitchChat(), sb.toString());
+        } else if (event.getMessage().equals("!ping") && event.getUser().getName().equalsIgnoreCase("lucasskywalker64")) {
+            Logger.info("Ping received from user {}", event.getUser().getName());
+            twitchClient.getChat().sendMessage(twitchDataList.getFirst().username(), "pong!");
+        }
     }
 
-    private void handleChannelPointsRedemptionEvent(ChannelPointsCustomRewardRedemptionEvent event) {
+    private void handleRewardAddEvent(CustomRewardRedemptionAddEvent event) {
         String rewardId = event.getReward().getId();
         String rewardTitle = event.getReward().getTitle();
         String userName = event.getUserName();
         String userId = event.getUserId();
+
+        processRedemption(rewardId, rewardTitle, userName, userId);
+
+        String jsonPayload = """
+                {
+                    "type": "add",
+                    "id": "%s",
+                    "user": "%s",
+                    "reward": "%s",
+                    "cost": %d
+                }
+                """
+                .formatted(event.getId(), userName, rewardTitle, event.getReward().getCost());
+        BotMain.getContext().webServer().broadcastToOverlays(event.getBroadcasterUserId(), jsonPayload);
+    }
+
+    private void handleRewardUpdateEvent(CustomRewardRedemptionUpdateEvent event) {
+        RedemptionStatus status = event.getStatus();
+        if (RedemptionStatus.FULFILLED.equals(status) || RedemptionStatus.CANCELED.equals(status)) {
+            String jsonPayload = """
+                    {
+                        "type": "remove",
+                        "id": "%s"
+                    }
+                    """
+                    .formatted(event.getId());
+            BotMain.getContext().webServer().broadcastToOverlays(event.getBroadcasterUserId(), jsonPayload);
+        }
+    }
+
+    private void processRedemption(String rewardId, String rewardTitle, String userName, String userId) {
         if (redemptionIds.contains(rewardId) || checkinConfigs.containsKey(rewardId)) {
             Logger.info("Tracked reward {}, redeemed by {}", rewardTitle, userName);
+
+            idToUsernameMap.putIfAbsent(userId, userName);
+
             try {
                 int newCount = twitchRepo.incrementRedemptionCount(rewardId, userId);
                 boolean vipGranted = false;
@@ -547,13 +651,29 @@ public class TwitchImpl {
 
         load();
 
-        EventSubSubscription rewardRedemptionSubscription = SubscriptionTypes.CHANNEL_POINTS_CUSTOM_REWARD_REDEMPTION_ADD.prepareSubscription(
-                builder -> builder.broadcasterUserId(broadcasterId).build(),
-                EventSubTransport.builder()
-                        .method(EventSubTransportMethod.WEBHOOK)
-                        .callback(config.get("SERVER_BASE_URL") + Routes.WEBHOOK_TWITCH)
-                        .secret(config.get("TWITCH_EVENTSUB_SECRET"))
-                        .build()
+        EventSubSubscription rewardRedemptionAddSubscription = SubscriptionTypes
+                .CHANNEL_POINTS_CUSTOM_REWARD_REDEMPTION_ADD.prepareSubscription(
+                        builder -> builder.broadcasterUserId(broadcasterId).build(),
+                        EventSubTransport.builder()
+                                .method(EventSubTransportMethod.WEBHOOK)
+                                .callback(config.get("SERVER_BASE_URL") + Routes.WEBHOOK_TWITCH)
+                                .secret(config.get("TWITCH_EVENTSUB_SECRET"))
+                                .build()
+                );
+
+        EventSubSubscription rewardRedemptionUpdateSubscription = SubscriptionTypes
+                .CHANNEL_POINTS_CUSTOM_REWARD_REDEMPTION_UPDATE.prepareSubscription(
+                        builder -> builder.broadcasterUserId(broadcasterId).build(),
+                        EventSubTransport.builder()
+                                .method(EventSubTransportMethod.WEBHOOK)
+                                .callback(config.get("SERVER_BASE_URL") + Routes.WEBHOOK_TWITCH)
+                                .secret(config.get("TWITCH_EVENTSUB_SECRET"))
+                                .build()
+                );
+
+        Map<EventSubSubscription, Boolean> subscriptionHealth = MapUtils.of(
+                rewardRedemptionAddSubscription, false,
+                rewardRedemptionUpdateSubscription, false
         );
 
         try {
@@ -561,27 +681,36 @@ public class TwitchImpl {
                     .getEventSubSubscriptions(null, null, null, broadcasterId, null, null)
                     .execute();
 
-            boolean subscriptionIsHealthy = false;
-
             if (existingSubs.getSubscriptions() != null) {
                 for (EventSubSubscription sub : existingSubs.getSubscriptions()) {
                     if (SubscriptionTypes.CHANNEL_POINTS_CUSTOM_REWARD_REDEMPTION_ADD.equals(sub.getType())) {
-                        if (EventSubSubscriptionStatus.ENABLED.equals(sub.getStatus())) {
+                        if (EventSubSubscriptionStatus.ENABLED.equals(sub.getStatus()) &&
+                                (config.get("SERVER_BASE_URL") + Routes.WEBHOOK_TWITCH).equals(sub.getTransport().getCallback())) {
                             Logger.info("EventSub subscription is active and healthy");
-                            subscriptionIsHealthy = true;
+                            subscriptionHealth.put(rewardRedemptionAddSubscription, true);
                         } else {
                             Logger.warn("Found a broken EventSub Webhook (Status: {}). Deleting it...", sub.getStatus());
                             twitchClient.getHelix().deleteEventSubSubscription(null, sub.getId()).execute();
                         }
-                        break;
+                    } else if (SubscriptionTypes.CHANNEL_POINTS_CUSTOM_REWARD_REDEMPTION_UPDATE.equals(sub.getType())) {
+                        if (EventSubSubscriptionStatus.ENABLED.equals(sub.getStatus()) &&
+                                (config.get("SERVER_BASE_URL") + Routes.WEBHOOK_TWITCH).equals(sub.getTransport().getCallback())) {
+                            Logger.info("EventSub subscription is active and healthy");
+                            subscriptionHealth.put(rewardRedemptionUpdateSubscription, true);
+                        } else {
+                            Logger.warn("Found a broken EventSub Webhook (Status: {}). Deleting it...", sub.getStatus());
+                            twitchClient.getHelix().deleteEventSubSubscription(null, sub.getId()).execute();
+                        }
                     }
                 }
             }
 
-            if (!subscriptionIsHealthy) {
-                Logger.info("Creating new EventSub Webhook subscription...");
-                twitchClient.getHelix().createEventSubSubscription(appAccessCredential.getAccessToken(), rewardRedemptionSubscription).execute();
-            }
+            subscriptionHealth.forEach((sub, isHealthy) -> {
+                if (!isHealthy) {
+                    Logger.info("Creating new EventSub Webhook subscription...");
+                    twitchClient.getHelix().createEventSubSubscription(appAccessCredential.getAccessToken(), sub).execute();
+                }
+            });
         } catch (Exception e) {
             Logger.error(e, "Failed to request Twitch EventSub Webhook subscription");
         }
@@ -590,6 +719,40 @@ public class TwitchImpl {
             moderatorId = chatTokenData.userId();
 
             twitchClient.getChat().joinChannel(twitchDataList.getFirst().username());
+            Logger.info("Chat connected? {}", twitchClient.getChat().isChannelJoined(twitchDataList.getFirst().username()));
+        }
+
+        try {
+            rewards.addAll(twitchClient.getHelix().getCustomRewards(
+                    getValidAccessToken(streamerTokenData, streamerCredential),
+                    broadcasterId,
+                    redemptionIds,
+                    false
+            ).execute().getRewards());
+            Logger.info("Loaded {} custom rewards", rewards.size());
+        } catch (Exception e) {
+            Logger.error(e);
+        }
+
+        try {
+            List<String> userIds = twitchRepo.loadAllUserIds();
+            for (int i = 0; i < userIds.size(); i += 100) {
+                int end = Math.min(i + 100, userIds.size());
+                List<String> chunk = userIds.subList(i, end);
+
+                UserList result = twitchClient.getHelix().getUsers(
+                        getValidAccessToken(streamerTokenData, streamerCredential),
+                        chunk,
+                        null
+                ).execute();
+
+                for (User user : result.getUsers()) {
+                    idToUsernameMap.put(user.getId(), user.getDisplayName());
+                }
+            }
+            Logger.info("Loaded {} ID/username mappings", idToUsernameMap.size());
+        } catch (Exception e) {
+            Logger.error(e);
         }
     }
 
@@ -626,7 +789,9 @@ public class TwitchImpl {
         twitchClient.getEventManager()
                 .onEvent(ChannelGoOfflineEvent.class, this::handleChannelGoOfflineEvent);
         twitchClient.getEventManager()
-                .onEvent(ChannelPointsCustomRewardRedemptionEvent.class, this::handleChannelPointsRedemptionEvent);
+                .onEvent(CustomRewardRedemptionAddEvent.class, this::handleRewardAddEvent);
+        twitchClient.getEventManager()
+                .onEvent(CustomRewardRedemptionUpdateEvent.class, this::handleRewardUpdateEvent);
 
         scheduleLoad();
         Logger.info("Twitch API started");

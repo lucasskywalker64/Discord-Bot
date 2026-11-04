@@ -10,6 +10,8 @@ public class Routes {
     public static final String AUTH_DISCORD_CALLBACK = AUTH_DISCORD + "/callback";
     public static final String AUTH_TWITCH = AUTH_BASE + "/twitch";
     public static final String AUTH_TWITCH_CALLBACK = AUTH_TWITCH + "/callback";
+    public static final String AUTH_DASHBOARD = AUTH_BASE + "/dashboard";
+    public static final String AUTH_DASHBOARD_LOGOUT = AUTH_DASHBOARD + "/logout";
 
     public static final String WEBHOOKS_BASE = API_BASE + "/webhooks";
     public static final String WEBHOOK_TWITCH = WEBHOOKS_BASE + "/twitch";
@@ -24,4 +26,11 @@ public class Routes {
 
     public static final String TWITCH_BASE = API_BASE + "/twitch";
     public static final String TWITCH_REWARDS = TWITCH_BASE + "/rewards";
+
+    public static final String DASHBOARD_BASE = API_BASE + "/dashboard";
+    public static final String DASHBOARD_OVERLAYS = DASHBOARD_BASE + "/overlays";
+    public static final String DASHBOARD_OVERLAYS_REGENERATE = DASHBOARD_OVERLAYS + "/regenerate/{id}";
+
+    public static final String WEBSOCKET_BASE = "/ws";
+    public static final String WEBSOCKET_OVERLAY = WEBSOCKET_BASE + "/overlays/{token}";
 }

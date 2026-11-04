@@ -6,24 +6,34 @@ import com.github.lucasskywalker64.BotContext;
 import com.github.lucasskywalker64.BotInitializer;
 import com.github.lucasskywalker64.BotMain;
 import com.github.lucasskywalker64.persistence.Database;
+import com.github.lucasskywalker64.persistence.data.OverlayData;
+import com.github.lucasskywalker64.persistence.data.SystemEvent;
+import com.github.lucasskywalker64.persistence.data.TokenData;
 import com.github.lucasskywalker64.persistence.data.YouTubeData;
+import com.github.lucasskywalker64.persistence.repository.OverlayRepository;
+import com.github.lucasskywalker64.persistence.repository.SystemEventRepository;
 import com.github.lucasskywalker64.persistence.repository.YouTubeRepository;
 import com.github.lucasskywalker64.ticket.model.Ticket;
 import com.github.lucasskywalker64.ticket.persistence.TicketRepository;
 import com.github.twitch4j.common.util.TypeConvert;
 import com.github.twitch4j.eventsub.events.CustomRewardRedemptionAddEvent;
+import com.github.twitch4j.helix.domain.CustomReward;
 import com.google.gson.Gson;
+import com.google.gson.JsonSyntaxException;
 import com.google.gson.annotations.SerializedName;
 import io.github.cdimascio.dotenv.Dotenv;
 import io.javalin.Javalin;
 import io.javalin.http.Context;
 import io.javalin.http.HttpStatus;
+import io.javalin.websocket.WsContext;
+import jakarta.servlet.http.HttpSession;
 import org.eclipse.jetty.ee10.servlet.SessionHandler;
 import org.eclipse.jetty.http.HttpCookie.SameSite;
 import org.eclipse.jetty.session.DatabaseAdaptor;
 import org.eclipse.jetty.session.DefaultSessionCache;
 import org.eclipse.jetty.session.JDBCSessionDataStoreFactory;
 import org.eclipse.jetty.session.SessionCache;
+import org.eclipse.jetty.websocket.api.Callback;
 import org.jetbrains.annotations.Nullable;
 import org.tinylog.Logger;
 
@@ -65,12 +75,15 @@ public class WebServer {
     private final BotContext botContext;
     private final TicketRepository ticketRepository;
     private final YouTubeRepository youTubeRepository;
+    private final OverlayRepository overlayRepository;
+    private final SystemEventRepository systemEventRepository;
 
     private final HttpClient httpClient;
     private final PresignedUrlGenerator presignedUrlGenerator;
     private final Gson gson;
     private final ConcurrentHashMap<String, ExecutorService> channelExecutors;
-    private final Set<String> processedEventSubMessageIds;
+    private final Map<String, Set<WsContext>> overlayClients;
+    private final Map<String, Instant> userRateLimits;
 
     public WebServer() {
         botContext = BotMain.getContext();
@@ -89,11 +102,14 @@ public class WebServer {
         DISCORD_CLIENT_SECRET = config.get("DISCORD_CLIENT_SECRET");
         ticketRepository = TicketRepository.getInstance();
         youTubeRepository = YouTubeRepository.getInstance();
+        overlayRepository = OverlayRepository.getInstance();
+        systemEventRepository = SystemEventRepository.getInstance();
         httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
         presignedUrlGenerator = new PresignedUrlGenerator();
         gson = new Gson();
         channelExecutors = new ConcurrentHashMap<>();
-        processedEventSubMessageIds = ConcurrentHashMap.newKeySet();
+        overlayClients = new ConcurrentHashMap<>();
+        userRateLimits = new ConcurrentHashMap<>();
     }
 
     public void start() {
@@ -167,7 +183,22 @@ public class WebServer {
                             get(this::handleDiscordLogin);
                             get("callback", this::handleDiscordCallback);
                         });
+                        path("dashboard", () -> {
+                            get(this::dashboardAuthHandler);
+                            post("logout", this::dashboardLogoutHandler);
+                        });
                     });
+
+                    path("dashboard", () -> {
+                        get(this::dashboardHandler);
+                        get("overlays", this::overlayListHandler);
+                        post("overlays", this::overlayCreateHandler);
+                        patch("overlays/{id}", this::overlayUpdateHandler);
+                        delete("overlays/{id}", this::overlayDeleteHandler);
+                        post("overlays/{id}/regenerate", this::overlayRegenerateHandler);
+                    });
+
+                    path("twitch", () -> get("rewards", this::twitchRewardsHandler));
 
                     path("webhooks", () -> {
                         post("twitch", this::handleTwitchEventsub);
@@ -185,10 +216,297 @@ public class WebServer {
                         });
                     });
                 });
+
+                ws(Routes.WEBSOCKET_OVERLAY, ws -> {
+                    ws.onConnect(ctx -> {
+                        String token = ctx.pathParam("token");
+
+                        Optional<OverlayData> overlayOptional;
+                        try {
+                            overlayOptional = overlayRepository.getOverlayByToken(token);
+                        } catch (SQLException e) {
+                            Logger.error(e, "Failed to get overlay data");
+                            ctx.session.close(1008, "Internal Server Error", Callback.NOOP);
+                            return;
+                        }
+
+                        if (overlayOptional.isEmpty()) {
+                            ctx.session.close(1008, "Invalid Token", Callback.NOOP);
+                            return;
+                        }
+
+                        OverlayData overlayData = overlayOptional.get();
+
+                        String streamerId = overlayData.streamerId();
+                        ctx.attribute("streamerId", streamerId);
+                        ctx.attribute("overlayId", overlayData.id());
+
+                        overlayClients.computeIfAbsent(streamerId, k -> ConcurrentHashMap.newKeySet()).add(ctx);
+                        Logger.info("Overlay connected for streamer ID: {}", streamerId);
+
+                        List<SystemEvent> backlogEvents = systemEventRepository.getUnfulfilledTwitchRedemptions(streamerId);
+
+                        StringBuilder eventsJsonBuilder = new StringBuilder("[");
+                        for (int i = 0; i < backlogEvents.size(); i++) {
+                            SystemEvent event = backlogEvents.get(i);
+
+                            JsonNode rootNode = TypeConvert.getObjectMapper().readTree(event.payload());
+                            CustomRewardRedemptionAddEvent twitchEvent = TypeConvert.getObjectMapper()
+                                    .treeToValue(rootNode.get("event"), CustomRewardRedemptionAddEvent.class);
+
+                            String formattedEvent = """
+                            {
+                                "type": "add",
+                                "id": "%s",
+                                "user": "%s",
+                                "reward": "%s"
+                            }
+                            """.formatted(
+                                    twitchEvent.getId(),
+                                    twitchEvent.getUserName(),
+                                    twitchEvent.getReward().getTitle()
+                            );
+
+                            eventsJsonBuilder.append(formattedEvent);
+                            if (i < backlogEvents.size() - 1)
+                                eventsJsonBuilder.append(",");
+                        }
+                        eventsJsonBuilder.append("]");
+
+                        ctx.send("""
+                        {
+                            "type": "init_overlay",
+                            "settings": %s,
+                            "events": %s
+                        }
+                        """
+                                .formatted(overlayData.settings(), eventsJsonBuilder.toString())
+                        );
+                    });
+
+                    ws.onClose(ctx -> {
+                        String streamerId = ctx.attribute("streamerId");
+                        if (streamerId != null) {
+                            Set<WsContext> clients = overlayClients.get(streamerId);
+                            if (clients != null) {
+                                clients.remove(ctx);
+                                if (clients.isEmpty())
+                                    overlayClients.remove(streamerId);
+                            }
+                            Logger.info("Overlay disconnected for streamer ID: {}", streamerId);
+                        }
+                    });
+
+                    ws.onError(ctx -> {
+                        Logger.error(ctx.error(), "WebSocket error");
+                        if (ctx.session.isOpen())
+                            ctx.session.close(1011, "Internal Server Error", Callback.NOOP);
+                    });
+
+                    ws.onMessage(ctx -> {});
+                });
             });
 
             config.events.serverStarted(() -> Logger.info("Webserver is ready"));
         }).start(port);
+    }
+
+    public void broadcastToOverlays(String broadcasterId, String jsonPayload) {
+        Set<WsContext> clients = overlayClients.get(broadcasterId);
+        if (clients != null) {
+            clients.stream()
+                    .filter(ctx -> ctx.session.isOpen())
+                    .forEach(ctx -> ctx.send(jsonPayload));
+        }
+    }
+
+    private void dashboardHandler(Context ctx) {
+        String twitchLogin = ctx.sessionAttribute("twitch_login");
+        String twitchUserId = ctx.sessionAttribute("twitch_user_id");
+        String twitchProfileImageUrl = ctx.sessionAttribute("twitch_profile_image_url");
+
+        if (twitchLogin == null || twitchUserId == null) {
+            ctx.status(HttpStatus.UNAUTHORIZED).json(Map.of("error", "Not logged in"));
+            return;
+        }
+
+        String token;
+        try {
+            String signature = computeHmacSha1(twitchUserId.getBytes(StandardCharsets.UTF_8), TWITCH_EVENTSUB_SECRET);
+            token = twitchUserId + "-" + signature;
+        } catch (NoSuchAlgorithmException | InvalidKeyException e) {
+            Logger.error(e, "Failed to generate overlay token");
+            ctx.status(HttpStatus.INTERNAL_SERVER_ERROR).json(Map.of("error", "Failed to generate overlay token"));
+            return;
+        }
+
+        ctx.json(Map.of(
+                "login", twitchLogin,
+                "token", token,
+                "profileImageUrl", twitchProfileImageUrl != null ? twitchProfileImageUrl : ""
+        ));
+    }
+
+    private void dashboardAuthHandler(Context ctx) {
+        String redirectPath = ctx.queryParam("redirect_path");
+        if (redirectPath != null) {
+            ctx.sessionAttribute("redirect_path", redirectPath);
+        }
+
+        String state = UUID.randomUUID().toString();
+        ctx.sessionAttribute("state", new ExpiringSessionAttribute(state, TimeUnit.MINUTES.toSeconds(10)));
+        ctx.sessionAttribute("streamer", true);
+
+        String twitchAuthUrl = """
+                https://id.twitch.tv/oauth2/authorize?
+                client_id=%s&
+                redirect_uri=%s&
+                response_type=code&
+                state=%s
+                """
+                .formatted(
+                        TWITCH_CLIENT_ID,
+                        ENCODED_TWITCH_REDIRECT_URI,
+                        state
+                );
+
+        ctx.json(Map.of("authUrl", twitchAuthUrl));
+    }
+
+    private void dashboardLogoutHandler(Context ctx) {
+        HttpSession session = ctx.req().getSession(false);
+        if (session != null) {
+            session.invalidate();
+        } else {
+            Logger.warn("Session not found for logout request");
+        }
+        ctx.removeCookie("JSESSIONID");
+        ctx.status(HttpStatus.OK).json(Map.of("message", "Successfully logged out"));
+    }
+
+    private void overlayListHandler(Context ctx) {
+        String twitchUserId = ctx.sessionAttribute("twitch_user_id");
+        if (twitchUserId == null) {
+            ctx.status(HttpStatus.UNAUTHORIZED).json(Map.of("error", "Not logged in"));
+            return;
+        }
+
+        List<OverlayData> overlays;
+        try {
+            overlays = overlayRepository.getByStreamerId(twitchUserId);
+        } catch (SQLException e) {
+            ctx.status(HttpStatus.INTERNAL_SERVER_ERROR).json(Map.of("error", "Failed to fetch overlays"));
+            return;
+        }
+
+        ctx.json(overlays);
+    }
+
+    private void overlayCreateHandler(Context ctx) {
+        String twitchUserId = validateUserAndRateLimit(ctx, 3);
+        if (twitchUserId == null) return;
+
+        OverlaySaveRequest request = parseOverlayRequest(ctx);
+        if (request == null) return;
+
+        if (request.type() == null) {
+            ctx.status(HttpStatus.BAD_REQUEST).json(Map.of("error", "Invalid request"));
+            return;
+        }
+
+        String instanceId = UUID.randomUUID().toString();
+        String token = UUID.randomUUID().toString().replace("-", "")
+                + UUID.randomUUID().toString().replace("-", "");
+
+        String settingsString = extractSettingsJson(request);
+        OverlayData overlayToSave = new OverlayData(
+                instanceId,
+                twitchUserId,
+                request.type(),
+                token,
+                settingsString
+        );
+
+        try {
+            overlayRepository.createOverlay(overlayToSave);
+        } catch (SQLException e) {
+            ctx.status(HttpStatus.INTERNAL_SERVER_ERROR).json(Map.of("error", "Failed to save overlay"));
+            return;
+        }
+
+        ctx.status(HttpStatus.OK).json(overlayToSave);
+    }
+
+    private void overlayUpdateHandler(Context ctx) {
+        String twitchUserId = validateUserAndRateLimit(ctx, 3);
+        if (twitchUserId == null) return;
+
+        OverlaySaveRequest request = parseOverlayRequest(ctx);
+        if (request == null) return;
+        
+        String id = ctx.pathParam("id");
+        String settingsString = extractSettingsJson(request);
+        
+        try {
+            if (overlayRepository.updateOverlaySettings(id, twitchUserId, settingsString))
+                ctx.status(HttpStatus.OK).json(Map.of("message", "Overlay updated successfully"));
+            else
+                ctx.status(HttpStatus.NOT_FOUND).json(Map.of("error", "Overlay not found"));
+        } catch (SQLException e) {
+            Logger.error(e, "Failed to update overlay");
+            ctx.status(HttpStatus.INTERNAL_SERVER_ERROR).json(Map.of("error", "Failed to update overlay"));
+        }
+    }
+
+    private void overlayDeleteHandler(Context ctx) {
+        String twitchUserId = validateUserAndRateLimit(ctx, 3);
+        if (twitchUserId == null) return;
+
+        String id = ctx.pathParam("id");
+
+        try {
+            if (overlayRepository.deleteOverlay(id, twitchUserId))
+                ctx.status(HttpStatus.OK).json(Map.of("message", "Overlay deleted successfully"));
+            else
+                ctx.status(HttpStatus.NOT_FOUND).json(Map.of("error", "Overlay not found"));
+        } catch (SQLException e) {
+            Logger.error(e, "Failed to delete overlay");
+            ctx.status(HttpStatus.INTERNAL_SERVER_ERROR).json(Map.of("error", "Failed to delete overlay"));
+        }
+    }
+
+    private void overlayRegenerateHandler(Context ctx) {
+        String twitchUserId = validateUserAndRateLimit(ctx, 5);
+        if (twitchUserId == null) {
+            ctx.status(HttpStatus.UNAUTHORIZED).json(Map.of("error", "Not logged in"));
+        }
+
+        String id = ctx.pathParam("id");
+
+        List<OverlayData> userOverlays;
+        try {
+            userOverlays = overlayRepository.getByStreamerId(twitchUserId);
+        } catch (SQLException e) {
+            ctx.status(HttpStatus.INTERNAL_SERVER_ERROR).json(Map.of("error", "Failed to fetch overlays"));
+            return;
+        }
+
+        boolean ownsOverlay = userOverlays.stream()
+                .anyMatch(o -> o.id().equals(id));
+
+        if (!ownsOverlay) {
+            ctx.status(HttpStatus.FORBIDDEN).json(Map.of("error", "You do not own this overlay"));
+        }
+
+        String newToken;
+        try {
+            newToken = overlayRepository.regenerateToken(id);
+        } catch (SQLException e) {
+            ctx.status(HttpStatus.INTERNAL_SERVER_ERROR).json(Map.of("error", "Failed to regenerate overlay token"));
+            return;
+        }
+
+        ctx.status(HttpStatus.OK).json(Map.of("token", newToken));
     }
 
     private void handleTwitchLogin(Context ctx) {
@@ -207,6 +525,12 @@ public class WebServer {
         }
         boolean streamerLogin = Boolean.parseBoolean(ctx.queryParam("streamer"));
         ctx.sessionAttribute("streamer", streamerLogin);
+
+        String redirectPath = ctx.queryParam("redirect_path");
+        if (redirectPath != null) {
+            ctx.sessionAttribute("redirect_path", redirectPath);
+        }
+        Logger.info(Optional.ofNullable(ctx.sessionAttribute("redirect_path")));
 
         String twitchAuthUrl = "https://id.twitch.tv/oauth2/authorize" +
                 "?client_id=" + TWITCH_CLIENT_ID +
@@ -235,10 +559,48 @@ public class WebServer {
                         "<p>Missing streamer attribute.</p>");
                 return;
             }
+
             boolean streamerLogin = Boolean.TRUE.equals(ctx.sessionAttribute("streamer"));
-            botContext.twitchOauthService().onOAuthCallback(code, streamerLogin);
-            if (botContext.twitch() == null)
+            TokenData tokenData = botContext.twitchOauthService().onOAuthCallback(code, streamerLogin);
+            ctx.sessionAttribute("twitch_login", tokenData.login());
+            ctx.sessionAttribute("twitch_user_id", tokenData.userId());
+
+            try {
+                HttpRequest profileRequest = HttpRequest.newBuilder()
+                        .uri(URI.create("https://api.twitch.tv/helix/users"))
+                        .header("Authorization", "Bearer " + tokenData.bundle().accessToken())
+                        .header("Client-Id", TWITCH_CLIENT_ID)
+                        .GET()
+                        .build();
+
+                HttpResponse<String> profileResponse = httpClient.send(profileRequest, HttpResponse.BodyHandlers.ofString());
+
+                if (profileResponse.statusCode() == 200) {
+                    JsonNode rootNode = TypeConvert.getObjectMapper().readTree(profileResponse.body());
+                    JsonNode dataArray = rootNode.path("data");
+
+                    if (dataArray.isArray() && !dataArray.isEmpty()) {
+                        String profileImageUrl = dataArray.get(0).path("profile_image_url").asText();
+                        ctx.sessionAttribute("twitch_profile_image_url", profileImageUrl);
+                        Logger.info("Successfully fetched profile picture for {}", tokenData.login());
+                    }
+                } else {
+                    Logger.warn("Failed to fetch Twitch profile picture. Status: {}", profileResponse.statusCode());
+                }
+            } catch (Exception e) {
+                Logger.warn(e, "Error occurred while fetching Twitch profile picture manually.");
+            }
+
+            if (botContext.twitch() == null) {
                 BotInitializer.tryTwitchStart();
+            }
+
+            String redirectPath = ctx.sessionAttribute("redirect_path");
+            if (redirectPath != null) {
+                ctx.sessionAttribute("redirect_path", null);
+                ctx.redirect(redirectPath);
+                return;
+            }
         } catch (Exception e) {
             Logger.error(e);
             ctx.status(HttpStatus.INTERNAL_SERVER_ERROR).html("<h1>500 Internal Server Error</h1>" +
@@ -247,6 +609,37 @@ public class WebServer {
         }
         ctx.status(HttpStatus.OK).html("<h1>Authorization successful</h1>" +
                 "<p>You can now leave this page.</p>");
+    }
+
+    private void twitchRewardsHandler(Context ctx) {
+        String twitchUserId = ctx.sessionAttribute("twitch_user_id");
+        if (twitchUserId == null) {
+            ctx.status(HttpStatus.UNAUTHORIZED).json(Map.of("error", "Not logged in"));
+            return;
+        }
+
+        try {
+            List<CustomReward> rewards = botContext.twitchRedeemCacheService().getOrFetch(twitchUserId);
+
+            List<Map<String, Object>> mappedRewards = rewards.stream().map(r -> {
+                        String imageUrl = r.getImage() != null ?
+                                r.getImage().getUrl1x() :
+                                r.getDefaultImage() != null ?
+                                        r.getDefaultImage().getUrl1x() : "";
+
+                        return Map.<String, Object>of(
+                                "id", r.getId(),
+                                "title", r.getTitle(),
+                                "cost", r.getCost(),
+                                "image", imageUrl
+                        );
+                    }).toList();
+
+            ctx.json(mappedRewards);
+        } catch (Exception e) {
+            Logger.error(e, "Failed to fetch Twitch rewards for user {}: ", twitchUserId);
+            ctx.status(HttpStatus.INTERNAL_SERVER_ERROR).json(Map.of("error", "Failed to load rewards"));
+        }
     }
 
     private void handleTwitchEventsub(Context ctx) {
@@ -276,8 +669,14 @@ public class WebServer {
             return;
         }
 
-        if (!processedEventSubMessageIds.add(messageId)) {
-            Logger.info("Duplicate Twitch EventSub message received. Ignoring.");
+        try {
+            if (systemEventRepository.eventExists("twitch", messageId)) {
+                Logger.info("Duplicate Twitch EventSub message received. Ignoring.");
+                ctx.status(HttpStatus.OK).result("");
+                return;
+            }
+        } catch (SQLException e) {
+            Logger.error(e, "Database error during deduplication check");
             ctx.status(HttpStatus.OK).result("");
             return;
         }
@@ -301,12 +700,19 @@ public class WebServer {
                 case "notification" -> {
                     ctx.status(HttpStatus.OK).result("");
 
-                    String eventType = jsonNode.get("subscription").get("type").asText();
-                    if ("channel.channel_points_custom_reward_redemption.add".equals(eventType)) {
-                        CustomRewardRedemptionAddEvent event = TypeConvert.getObjectMapper()
-                                .treeToValue(jsonNode.get("event"), CustomRewardRedemptionAddEvent.class);
+                    String eventType = jsonNode.path("subscription").path("type").asText("unknown-type");
+                    String streamerId = jsonNode.path("subscription").path("condition")
+                            .path("broadcaster_user_id").asText("unknown-streamer");
+                    String referenceId = jsonNode.path("event").path("id").asText("unknown-ref");
 
-                        botContext.twitch().publishEvent(event);
+                    SystemEvent event = new SystemEvent(
+                            messageId, referenceId, streamerId, "twitch", eventType, "PENDING", rawBody
+                    );
+
+                    try {
+                        systemEventRepository.saveEvent(event);
+                    } catch (SQLException e) {
+                        Logger.error(e, "Failed to save Twitch EventSub event to system queue");
                     }
                 }
                 case "revocation" -> {
@@ -681,6 +1087,45 @@ public class WebServer {
         return gson.fromJson(userResponse.body(), DiscordUser.class);
     }
 
+    private String validateUserAndRateLimit(Context ctx, int rateLimitSeconds) {
+        String twitchUserId = ctx.sessionAttribute("twitch_user_id");
+        if (twitchUserId == null) {
+            ctx.status(HttpStatus.UNAUTHORIZED).json(Map.of("error", "Not logged in"));
+            return null;
+        }
+
+        if (isRateLimited(twitchUserId, rateLimitSeconds)) {
+            ctx.status(HttpStatus.TOO_MANY_REQUESTS).json(Map.of("error", "Rate limit exceeded"));
+            return null;
+        }
+
+        return twitchUserId;
+    }
+
+    private boolean isRateLimited(String userId, long minSecondsBetweenRequests) {
+        Instant now = Instant.now();
+        Instant lastRequest = userRateLimits.get(userId);
+
+        if (lastRequest != null && Duration.between(lastRequest, now).toSeconds() < minSecondsBetweenRequests)
+            return true;
+
+        userRateLimits.put(userId, now);
+        return false;
+    }
+
+    private OverlaySaveRequest parseOverlayRequest(Context ctx) {
+        try {
+            return gson.fromJson(ctx.body(), OverlaySaveRequest.class);
+        } catch (JsonSyntaxException e) {
+            ctx.status(HttpStatus.BAD_REQUEST).json(Map.of("error", "Invalid JSON"));
+            return null;
+        }
+    }
+
+    private String extractSettingsJson(OverlaySaveRequest request) {
+        return request.settings() != null ? gson.toJson(request.settings()) : "{}";
+    }
+
     private record ExpiringSessionAttribute(String value, long expiryTimestamp) {
         public ExpiringSessionAttribute(String value, long expiryTimestamp) {
             this.value = value;
@@ -691,6 +1136,8 @@ public class WebServer {
                 return Instant.now().getEpochSecond() > expiryTimestamp;
         }
     }
+
+    private record OverlaySaveRequest(String id, String type, Object settings) {}
 
     private record DiscordTokenResponse(
             @SerializedName("access_token") String accessToken,

@@ -172,6 +172,17 @@ public class TwitchRepository {
         return leaderboard;
     }
 
+    public List<String> loadAllUserIds() throws SQLException {
+        List<String> userIds = new ArrayList<>();
+        try (PreparedStatement ps = conn.prepareStatement("SELECT DISTINCT userId FROM twitch_redemption_leaderboard")) {
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next())
+                    userIds.add(rs.getString(1));
+            }
+        }
+        return userIds;
+    }
+
     public void saveCheckinConfig(String rewardId, int requiredCount, int durationDays) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(
                 "INSERT INTO checkin_config (rewardId, requiredCount, durationDays) VALUES (?,?,?) " +

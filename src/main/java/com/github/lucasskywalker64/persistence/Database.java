@@ -170,6 +170,28 @@ public final class Database {
                                 closeTimeEpoch INTEGER NOT NULL,
                                 channelId INTEGER NOT NULL
                             )""");
+
+            st.executeUpdate("""
+                            CREATE TABLE IF NOT EXISTS overlays (
+                                id TEXT PRIMARY KEY,
+                                streamerId TEXT NOT NULL,
+                                type TEXT NOT NULL,
+                                token TEXT NOT NULL UNIQUE,
+                                settings TEXT NOT NULL DEFAULT '{}'
+                            )""");
+
+            st.executeUpdate("""
+                             CREATE TABLE IF NOT EXISTS system_events (
+                                 id TEXT NOT NULL,
+                                 referenceId TEXT NOT NULL,
+                                 streamerId TEXT NOT NULL,
+                                 domain TEXT NOT NULL,
+                                 eventType TEXT NOT NULL,
+                                 status TEXT NOT NULL,
+                                 payload TEXT NOT NULL,
+                                 createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                                 PRIMARY KEY (id, domain)
+                             )""");
         }
     }
 
