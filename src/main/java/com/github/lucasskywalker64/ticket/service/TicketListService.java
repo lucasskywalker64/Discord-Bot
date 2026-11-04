@@ -9,6 +9,7 @@ import gg.jte.output.StringOutput;
 import gg.jte.resolve.DirectoryCodeResolver;
 import io.github.cdimascio.dotenv.Dotenv;
 import net.dv8tion.jda.api.JDA;
+import net.dv8tion.jda.api.entities.Guild;
 
 import java.nio.file.Path;
 import java.util.HashMap;
@@ -31,6 +32,23 @@ public class TicketListService {
 
         config = BotMain.getContext().config();
         jda = BotMain.getContext().jda();
+    }
+
+    public static String getEffectiveName(Guild guild, long userId) {
+        if (userId == 0) return "";
+        if (guild != null) {
+            var member = guild.getMemberById(userId);
+            if (member != null) return member.getEffectiveName();
+        }
+        try {
+            if (guild != null) {
+                var user = guild.getJDA().getUserById(userId);
+                if (user != null) return user.getEffectiveName();
+                return guild.getJDA().retrieveUserById(userId).complete().getEffectiveName();
+            }
+        } catch (Exception ignored) {
+        }
+        return "User " + userId;
     }
 
     public String generateHtml(List<Ticket> tickets, String guildId) {

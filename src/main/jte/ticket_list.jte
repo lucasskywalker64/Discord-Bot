@@ -4,6 +4,7 @@
 @import com.github.lucasskywalker64.web.Routes
 @import net.dv8tion.jda.api.entities.Guild
 @import io.github.cdimascio.dotenv.Dotenv
+@import com.github.lucasskywalker64.ticket.service.TicketListService
 
 @param List<Ticket> ticketList
 @param Guild guild
@@ -42,7 +43,7 @@
             </td>
             @if(ticket.claimerId() != 0)
                 <td style="white-space: nowrap;">
-                    ${guild.retrieveMemberById(ticket.claimerId()).complete().getEffectiveName()}
+                    ${TicketListService.getEffectiveName(guild, ticket.claimerId())}
                 </td>
             @else
                 <td></td>
@@ -54,7 +55,7 @@
                     </time>
                 </td>
                 <td style="white-space: nowrap;">
-                    ${guild.retrieveMemberById(ticket.closerId()).complete().getEffectiveName()}
+                    ${TicketListService.getEffectiveName(guild, ticket.closerId())}
                 </td>
                 <td>
                     ${ticket.reason()}

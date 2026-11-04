@@ -1,6 +1,7 @@
 package com.github.lucasskywalker64.ticket.model;
 
 import net.dv8tion.jda.api.entities.Guild;
+import net.dv8tion.jda.api.entities.Member;
 import net.dv8tion.jda.api.entities.MessageEmbed;
 import net.dv8tion.jda.api.entities.MessageEmbed.AuthorInfo;
 import net.dv8tion.jda.api.entities.MessageEmbed.Field;
@@ -37,13 +38,26 @@ public record TranscriptEmbed(
     }
 
     private static String formatDescription(String description, Guild guild) {
+        if (description == null) {
+            return null;
+        }
         Pattern pattern = Pattern.compile("<@[0-9]{17,20}>");
         Matcher matcher = pattern.matcher(description);
         StringBuilder result = new StringBuilder();
         while (matcher.find()) {
             String memberId = matcher.group().substring(2, matcher.group().length() - 1);
-            String replacement = "@" + guild.retrieveMemberById(memberId).complete().getEffectiveName();
-            matcher.appendReplacement(result, replacement);
+            String replacement;
+            try {
+                Member member = guild.getMemberById(memberId);
+                if (member != null) {
+                    replacement = "@" + member.getEffectiveName();
+                } else {
+                    replacement = "@" + guild.getJDA().retrieveUserById(memberId).complete().getEffectiveName();
+                }
+            } catch (Exception e) {
+                replacement = matcher.group();
+            }
+            matcher.appendReplacement(result, Matcher.quoteReplacement(replacement));
         }
         matcher.appendTail(result);
         return result.toString();

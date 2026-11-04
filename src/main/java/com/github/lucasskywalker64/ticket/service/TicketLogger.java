@@ -7,8 +7,11 @@ import com.github.lucasskywalker64.web.Routes;
 import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.entities.Guild;
+import net.dv8tion.jda.api.entities.UserSnowflake;
+import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
 import net.dv8tion.jda.api.interactions.components.ActionRow;
 import net.dv8tion.jda.api.interactions.components.buttons.Button;
+import org.tinylog.Logger;
 
 import java.awt.*;
 
@@ -30,8 +33,17 @@ public class TicketLogger {
                 .setTitle("Ticket Created")
                 .setColor(GREEN)
                 .addField("Ticket ID", String.valueOf(ticket.id()), true)
-                .addField("Created By", guild.retrieveMemberById(ticket.openerId()).complete().getAsMention(), true);
-        guild.getTextChannelById(configHolder.get().logChannelId()).sendMessageEmbeds(embed.build()).queue();
+                .addField("Created By", UserSnowflake.fromId(ticket.openerId()).getAsMention(), true);
+
+        TextChannel logChannel = guild.getTextChannelById(configHolder.get().logChannelId());
+        if (logChannel != null) {
+            logChannel.sendMessageEmbeds(embed.build()).queue(
+                    null,
+                    err -> Logger.error(err, "Failed to send ticket created log message")
+            );
+        } else {
+            Logger.warn("Ticket log channel {} not found", configHolder.get().logChannelId());
+        }
     }
 
     public void logTicketClosed(Ticket ticket) {
@@ -40,11 +52,11 @@ public class TicketLogger {
                 .setTitle("Ticket Closed")
                 .setColor(Color.RED)
                 .addField("Ticket ID", String.valueOf(ticket.id()), true)
-                .addField("Created By", guild.retrieveMemberById(ticket.openerId()).complete().getAsMention(), true)
-                .addField("Closed By", guild.retrieveMemberById(ticket.closerId()).complete().getAsMention(), true)
+                .addField("Created By", UserSnowflake.fromId(ticket.openerId()).getAsMention(), true)
+                .addField("Closed By", UserSnowflake.fromId(ticket.closerId()).getAsMention(), true)
                 .addField("Created At", String.format("<t:%d:F>", ticket.createdAt().toEpochSecond()), true)
                 .addField("Claimed By", ticket.claimerId() != 0
-                        ? guild.retrieveMemberById(ticket.claimerId()).complete().getAsMention()
+                        ? UserSnowflake.fromId(ticket.claimerId()).getAsMention()
                         : "Not claimed", true)
                 .addBlankField(true)
                 .addField("Reason", ticket.reason() != null
@@ -54,16 +66,34 @@ public class TicketLogger {
         String transcriptUri;
         if ("prod".equals(System.getProperty("app.env", "prod"))) {
             transcriptUri = Routes.buildTranscriptUrl(botContext.config().get("SERVER_BASE_URL"), ticket.id());
-        } else
+        } else {
             transcriptUri = Routes.buildTranscriptUrl(botContext.config().get("SERVER_BASE_URL")
                     + ":" + botContext.config().get("SERVER_PORT"), ticket.id());
+        }
 
         ActionRow actionRow = ActionRow.of(
                 Button.link(transcriptUri, "View Online Transcript")
         );
-        guild.getTextChannelById(configHolder.get().logChannelId()).sendMessageEmbeds(embed.build())
-                .setComponents(actionRow).queue();
-        jda.retrieveUserById(ticket.openerId()).complete().openPrivateChannel().queue(channel ->
-                channel.sendMessageEmbeds(embed.build()).setComponents(actionRow).queue());
+
+        TextChannel logChannel = guild.getTextChannelById(configHolder.get().logChannelId());
+        if (logChannel != null) {
+            logChannel.sendMessageEmbeds(embed.build()).setComponents(actionRow).queue(
+                    null,
+                    err -> Logger.error(err, "Failed to send ticket closed embed to log channel")
+            );
+        } else {
+            Logger.warn("Ticket log channel {} not found", configHolder.get().logChannelId());
+        }
+
+        jda.retrieveUserById(ticket.openerId()).queue(
+                user -> user.openPrivateChannel().queue(
+                        channel -> channel.sendMessageEmbeds(embed.build()).setComponents(actionRow).queue(
+                                null,
+                                err -> Logger.warn("Could not DM ticket closed notice to user {}: {}", ticket.openerId(), err.getMessage())
+                        ),
+                        err -> Logger.warn("Could not open DM channel with user {}: {}", ticket.openerId(), err.getMessage())
+                ),
+                err -> Logger.warn("Could not retrieve user {} for ticket closed notice: {}", ticket.openerId(), err.getMessage())
+        );
     }
 }

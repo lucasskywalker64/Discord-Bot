@@ -191,13 +191,17 @@ public class TicketRepository {
         }
     }
 
-    public void saveAuthorizedUsers(long ticketId, Set<Member> authorizedMembers) throws SQLException {
-        conn.createStatement().executeUpdate("DELETE FROM ticket_authorized_users WHERE ticketId = " + ticketId);
+    public void saveAuthorizedUsers(long ticketId, Set<Long> authorizedUserIds) throws SQLException {
+        try (PreparedStatement deletePs = conn.prepareStatement(
+                "DELETE FROM ticket_authorized_users WHERE ticketId = ?")) {
+            deletePs.setLong(1, ticketId);
+            deletePs.executeUpdate();
+        }
         try (PreparedStatement ps = conn.prepareStatement(
                 "INSERT INTO ticket_authorized_users (ticketId, userId) VALUES (?,?)")) {
-            for (Member member : authorizedMembers) {
+            for (Long userId : authorizedUserIds) {
                 ps.setLong(1, ticketId);
-                ps.setLong(2, member.getIdLong());
+                ps.setLong(2, userId);
                 ps.addBatch();
             }
             ps.executeBatch();
