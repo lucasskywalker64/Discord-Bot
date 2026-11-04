@@ -71,33 +71,40 @@ public class TicketService {
                     return CompletableFuture.completedFuture(result);
                 })
                 .thenCompose(result -> {
-                    Set<Member> authorizedUsers = new HashSet<>();
+                    Set<Long> authorizedUserIds = new HashSet<>();
                     Guild guild = channel.getGuild();
+
+                    authorizedUserIds.add(ticket[0].openerId());
+                    if (closerId != 0) {
+                        authorizedUserIds.add(closerId);
+                    }
 
                     for (PermissionOverride override : channel.getPermissionOverrides()) {
                         if (!override.getAllowed().contains(Permission.VIEW_CHANNEL)) continue;
 
                         if (override.isMemberOverride()) {
-                            Member member = override.getMember();
-                            if (member != null && !member.getUser().isBot()) {
-                                authorizedUsers.add(member);
-                            }
+                            authorizedUserIds.add(override.getIdLong());
                         } else if (override.isRoleOverride()) {
                             Role role = override.getRole();
                             if (role != null) {
-                                authorizedUsers.addAll(guild.findMembersWithRoles(role).get().stream()
-                                        .filter(member -> !member.getUser().isBot()).toList());
+                                guild.getMembersWithRoles(role).forEach(member -> {
+                                    if (!member.getUser().isBot()) {
+                                        authorizedUserIds.add(member.getIdLong());
+                                    }
+                                });
                             }
                         }
                     }
 
                     Member owner = guild.getOwner();
                     if (owner != null) {
-                        authorizedUsers.add(owner);
+                        authorizedUserIds.add(owner.getIdLong());
+                    } else {
+                        authorizedUserIds.add(guild.getOwnerIdLong());
                     }
 
                     try {
-                        repository.saveAuthorizedUsers(ticket[0].id(), authorizedUsers);
+                        repository.saveAuthorizedUsers(ticket[0].id(), authorizedUserIds);
                     } catch (SQLException e) {
                         Logger.error(e, "Failed to save authorized users for ticket {}", ticket[0].id());
                         return CompletableFuture.failedFuture(e);
@@ -112,7 +119,11 @@ public class TicketService {
                         Logger.error(e, "Failed to save closed ticket for ticket {}", ticket[0].id());
                         return CompletableFuture.failedFuture(e);
                     }
-                    ticketLogger.logTicketClosed(ticket[0]);
+                    try {
+                        ticketLogger.logTicketClosed(ticket[0]);
+                    } catch (Exception e) {
+                        Logger.error(e, "Failed to log ticket closed for ticket {}", ticket[0].id());
+                    }
                     return CompletableFuture.completedFuture(null);
                 })
                 .thenCompose(v -> channel.delete().submit())
