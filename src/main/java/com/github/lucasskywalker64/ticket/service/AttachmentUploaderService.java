@@ -5,6 +5,7 @@ import com.github.lucasskywalker64.web.S3Uploader;
 import net.dv8tion.jda.api.entities.Message;
 import net.dv8tion.jda.api.entities.Message.Attachment;
 
+import org.tinylog.Logger;
 import java.io.InputStream;
 import java.util.*;
 
@@ -27,11 +28,16 @@ public class AttachmentUploaderService {
 
                 if (!keys.add(key)) continue;
 
-                try (InputStream in = attachment.getProxy().download().join()) {
-                    long len = attachment.getSize();
-                    String contentType = attachment.getContentType();
-                    if (contentType == null) contentType = "application/octet-stream";
-                    uploader.uploadAttachment(key, in, len, contentType);
+                try {
+                    try (InputStream in = attachment.getProxy().download().join()) {
+                        byte[] data = in.readAllBytes();
+                        String contentType = attachment.getContentType();
+                        if (contentType == null) contentType = "application/octet-stream";
+                        uploader.uploadAttachment(key, data, contentType);
+                    }
+                } catch (Exception e) {
+                    Logger.error(e, "Failed to upload attachment {} for ticket {}", attachment.getFileName(), ticketId);
+                    keys.remove(key);
                 }
             }
         }

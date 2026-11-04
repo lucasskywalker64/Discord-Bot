@@ -39,6 +39,22 @@ public class S3Uploader {
 
     public void uploadAttachment(
             String key,
+            byte[] data,
+            String contentType) {
+        PutObjectRequest req = PutObjectRequest.builder()
+                .bucket(BUCKET_NAME)
+                .key(key)
+                .contentLength((long) data.length)
+                .contentType(contentType)
+                .build();
+
+        RequestBody requestBody = RequestBody.fromBytes(data);
+
+        client.putObject(req, requestBody);
+    }
+
+    public void uploadAttachment(
+            String key,
             InputStream in,
             long contentLength,
             String contentType) {

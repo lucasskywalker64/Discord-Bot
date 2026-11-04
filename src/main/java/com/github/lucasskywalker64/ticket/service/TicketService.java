@@ -65,8 +65,7 @@ public class TicketService {
                     try {
                         attachmentUploader.uploadAttachmentsForTranscript(result.messages(), ticket[0].id());
                     } catch (Exception e) {
-                        Logger.error(e, "Failed to upload transcript for ticket {}", ticket[0].id());
-                        return CompletableFuture.failedFuture(e);
+                        Logger.error(e, "Failed to upload attachments for ticket {}", ticket[0].id());
                     }
                     return CompletableFuture.completedFuture(result);
                 })
