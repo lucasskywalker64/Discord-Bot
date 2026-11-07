@@ -1,0 +1,48 @@
+name: Label issues fixed in develop
+
+on:
+  pull_request:
+    branches: [develop]
+    types: [closed]
+
+permissions:
+  issues: write
+
+jobs:
+  label-issues:
+    if: github.event.pull_request.merged && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Label referenced issues
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const repository = `${owner}/${repo}`.toLowerCase();
+            const body = (context.payload.pull_request.body ?? '')
+              .replace(/<!--[^]*?(?:-->|$)/g, '')
+              .replace(/^ {0,3}(`{3,}|~{3,})[^\n]*\n[^]*?(?:^ {0,3}\1[^\S\n]*$|(?![^]))/gm, '')
+              .replace(/(`+)[^\n]*?\1/g, '')
+              .replace(/^[ \t]*>.*$/gm, '');
+            const closingReference = /\b(?:closes?|closed|fix(?:es|ed)?|resolves?|resolved):?[ \t]+(?:(?:([\w.-]+\/[\w.-]+)?#)|https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/issues\/)([1-9]\d*)(?=$|[\s,.;!?)\]])/gi;
+            const issueNumbers = new Set();
+
+            for (const [, qualifiedRepo, urlRepo, number] of body.matchAll(closingReference)) {
+              const target = qualifiedRepo ?? urlRepo ?? repository;
+              if (target.toLowerCase() === repository) issueNumbers.add(Number(number));
+            }
+
+            for (const issue_number of issueNumbers) {
+              const target = { owner, repo, issue_number };
+              let issue;
+              try {
+                ({ data: issue } = await github.rest.issues.get(target));
+              } catch (error) {
+                if (error.status !== 404 && error.status !== 410) throw error;
+                core.warning(`Issue #${issue_number} is unavailable.`);
+                continue;
+              }
+              if (issue.pull_request || issue.state !== 'open') continue;
+
+              await github.rest.issues.addLabels({ ...target, labels: ['status: fixed-in-dev'] });
+            }
