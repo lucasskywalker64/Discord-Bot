@@ -42,7 +42,7 @@ public class DiscordConfiguration {
 
     @Bean
     DiscordLifecycle discordLifecycle(JDABuilder builder, DiscordListener listener) {
-        return new DiscordLifecycle(builder, listener);
+        return new DiscordLifecycle(builder.setEnableShutdownHook(false).addEventListeners(listener));
     }
 
     @ConfigurationProperties("discord")

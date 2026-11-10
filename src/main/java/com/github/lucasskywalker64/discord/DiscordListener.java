@@ -3,6 +3,7 @@ package com.github.lucasskywalker64.discord;
 import com.github.lucasskywalker64.commands.CommandRegistry;
 import com.github.lucasskywalker64.guild.GuildConfigurationRepository;
 import net.dv8tion.jda.api.entities.Guild;
+import net.dv8tion.jda.api.events.guild.GuildAvailableEvent;
 import net.dv8tion.jda.api.events.guild.GuildJoinEvent;
 import net.dv8tion.jda.api.events.guild.GuildReadyEvent;
 import net.dv8tion.jda.api.events.interaction.command.CommandAutoCompleteInteractionEvent;
@@ -29,6 +30,11 @@ public class DiscordListener extends ListenerAdapter {
 
     @Override
     public void onGuildJoin(GuildJoinEvent event) {
+        registerCommands(event.getGuild());
+    }
+
+    @Override
+    public void onGuildAvailable(GuildAvailableEvent event) {
         registerCommands(event.getGuild());
     }
 

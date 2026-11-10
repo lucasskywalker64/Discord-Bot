@@ -31,9 +31,9 @@ source control. Startup tests explicitly disable Discord; adapter tests replace
 the outbound JDA connection and use disposable PostgreSQL.
 
 A configured guild has a row in `guild_configuration`. When Discord reports
-that guild ready or joined, the adapter registers the guild command
-`/general ping`. Registration replaces the guild's command set, currently only
-`general ping`. The command replies ephemerally with REST and gateway latency
+that a guild is ready, joined, or newly available, the adapter registers the
+guild command `/general ping`. Registration replaces the guild's command set,
+currently only `general ping`. The command replies ephemerally with REST and gateway latency
 in milliseconds. DMs, missing guilds and unconfigured guilds receive a rejection
 without using another guild's settings. No privileged gateway intents are needed.
 The command retains the legacy administrator-only default. Guild administrators
@@ -54,9 +54,11 @@ separate.
 
 Spring starts the gateway asynchronously. HTTP readiness confirms application
 and database startup, not Discord connectivity. Check JDA's connection logs and
-the live ping before accepting an operator deployment. On shutdown, Spring asks
-JDA to drain requests for up to 10 seconds, then cancels pending requests and
-waits up to 5 more seconds. A timeout or interruption is logged.
+the live ping before accepting an operator deployment. JDA's JVM shutdown hook
+is disabled so Spring can drain requests for up to 10 seconds before cancelling
+them. If the drain times out, Spring waits up to 5 more seconds after cancellation.
+If the drain is interrupted, Spring cancels pending requests and restores the
+thread's interrupt status. A timeout or interruption is logged.
 
 ### Opt-in live smoke test
 

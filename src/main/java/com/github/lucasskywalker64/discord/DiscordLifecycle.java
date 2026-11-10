@@ -13,18 +13,16 @@ public class DiscordLifecycle implements SmartLifecycle {
     private static final Logger log = LoggerFactory.getLogger(DiscordLifecycle.class);
 
     private final JDABuilder builder;
-    private final DiscordListener listener;
     private volatile JDA discord;
 
-    public DiscordLifecycle(JDABuilder builder, DiscordListener listener) {
+    public DiscordLifecycle(JDABuilder builder) {
         this.builder = builder;
-        this.listener = listener;
     }
 
     @Override
     public void start() {
         if (!isRunning()) {
-            discord = builder.addEventListeners(listener).build();
+            discord = builder.build();
         }
     }
 

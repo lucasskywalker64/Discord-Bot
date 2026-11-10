@@ -11,8 +11,10 @@ import net.dv8tion.jda.api.JDABuilder;
 import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.Message;
 import net.dv8tion.jda.api.entities.User;
+import net.dv8tion.jda.api.events.guild.GuildAvailableEvent;
 import net.dv8tion.jda.api.events.guild.GuildJoinEvent;
 import net.dv8tion.jda.api.events.guild.GuildReadyEvent;
+import net.dv8tion.jda.api.events.guild.UnavailableGuildJoinedEvent;
 import net.dv8tion.jda.api.events.interaction.command.CommandAutoCompleteInteractionEvent;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
@@ -58,6 +60,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.RETURNS_SELF;
+import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.anyString;
 import static org.mockito.Mockito.anyCollection;
 import static org.mockito.Mockito.clearInvocations;
@@ -65,6 +68,7 @@ import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -370,6 +374,34 @@ class DiscordAdapterTest {
         }
     }
 
+    @Test
+    void registersPingWhenAnUnavailableConfiguredGuildBecomesAvailable() {
+        try (var application = startApplication()) {
+            String guildId = "100000000000000004";
+            application.getBean(GuildConfigurationRepository.class)
+                    .saveAndFlush(new GuildConfiguration(guildId, null));
+            var guild = guild(guildId);
+            var registration = mock(CommandListUpdateAction.class, RETURNS_SELF);
+            when(guild.updateCommands()).thenReturn(registration);
+            var listener = listener();
+
+            listener.onEvent(new UnavailableGuildJoinedEvent(discord, 1, Long.parseLong(guildId)));
+            verify(guild, never()).updateCommands();
+            listener.onEvent(new GuildAvailableEvent(discord, 2, guild));
+
+            var commands = ArgumentCaptor.forClass(CommandData[].class);
+            verify(registration).addCommands(commands.capture());
+            var definition = commands.getValue()[0].toData();
+            assertEquals("general", definition.getString("name"));
+            assertEquals("ping", definition.getArray("options").getObject(0).getString("name"));
+            verify(registration).queue();
+
+            var unconfigured = guild("100000000000000003");
+            listener.onEvent(new GuildAvailableEvent(discord, 3, unconfigured));
+            verify(unconfigured, never()).updateCommands();
+        }
+    }
+
     @ParameterizedTest
     @NullSource
     @ValueSource(strings = "100000000000000003")
@@ -462,6 +494,27 @@ class DiscordAdapterTest {
         verify(discord).shutdown();
         verify(discord).awaitShutdown(Duration.ofSeconds(10));
         verify(discord, never()).shutdownNow();
+    }
+
+    @Test
+    void restartsWithOneListenerAndSpringOwnedShutdown() throws InterruptedException {
+        var restarted = mock(JDA.class);
+        when(builder.build()).thenReturn(discord, restarted);
+        when(restarted.awaitShutdown(Duration.ofSeconds(10))).thenReturn(true);
+
+        try (var application = startApplication()) {
+            application.stop();
+            application.start();
+        }
+
+        verify(builder).addEventListeners(any(DiscordListener.class));
+        var builderOrder = inOrder(builder);
+        builderOrder.verify(builder).setEnableShutdownHook(false);
+        builderOrder.verify(builder, times(2)).build();
+        verify(discord).shutdown();
+        verify(restarted).shutdown();
+        verify(discord, never()).shutdownNow();
+        verify(restarted, never()).shutdownNow();
     }
 
     @Test
