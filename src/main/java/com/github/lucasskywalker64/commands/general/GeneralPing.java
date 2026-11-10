@@ -1,37 +1,27 @@
 package com.github.lucasskywalker64.commands.general;
 
 import com.github.lucasskywalker64.commands.SubcommandModule;
+import com.github.lucasskywalker64.commands.CommandContext;
+import com.github.lucasskywalker64.commands.CommandDefinition;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import net.dv8tion.jda.api.interactions.commands.DefaultMemberPermissions;
+import net.dv8tion.jda.api.interactions.commands.build.SubcommandData;
+
+import java.util.concurrent.CompletionStage;
 
 public class GeneralPing implements SubcommandModule {
 
-    private static final Logger log = LoggerFactory.getLogger(GeneralPing.class);
-
     @Override
-    public String getRootName() {
-        return "general";
+    public CommandDefinition definition() {
+        return new CommandDefinition(
+                new CommandDefinition.Root("general", "General utilities", DefaultMemberPermissions.DISABLED),
+                null, new SubcommandData("ping", "Check gateway and REST latency"));
     }
 
     @Override
-    public String getSubcommandName() {
-        return "ping";
-    }
-
-    @Override
-    public String getDescription() {
-        return "Check gateway and REST latency";
-    }
-
-    @Override
-    public void handle(SlashCommandInteractionEvent event) {
-        event.deferReply(true).submit().thenCompose(hook -> event.getJDA().getRestPing().submit()
+    public CompletionStage<?> handle(CommandContext context, SlashCommandInteractionEvent event) {
+        return event.deferReply(true).submit().thenCompose(hook -> event.getJDA().getRestPing().submit()
                 .thenCompose(rest -> hook.editOriginal("Rest ping: %d ms\nGateway ping: %d ms"
-                        .formatted(rest, event.getJDA().getGatewayPing())).submit()))
-                .exceptionally(failure -> {
-                    log.warn("Failed to answer ping in guild {}", event.getGuild().getId(), failure);
-                    return null;
-                });
+                        .formatted(rest, event.getJDA().getGatewayPing())).submit()));
     }
 }

@@ -39,12 +39,18 @@ without using another guild's settings. No privileged gateway intents are needed
 The command retains the legacy administrator-only default. Guild administrators
 can grant command access through Discord's integration settings.
 
-Commands follow the legacy `SubcommandModule` and `CommandRegistry` structure.
-Declare each module as a Spring bean. The registry combines their definitions
-under roots and optional groups, rejects duplicate routes at startup, and routes
-slash commands and autocomplete by root, group and subcommand. `GeneralPing`
-owns ping behavior. The JDA listener checks the actual guild and delegates to
-the registry; JDA lifecycle remains separate.
+Declare each `SubcommandModule` as a Spring bean. Its `CommandDefinition` owns
+root and group descriptions, default permissions and the subcommand definition.
+`CommandRegistry` snapshots these definitions for registration and routing;
+duplicate routes and conflicting root/group metadata prevent startup.
+Handlers receive explicit guild and actor IDs in `CommandContext`, alongside
+the JDA event for Discord operations. Pass these IDs to feature operations.
+Return the complete asynchronous operation as a `CompletionStage` so the registry
+can handle thrown exceptions and failed stages consistently. It sends an
+ephemeral error before acknowledgement, updates the response after
+acknowledgement, or returns empty autocomplete choices. Failed error delivery is
+logged without retrying. `GeneralPing` owns ping behavior; JDA lifecycle stays
+separate.
 
 Spring starts the gateway asynchronously. HTTP readiness confirms application
 and database startup, not Discord connectivity. Check JDA's connection logs and

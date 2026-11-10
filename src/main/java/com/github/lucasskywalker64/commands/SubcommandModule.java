@@ -2,26 +2,17 @@ package com.github.lucasskywalker64.commands;
 
 import net.dv8tion.jda.api.events.interaction.command.CommandAutoCompleteInteractionEvent;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
-import net.dv8tion.jda.api.interactions.commands.build.SubcommandData;
+
+import java.util.List;
+import java.util.concurrent.CompletionStage;
 
 public interface SubcommandModule {
 
-    String getRootName();
+    CommandDefinition definition();
 
-    String getSubcommandName();
+    CompletionStage<?> handle(CommandContext context, SlashCommandInteractionEvent event);
 
-    default String getGroupName() {
-        return null;
-    }
-
-    String getDescription();
-
-    default SubcommandData definition() {
-        return new SubcommandData(getSubcommandName(), getDescription());
-    }
-
-    void handle(SlashCommandInteractionEvent event);
-
-    default void handleAutoComplete(CommandAutoCompleteInteractionEvent event) {
+    default CompletionStage<?> handleAutoComplete(CommandContext context, CommandAutoCompleteInteractionEvent event) {
+        return event.replyChoices(List.of()).submit();
     }
 }
