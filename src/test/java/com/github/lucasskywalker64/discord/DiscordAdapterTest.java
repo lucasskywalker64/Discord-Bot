@@ -1,6 +1,7 @@
 package com.github.lucasskywalker64.discord;
 
 import com.github.lucasskywalker64.DiscordBotApplication;
+import com.github.lucasskywalker64.commands.SubcommandModule;
 import com.github.lucasskywalker64.guild.GuildConfiguration;
 import com.github.lucasskywalker64.guild.GuildConfigurationRepository;
 import net.dv8tion.jda.api.JDA;
@@ -9,21 +10,26 @@ import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.Message;
 import net.dv8tion.jda.api.events.guild.GuildJoinEvent;
 import net.dv8tion.jda.api.events.guild.GuildReadyEvent;
+import net.dv8tion.jda.api.events.interaction.command.CommandAutoCompleteInteractionEvent;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
 import net.dv8tion.jda.api.interactions.InteractionHook;
+import net.dv8tion.jda.api.interactions.commands.Command;
+import net.dv8tion.jda.api.interactions.commands.CommandAutoCompleteInteraction;
 import net.dv8tion.jda.api.interactions.commands.SlashCommandInteraction;
 import net.dv8tion.jda.api.interactions.commands.build.CommandData;
 import net.dv8tion.jda.api.requests.RestAction;
 import net.dv8tion.jda.api.requests.restaction.CommandListUpdateAction;
 import net.dv8tion.jda.api.requests.restaction.WebhookMessageEditAction;
 import net.dv8tion.jda.api.requests.restaction.interactions.ReplyCallbackAction;
+import net.dv8tion.jda.api.requests.restaction.interactions.AutoCompleteCallbackAction;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Answers;
 import org.mockito.Mock;
@@ -36,16 +42,21 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import java.time.Duration;
+import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.RETURNS_SELF;
 import static org.mockito.Mockito.anyString;
+import static org.mockito.Mockito.anyCollection;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -66,6 +77,107 @@ class DiscordAdapterTest {
     void configureConnection() throws InterruptedException {
         when(builder.build()).thenReturn(discord);
         when(discord.awaitShutdown(Duration.ofSeconds(10))).thenReturn(true);
+    }
+
+    @Test
+    void routesAutocompleteToTheInjectedModuleInItsGuild() {
+        try (var application = startApplication(new EchoCommand())) {
+            String guildId = "100000000000000002";
+            application.getBean(GuildConfigurationRepository.class)
+                    .saveAndFlush(new GuildConfiguration(guildId, null));
+            var interaction = mock(CommandAutoCompleteInteraction.class);
+            var guild = guild(guildId);
+            when(interaction.getGuild()).thenReturn(guild);
+            when(interaction.getName()).thenReturn("general");
+            when(interaction.getSubcommandGroup()).thenReturn("diagnostics");
+            when(interaction.getSubcommandName()).thenReturn("echo");
+            var reply = mock(AutoCompleteCallbackAction.class);
+            when(interaction.replyChoices(anyCollection())).thenReturn(reply);
+
+            listener().onEvent(new CommandAutoCompleteInteractionEvent(discord, 1, interaction));
+
+            ArgumentCaptor<Collection<Command.Choice>> choices = ArgumentCaptor.captor();
+            verify(interaction).replyChoices(choices.capture());
+            assertEquals(1, choices.getValue().size());
+            assertEquals("100000000000000002", choices.getValue().iterator().next().getAsString());
+            verify(reply).queue();
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({"general,,missing", "general,diagnostics,missing", "other,,ping", "general,,"})
+    void rejectsUnknownRoutesWithoutCallingPing(String root, String group, String subcommand) {
+        try (var application = startApplication()) {
+            String guildId = "100000000000000001";
+            application.getBean(GuildConfigurationRepository.class)
+                    .saveAndFlush(new GuildConfiguration(guildId, null));
+            var interaction = mock(SlashCommandInteraction.class);
+            var guild = guild(guildId);
+            when(interaction.getGuild()).thenReturn(guild);
+            when(interaction.getName()).thenReturn(root);
+            when(interaction.getSubcommandGroup()).thenReturn(group);
+            when(interaction.getSubcommandName()).thenReturn(subcommand);
+            var reply = mock(ReplyCallbackAction.class, RETURNS_SELF);
+            when(interaction.deferReply()).thenReturn(reply);
+
+            listener().onEvent(new SlashCommandInteractionEvent(discord, 1, interaction));
+
+            verify(reply).setContent("Unknown command.");
+            verify(reply).setEphemeral(true);
+            verify(reply).queue();
+            verify(discord, never()).getRestPing();
+        }
+    }
+
+    @Test
+    void rejectsDuplicateRoutesBeforeStartingTheGateway() {
+        reset(builder, discord);
+        var failure = assertThrows(RuntimeException.class,
+                () -> startApplication(new EchoCommand(), new EchoCommand()));
+        Throwable cause = failure;
+        while (cause.getCause() != null) {
+            cause = cause.getCause();
+        }
+        assertTrue(cause instanceof IllegalStateException);
+        assertEquals("Duplicate subcommand: general/diagnostics/echo", cause.getMessage());
+        verify(builder, never()).build();
+    }
+
+    @Test
+    void registersAndRoutesAnInjectedGroupedCommandAlongsidePing() {
+        try (var application = startApplication(new EchoCommand())) {
+            String guildId = "100000000000000002";
+            application.getBean(GuildConfigurationRepository.class)
+                    .saveAndFlush(new GuildConfiguration(guildId, null));
+            var guild = guild(guildId);
+            var registration = mock(CommandListUpdateAction.class, RETURNS_SELF);
+            when(guild.updateCommands()).thenReturn(registration);
+            var listener = listener();
+
+            listener.onEvent(new GuildReadyEvent(discord, 1, guild));
+
+            var commands = ArgumentCaptor.forClass(CommandData[].class);
+            verify(registration).addCommands(commands.capture());
+            var options = commands.getValue()[0].toData().getArray("options");
+            assertEquals(2, options.length());
+            var group = options.getObject(1);
+            assertEquals("diagnostics", group.getString("name"));
+            assertEquals("echo", group.getArray("options").getObject(0).getString("name"));
+
+            var interaction = mock(SlashCommandInteraction.class);
+            when(interaction.getGuild()).thenReturn(guild);
+            when(interaction.getName()).thenReturn("general");
+            when(interaction.getSubcommandGroup()).thenReturn("diagnostics");
+            when(interaction.getSubcommandName()).thenReturn("echo");
+            var reply = mock(ReplyCallbackAction.class, RETURNS_SELF);
+            when(interaction.deferReply()).thenReturn(reply);
+
+            listener.onEvent(new SlashCommandInteractionEvent(discord, 1, interaction));
+
+            verify(reply).setContent("Echo from 100000000000000002");
+            verify(reply).queue();
+            verify(discord, never()).getRestPing();
+        }
     }
 
     @Test
@@ -91,7 +203,9 @@ class DiscordAdapterTest {
         try (var application = startApplication()) {
             application.getBean(GuildConfigurationRepository.class)
                     .saveAndFlush(new GuildConfiguration("100000000000000001", null));
-            var interaction = ping(guildId == null ? null : guild(guildId));
+            var interaction = mock(SlashCommandInteraction.class);
+            var guild = guildId == null ? null : guild(guildId);
+            when(interaction.getGuild()).thenReturn(guild);
             var reply = mock(ReplyCallbackAction.class, RETURNS_SELF);
             when(interaction.deferReply()).thenReturn(reply);
 
@@ -191,10 +305,16 @@ class DiscordAdapterTest {
         order.verify(discord).awaitShutdown(Duration.ofSeconds(5));
     }
 
-    private ConfigurableApplicationContext startApplication() {
+    private ConfigurableApplicationContext startApplication(SubcommandModule... modules) {
         var application = new SpringApplication(DiscordBotApplication.class);
-        application.addInitializers(context -> ((GenericApplicationContext) context)
-                .registerBean("testDiscordBuilder", JDABuilder.class, () -> builder));
+        application.addInitializers(context -> {
+            var beans = (GenericApplicationContext) context;
+            beans.registerBean("testDiscordBuilder", JDABuilder.class, () -> builder);
+            for (int index = 0; index < modules.length; index++) {
+                var module = modules[index];
+                beans.registerBean("testCommand" + index, SubcommandModule.class, () -> module);
+            }
+        });
         return application.run(
                 "--server.port=0",
                 "--spring.datasource.url=" + postgres.getJdbcUrl(),
@@ -223,5 +343,38 @@ class DiscordAdapterTest {
         when(interaction.getName()).thenReturn("general");
         when(interaction.getSubcommandName()).thenReturn("ping");
         return interaction;
+    }
+
+    private static class EchoCommand implements SubcommandModule {
+
+        @Override
+        public String getRootName() {
+            return "general";
+        }
+
+        @Override
+        public String getGroupName() {
+            return "diagnostics";
+        }
+
+        @Override
+        public String getSubcommandName() {
+            return "echo";
+        }
+
+        @Override
+        public String getDescription() {
+            return "Echo the guild";
+        }
+
+        @Override
+        public void handle(SlashCommandInteractionEvent event) {
+            event.reply("Echo from " + event.getGuild().getId()).queue();
+        }
+
+        @Override
+        public void handleAutoComplete(CommandAutoCompleteInteractionEvent event) {
+            event.replyChoice("Guild", event.getGuild().getId()).queue();
+        }
     }
 }

@@ -1,25 +1,25 @@
 package com.github.lucasskywalker64.discord;
 
+import com.github.lucasskywalker64.commands.CommandRegistry;
 import com.github.lucasskywalker64.guild.GuildConfigurationRepository;
 import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.events.guild.GuildJoinEvent;
 import net.dv8tion.jda.api.events.guild.GuildReadyEvent;
+import net.dv8tion.jda.api.events.interaction.command.CommandAutoCompleteInteractionEvent;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
-import net.dv8tion.jda.api.interactions.commands.DefaultMemberPermissions;
-import net.dv8tion.jda.api.interactions.commands.build.Commands;
-import net.dv8tion.jda.api.interactions.commands.build.SubcommandData;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import net.dv8tion.jda.api.interactions.commands.build.CommandData;
+
+import java.util.List;
 
 public class DiscordListener extends ListenerAdapter {
 
-    private static final Logger log = LoggerFactory.getLogger(DiscordListener.class);
-
     private final GuildConfigurationRepository configurations;
+    private final CommandRegistry commands;
 
-    public DiscordListener(GuildConfigurationRepository configurations) {
+    public DiscordListener(GuildConfigurationRepository configurations, CommandRegistry commands) {
         this.configurations = configurations;
+        this.commands = commands;
     }
 
     @Override
@@ -34,29 +34,27 @@ public class DiscordListener extends ListenerAdapter {
 
     @Override
     public void onSlashCommandInteraction(SlashCommandInteractionEvent event) {
-        if (!"general".equals(event.getName()) || !"ping".equals(event.getSubcommandName())
-                || event.getSubcommandGroup() != null) {
-            return;
-        }
         var guild = event.getGuild();
         if (guild == null || !configurations.existsById(guild.getId())) {
             event.reply("Use this command in a configured guild.").setEphemeral(true).queue();
             return;
         }
-        event.deferReply(true).submit().thenCompose(hook -> event.getJDA().getRestPing().submit()
-                .thenCompose(rest -> hook.editOriginal("Rest ping: %d ms\nGateway ping: %d ms"
-                        .formatted(rest, event.getJDA().getGatewayPing())).submit()))
-                .exceptionally(failure -> {
-                    log.warn("Failed to answer ping in guild {}", guild.getId(), failure);
-                    return null;
-                });
+        commands.dispatch(event);
+    }
+
+    @Override
+    public void onCommandAutoCompleteInteraction(CommandAutoCompleteInteractionEvent event) {
+        var guild = event.getGuild();
+        if (guild == null || !configurations.existsById(guild.getId())) {
+            event.replyChoices(List.of()).queue();
+            return;
+        }
+        commands.dispatchAutoComplete(event);
     }
 
     private void registerCommands(Guild guild) {
         if (configurations.existsById(guild.getId())) {
-            guild.updateCommands().addCommands(Commands.slash("general", "General utilities")
-                    .setDefaultPermissions(DefaultMemberPermissions.DISABLED)
-                    .addSubcommands(new SubcommandData("ping", "Check gateway and REST latency"))).queue();
+            guild.updateCommands().addCommands(commands.definitions().toArray(CommandData[]::new)).queue();
         }
     }
 }
