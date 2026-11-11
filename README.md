@@ -39,10 +39,27 @@ without using another guild's settings. No privileged gateway intents are needed
 The command retains the legacy administrator-only default. Guild administrators
 can grant command access through Discord's integration settings.
 
+Configured guild IDs load from PostgreSQL before JDA starts. Gateway callbacks
+use an immutable in-memory snapshot instead of querying the database. A failed
+initial load prevents startup. Operator provisioning still requires a restart.
+Code that changes guild membership must call `ConfiguredGuilds.refresh()` after
+the database transaction commits, outside gateway callbacks. A failed refresh
+clears the snapshot, rejecting guild access until a refresh succeeds. This
+snapshot covers provisioning only; feature authorization remains separate.
+
+Registration retries transport errors, timeouts and HTTP 5xx failures after
+JDA's own request handling finishes. Each operation makes at most three
+application attempts, with 1- and 2-second backoff. Permanent failures are
+logged without retrying. Only one operation per guild can be pending; Spring
+stop cancels retry timers before draining JDA, and stale callbacks cannot restart
+work after a lifecycle restart. A later guild lifecycle event can retry an
+operation that previously exhausted its attempts.
+
 Declare each `SubcommandModule` as a Spring bean. Its `CommandDefinition` owns
 root and group descriptions, default permissions and the subcommand definition.
 `CommandRegistry` snapshots these definitions for registration and routing;
-duplicate routes and conflicting root/group metadata prevent startup.
+duplicate routes, conflicting root/group metadata, and a name shared by a
+direct subcommand and a sibling group prevent startup.
 Handlers receive explicit guild and actor IDs in `CommandContext`, alongside
 the JDA event for Discord operations. Pass these IDs to feature operations.
 Return the complete asynchronous operation as a `CompletionStage` so the registry

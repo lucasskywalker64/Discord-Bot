@@ -13,16 +13,24 @@ public class DiscordLifecycle implements SmartLifecycle {
     private static final Logger log = LoggerFactory.getLogger(DiscordLifecycle.class);
 
     private final JDABuilder builder;
+    private final GuildCommandRegistration registrations;
     private volatile JDA discord;
 
-    public DiscordLifecycle(JDABuilder builder) {
+    public DiscordLifecycle(JDABuilder builder, GuildCommandRegistration registrations) {
         this.builder = builder;
+        this.registrations = registrations;
     }
 
     @Override
     public void start() {
         if (!isRunning()) {
-            discord = builder.build();
+            registrations.start();
+            try {
+                discord = builder.build();
+            } catch (RuntimeException failure) {
+                registrations.stop();
+                throw failure;
+            }
         }
     }
 
@@ -31,6 +39,7 @@ public class DiscordLifecycle implements SmartLifecycle {
         if (!isRunning()) {
             return;
         }
+        registrations.stop();
         discord.shutdown();
         try {
             if (!discord.awaitShutdown(Duration.ofSeconds(10))) {

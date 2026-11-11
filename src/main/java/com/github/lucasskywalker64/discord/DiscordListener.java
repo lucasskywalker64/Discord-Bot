@@ -1,47 +1,47 @@
 package com.github.lucasskywalker64.discord;
 
 import com.github.lucasskywalker64.commands.CommandRegistry;
-import com.github.lucasskywalker64.guild.GuildConfigurationRepository;
-import net.dv8tion.jda.api.entities.Guild;
+import com.github.lucasskywalker64.guild.ConfiguredGuilds;
 import net.dv8tion.jda.api.events.guild.GuildAvailableEvent;
 import net.dv8tion.jda.api.events.guild.GuildJoinEvent;
 import net.dv8tion.jda.api.events.guild.GuildReadyEvent;
 import net.dv8tion.jda.api.events.interaction.command.CommandAutoCompleteInteractionEvent;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
-import net.dv8tion.jda.api.interactions.commands.build.CommandData;
 
 import java.util.List;
 
 public class DiscordListener extends ListenerAdapter {
 
-    private final GuildConfigurationRepository configurations;
+    private final ConfiguredGuilds configuredGuilds;
     private final CommandRegistry commands;
+    private final GuildCommandRegistration registrations;
 
-    public DiscordListener(GuildConfigurationRepository configurations, CommandRegistry commands) {
-        this.configurations = configurations;
+    public DiscordListener(ConfiguredGuilds configuredGuilds, CommandRegistry commands, GuildCommandRegistration registrations) {
+        this.configuredGuilds = configuredGuilds;
         this.commands = commands;
+        this.registrations = registrations;
     }
 
     @Override
     public void onGuildReady(GuildReadyEvent event) {
-        registerCommands(event.getGuild());
+        registrations.register(event.getGuild());
     }
 
     @Override
     public void onGuildJoin(GuildJoinEvent event) {
-        registerCommands(event.getGuild());
+        registrations.register(event.getGuild());
     }
 
     @Override
     public void onGuildAvailable(GuildAvailableEvent event) {
-        registerCommands(event.getGuild());
+        registrations.register(event.getGuild());
     }
 
     @Override
     public void onSlashCommandInteraction(SlashCommandInteractionEvent event) {
         var guild = event.getGuild();
-        if (guild == null || !configurations.existsById(guild.getId())) {
+        if (guild == null || !configuredGuilds.contains(guild.getId())) {
             event.reply("Use this command in a configured guild.").setEphemeral(true).queue();
             return;
         }
@@ -51,16 +51,11 @@ public class DiscordListener extends ListenerAdapter {
     @Override
     public void onCommandAutoCompleteInteraction(CommandAutoCompleteInteractionEvent event) {
         var guild = event.getGuild();
-        if (guild == null || !configurations.existsById(guild.getId())) {
+        if (guild == null || !configuredGuilds.contains(guild.getId())) {
             event.replyChoices(List.of()).queue();
             return;
         }
         commands.dispatchAutoComplete(event);
     }
 
-    private void registerCommands(Guild guild) {
-        if (configurations.existsById(guild.getId())) {
-            guild.updateCommands().addCommands(commands.definitions().toArray(CommandData[]::new)).queue();
-        }
-    }
 }

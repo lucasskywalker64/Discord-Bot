@@ -57,7 +57,15 @@ public class CommandRegistry {
                 groupData.addSubcommands(subcommand);
             }
         }
-        groups.forEach((root, rootGroups) -> roots.get(root).addSubcommandGroups(rootGroups.values()));
+        groups.forEach((root, rootGroups) -> {
+            var rootData = roots.get(root);
+            for (var subcommand : rootData.getSubcommands()) {
+                if (rootGroups.containsKey(subcommand.getName())) {
+                    throw new IllegalStateException("Conflicting subcommand and group name: " + root + "/" + subcommand.getName());
+                }
+            }
+            rootData.addSubcommandGroups(rootGroups.values());
+        });
         definitions = List.copyOf(roots.values());
     }
 
