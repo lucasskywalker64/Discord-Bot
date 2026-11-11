@@ -24,9 +24,13 @@ import net.dv8tion.jda.api.requests.restaction.CommandListUpdateAction;
 import net.dv8tion.jda.api.requests.restaction.interactions.ReplyCallbackAction;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 import org.springframework.boot.SpringApplication;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.support.GenericApplicationContext;
@@ -54,6 +58,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.never;
 
 @Testcontainers
+@ExtendWith(MockitoExtension.class)
+// The shared Discord fixture supplies success, rejection and failure responses; each request uses one path.
+@MockitoSettings(strictness = Strictness.LENIENT)
 class GuildSettingsTest {
 
     private static final String GUILD_A = "100000000000000001";
