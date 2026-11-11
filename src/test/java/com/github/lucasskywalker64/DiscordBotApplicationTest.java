@@ -110,6 +110,7 @@ class DiscordBotApplicationTest {
     private static ConfigurableApplicationContext startApplication(String... additionalArguments) {
         var arguments = new ArrayList<>(List.of(
                 "--server.port=0",
+                "--discord.enabled=false",
                 "--spring.datasource.url=" + postgres.getJdbcUrl(),
                 "--spring.datasource.username=" + postgres.getUsername(),
                 "--spring.datasource.password=" + postgres.getPassword(),
