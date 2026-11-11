@@ -3,6 +3,7 @@ package com.github.lucasskywalker64.discord;
 import com.github.lucasskywalker64.commands.CommandRegistry;
 import com.github.lucasskywalker64.commands.SubcommandModule;
 import com.github.lucasskywalker64.commands.general.GeneralPing;
+import com.github.lucasskywalker64.commands.general.GeneralMemberCountAdd;
 import com.github.lucasskywalker64.guild.GuildConfigurationRepository;
 import com.github.lucasskywalker64.guild.ConfiguredGuilds;
 import net.dv8tion.jda.api.JDABuilder;
@@ -15,6 +16,7 @@ import org.springframework.context.annotation.Configuration;
 
 import java.util.List;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
 
 @Configuration(proxyBeanMethods = false)
@@ -31,6 +33,17 @@ public class DiscordConfiguration {
     @Bean
     GeneralPing generalPing() {
         return new GeneralPing();
+    }
+
+    @Bean(destroyMethod = "close")
+    ExecutorService guildSettingsExecutor() {
+        return Executors.newVirtualThreadPerTaskExecutor();
+    }
+
+    @Bean
+    GeneralMemberCountAdd generalMemberCountAdd(GuildConfigurationRepository configurations,
+                                               ExecutorService guildSettingsExecutor) {
+        return new GeneralMemberCountAdd(configurations, guildSettingsExecutor);
     }
 
     @Bean
