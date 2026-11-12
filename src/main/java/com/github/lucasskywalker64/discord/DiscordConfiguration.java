@@ -13,10 +13,11 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.task.SimpleAsyncTaskExecutor;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import java.util.List;
 import java.util.concurrent.Executors;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
 
 @Configuration(proxyBeanMethods = false)
@@ -36,14 +37,18 @@ public class DiscordConfiguration {
     }
 
     @Bean(destroyMethod = "close")
-    ExecutorService guildSettingsExecutor() {
-        return Executors.newVirtualThreadPerTaskExecutor();
+    SimpleAsyncTaskExecutor guildSettingsExecutor() {
+        var executor = new SimpleAsyncTaskExecutor("guild-settings-");
+        executor.setVirtualThreads(true);
+        executor.setTaskTerminationTimeout(5_000);
+        return executor;
     }
 
     @Bean
     GeneralMemberCountAdd generalMemberCountAdd(GuildConfigurationRepository configurations,
-                                               ExecutorService guildSettingsExecutor) {
-        return new GeneralMemberCountAdd(configurations, guildSettingsExecutor);
+                                               SimpleAsyncTaskExecutor guildSettingsExecutor,
+                                               PlatformTransactionManager transactionManager) {
+        return new GeneralMemberCountAdd(configurations, guildSettingsExecutor, transactionManager);
     }
 
     @Bean

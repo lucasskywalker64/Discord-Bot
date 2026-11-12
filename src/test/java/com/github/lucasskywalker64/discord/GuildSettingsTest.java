@@ -49,6 +49,7 @@ import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.fail;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.RETURNS_SELF;
 import static org.mockito.Mockito.doAnswer;
@@ -218,6 +219,61 @@ class GuildSettingsTest {
                     request.result().get(10, TimeUnit.SECONDS));
             verify(request.reply()).setEphemeral(true);
         }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"read", "write", "shutdown"})
+    void boundsBlockedSettingsWorkAndApplicationShutdown(String operation) throws Exception {
+        provisionGuilds();
+        try (var closer = Executors.newSingleThreadExecutor()) {
+            try (var application = startApplication();
+                 var connection = DriverManager.getConnection(
+                         postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())) {
+                var guildA = guild(GUILD_A, OWNER_A);
+                var guildB = guild(GUILD_B, OWNER_B);
+                invoke(application, guildA, OWNER_A, channel(guildA, CHANNEL_A));
+                invoke(application, guildB, OWNER_B, channel(guildB, CHANNEL_B));
+                connection.setAutoCommit(false);
+                try (var statement = connection.prepareStatement(operation.equals("read")
+                        ? "LOCK TABLE guild_configuration IN ACCESS EXCLUSIVE MODE"
+                        : "SELECT guild_id FROM guild_configuration WHERE guild_id = ? FOR UPDATE")) {
+                    if (!operation.equals("read")) {
+                        statement.setString(1, GUILD_A);
+                    }
+                    statement.execute();
+                }
+                var request = request(guildA, OWNER_A,
+                        operation.equals("read") ? null : channel(guildA, "200000000000000003"));
+                dispatch(application, request);
+                request.acknowledged().complete(request.hook());
+                awaitSettingsLock(application.getBean(JdbcTemplate.class));
+                if (operation.equals("shutdown")) {
+                    closer.submit(application::close).get(8, TimeUnit.SECONDS);
+                }
+                assertEquals("Command failed. Please try again.", request.result().get(8, TimeUnit.SECONDS));
+                connection.rollback();
+            }
+        }
+        try (var application = startApplication()) {
+            assertEquals("Member-count voice channel: <#200000000000000001>.",
+                    invoke(application, guild(GUILD_A, OWNER_A), OWNER_A, null));
+            assertEquals("Member-count voice channel: <#200000000000000002>.",
+                    invoke(application, guild(GUILD_B, OWNER_B), OWNER_B, null));
+        }
+    }
+
+    private static void awaitSettingsLock(JdbcTemplate jdbc) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        do {
+            if (jdbc.queryForObject("""
+                    SELECT count(*) FROM pg_stat_activity
+                    WHERE datname = current_database() AND wait_event_type = 'Lock'
+                    AND query LIKE '%guild_configuration%'
+                    """, Integer.class) > 0) {
+                return;
+            }
+        } while (System.nanoTime() < deadline);
+        fail("The settings request did not reach the database lock");
     }
 
     private void provisionGuilds() throws InterruptedException {

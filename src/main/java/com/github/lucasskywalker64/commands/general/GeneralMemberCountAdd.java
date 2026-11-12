@@ -11,6 +11,8 @@ import net.dv8tion.jda.api.interactions.commands.DefaultMemberPermissions;
 import net.dv8tion.jda.api.interactions.commands.OptionType;
 import net.dv8tion.jda.api.interactions.commands.build.OptionData;
 import net.dv8tion.jda.api.interactions.commands.build.SubcommandData;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -20,10 +22,14 @@ public class GeneralMemberCountAdd implements SubcommandModule {
 
     private final GuildConfigurationRepository configurations;
     private final Executor executor;
+    private final TransactionTemplate transactions;
 
-    public GeneralMemberCountAdd(GuildConfigurationRepository configurations, Executor executor) {
+    public GeneralMemberCountAdd(GuildConfigurationRepository configurations, Executor executor,
+                                 PlatformTransactionManager transactionManager) {
         this.configurations = configurations;
         this.executor = executor;
+        this.transactions = new TransactionTemplate(transactionManager);
+        this.transactions.setTimeout(5);
     }
 
     @Override
@@ -53,7 +59,7 @@ public class GeneralMemberCountAdd implements SubcommandModule {
         }
         String selectedChannelId = channelId;
         return event.deferReply(true).submit().thenCompose(hook -> CompletableFuture
-                .supplyAsync(() -> readOrSet(context.guildId(), selectedChannelId), executor)
+                .supplyAsync(() -> transactions.execute(status -> readOrSet(context.guildId(), selectedChannelId)), executor)
                 .thenCompose(message -> hook.editOriginal(message).submit()));
     }
 

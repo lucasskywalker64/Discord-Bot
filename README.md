@@ -68,6 +68,10 @@ The setting persists across restarts; storage failures return a command error
 instead of reporting an unset channel. The command only stores the channel;
 member-count renaming, scheduling and removal belong to rewrite ticket #61.
 
+Settings transactions have a five-second timeout, including database lock waits.
+On shutdown, the settings executor waits up to five seconds for active tasks,
+then interrupts any remaining tasks.
+
 Registration retries transport errors, timeouts and HTTP 5xx failures after
 JDA's own request handling finishes. Each operation makes at most three
 application attempts, with 1- and 2-second backoff. Permanent failures are
@@ -118,9 +122,17 @@ the environment. Do not run this check with a production bot token or database.
 3. As an administrator in each guild, invoke `/general ping` and check the ephemeral reply contains
    both measured latencies. Repeat to check subsequent interactions. If Discord
    offers the command in a DM, verify it rejects the request.
-4. Stop the foreground application with Ctrl+C or send SIGTERM. Confirm the
+4. As the owner of each guild, run `/general addmembercount` and confirm the
+   channel is unset. Set a different local voice channel in each guild with
+   `/general addmembercount channel:<voice channel>`, then omit `channel` to
+   read it back. Confirm each guild returns its own channel in an ephemeral reply.
+   As an administrator who is not the owner, try both reading and setting the
+   channel. Confirm both requests are rejected and the owner's read stays unchanged.
+5. Stop the foreground application with Ctrl+C or send SIGTERM. Confirm the
    process exits without a shutdown timeout and the bot disconnects. Start it
    again and repeat both guild pings to check registration after reconnecting.
+   As each guild's owner, read `/general addmembercount` again and confirm its
+   previously selected channel persists.
 
 Automated tests cover the missing-guild case even when Discord does not expose
 the guild command in DMs. Real gateway delivery requires this opt-in check and
