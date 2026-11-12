@@ -344,7 +344,7 @@ class GuildSettingsTest {
         WebhookMessageEditAction<Message> response = mock();
         when(hook.editOriginal(anyString())).thenAnswer(call -> {
             String content = call.getArgument(0);
-            when(response.submit()).thenAnswer(ignored -> {
+            when(response.submit()).thenAnswer(_ -> {
                 result.complete(content);
                 return CompletableFuture.completedFuture(null);
             });

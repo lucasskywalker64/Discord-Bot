@@ -69,7 +69,7 @@ public class GuildCommandRegistration {
         registration.attempt++;
         try {
             registration.guild.updateCommands().addCommands(commands.definitions().toArray(CommandData[]::new))
-                    .queue(ignored -> complete(registration), failure -> failed(registration, failure));
+                    .queue(_ -> complete(registration), failure -> failed(registration, failure));
         } catch (RuntimeException failure) {
             failed(registration, failure);
         }

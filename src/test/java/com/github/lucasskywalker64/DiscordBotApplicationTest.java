@@ -84,7 +84,7 @@ class DiscordBotApplicationTest {
     @Test
     void rejectsBrokenMigrationAtStartup() {
         var failure = assertThrows(BeanCreationException.class, () -> {
-            try (var ignored = startApplication(
+            try (var _ = startApplication(
                     "--spring.flyway.locations=classpath:db/migration,classpath:db/broken")) {
                 // Startup must fail before returning an application context.
             }
@@ -100,7 +100,7 @@ class DiscordBotApplicationTest {
         }
 
         var failure = assertThrows(BeanCreationException.class, () -> {
-            try (var ignored = startApplication()) {
+            try (var _ = startApplication()) {
                 // Hibernate must validate, rather than change, the migrated schema.
             }
         });

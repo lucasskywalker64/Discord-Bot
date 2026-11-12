@@ -729,7 +729,7 @@ class DiscordAdapterTest {
     void forcesShutdownIfGracefulShutdownTimesOut() throws InterruptedException {
         when(discord.awaitShutdown(Duration.ofSeconds(10))).thenReturn(false);
         when(discord.awaitShutdown(Duration.ofSeconds(5))).thenReturn(true);
-        try (var ignored = startApplication()) {
+        try (var _ = startApplication()) {
             // Closing Spring must also stop a gateway with pending requests.
         }
 
