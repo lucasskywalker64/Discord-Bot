@@ -32,8 +32,8 @@ the outbound JDA connection and use disposable PostgreSQL.
 
 A configured guild has a row in `guild_configuration`. When Discord reports
 that a guild is ready, joined, or newly available, the adapter registers the
-guild command `/general ping`. Registration replaces the guild's command set,
-currently only `general ping`. The command replies ephemerally with REST and gateway latency
+guild commands `/general ping` and `/general addmembercount`. Registration replaces
+the guild's command set. Ping replies ephemerally with REST and gateway latency
 in milliseconds. DMs, missing guilds and unconfigured guilds receive a rejection
 without using another guild's settings. No privileged gateway intents are needed.
 The command retains the legacy administrator-only default. Guild administrators
@@ -46,6 +46,31 @@ Code that changes guild membership must call `ConfiguredGuilds.refresh()` after
 the database transaction commits, outside gateway callbacks. A failed refresh
 clears the snapshot, rejecting guild access until a refresh succeeds. This
 snapshot covers provisioning only; feature authorization remains separate.
+
+### Guild settings
+
+On a clean installation, start the app once to apply Flyway migrations, then
+provision each intended guild through your database client:
+
+```sql
+INSERT INTO guild_configuration (guild_id) VALUES ('YOUR_GUILD_ID');
+```
+
+Start or restart the app after provisioning. Commands are registered only for
+provisioned guilds. The member-count channel starts unset.
+
+Only the current guild owner can read or change this setting, including when
+Discord grants another administrator access to the command. Use
+`/general addmembercount` to read it, or
+`/general addmembercount channel:<voice channel>` to set or replace it. The channel
+must be an existing voice channel in the same guild. Replies are ephemeral.
+The setting persists across restarts; storage failures return a command error
+instead of reporting an unset channel. The command only stores the channel;
+member-count renaming, scheduling and removal belong to rewrite ticket #61.
+
+Settings transactions have a five-second timeout, including database lock waits.
+On shutdown, the settings executor waits up to five seconds for active tasks,
+then interrupts any remaining tasks.
 
 Registration retries transport errors, timeouts and HTTP 5xx failures after
 JDA's own request handling finishes. Each operation makes at most three
@@ -93,14 +118,21 @@ the environment. Do not run this check with a production bot token or database.
    VALUES ('YOUR_FIRST_TEST_GUILD_ID'), ('YOUR_SECOND_TEST_GUILD_ID');
    ```
 
-   This seeds only the lifecycle smoke test. Guild settings commands belong to
-   rewrite ticket #54. Wait for JDA to report a connected gateway.
+   Wait for JDA to report a connected gateway.
 3. As an administrator in each guild, invoke `/general ping` and check the ephemeral reply contains
    both measured latencies. Repeat to check subsequent interactions. If Discord
    offers the command in a DM, verify it rejects the request.
-4. Stop the foreground application with Ctrl+C or send SIGTERM. Confirm the
+4. As the owner of each guild, run `/general addmembercount` and confirm the
+   channel is unset. Set a different local voice channel in each guild with
+   `/general addmembercount channel:<voice channel>`, then omit `channel` to
+   read it back. Confirm each guild returns its own channel in an ephemeral reply.
+   As an administrator who is not the owner, try both reading and setting the
+   channel. Confirm both requests are rejected and the owner's read stays unchanged.
+5. Stop the foreground application with Ctrl+C or send SIGTERM. Confirm the
    process exits without a shutdown timeout and the bot disconnects. Start it
    again and repeat both guild pings to check registration after reconnecting.
+   As each guild's owner, read `/general addmembercount` again and confirm its
+   previously selected channel persists.
 
 Automated tests cover the missing-guild case even when Discord does not expose
 the guild command in DMs. Real gateway delivery requires this opt-in check and

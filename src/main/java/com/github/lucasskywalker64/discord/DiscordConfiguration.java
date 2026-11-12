@@ -3,6 +3,7 @@ package com.github.lucasskywalker64.discord;
 import com.github.lucasskywalker64.commands.CommandRegistry;
 import com.github.lucasskywalker64.commands.SubcommandModule;
 import com.github.lucasskywalker64.commands.general.GeneralPing;
+import com.github.lucasskywalker64.commands.general.GeneralMemberCountAdd;
 import com.github.lucasskywalker64.guild.GuildConfigurationRepository;
 import com.github.lucasskywalker64.guild.ConfiguredGuilds;
 import net.dv8tion.jda.api.JDABuilder;
@@ -12,6 +13,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.task.SimpleAsyncTaskExecutor;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import java.util.List;
 import java.util.concurrent.Executors;
@@ -31,6 +34,21 @@ public class DiscordConfiguration {
     @Bean
     GeneralPing generalPing() {
         return new GeneralPing();
+    }
+
+    @Bean(destroyMethod = "close")
+    SimpleAsyncTaskExecutor guildSettingsExecutor() {
+        var executor = new SimpleAsyncTaskExecutor("guild-settings-");
+        executor.setVirtualThreads(true);
+        executor.setTaskTerminationTimeout(5_000);
+        return executor;
+    }
+
+    @Bean
+    GeneralMemberCountAdd generalMemberCountAdd(GuildConfigurationRepository configurations,
+                                               SimpleAsyncTaskExecutor guildSettingsExecutor,
+                                               PlatformTransactionManager transactionManager) {
+        return new GeneralMemberCountAdd(configurations, guildSettingsExecutor, transactionManager);
     }
 
     @Bean

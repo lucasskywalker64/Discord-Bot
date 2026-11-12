@@ -543,8 +543,8 @@ class DiscordAdapterTest {
             var commands = ArgumentCaptor.forClass(CommandData[].class);
             verify(registration).addCommands(commands.capture());
             var options = commands.getValue()[0].toData().getArray("options");
-            assertEquals(2, options.length());
-            var group = options.getObject(1);
+            assertEquals(3, options.length());
+            var group = options.getObject(2);
             assertEquals("diagnostics", group.getString("name"));
             assertEquals("echo", group.getArray("options").getObject(0).getString("name"));
 
@@ -729,7 +729,7 @@ class DiscordAdapterTest {
     void forcesShutdownIfGracefulShutdownTimesOut() throws InterruptedException {
         when(discord.awaitShutdown(Duration.ofSeconds(10))).thenReturn(false);
         when(discord.awaitShutdown(Duration.ofSeconds(5))).thenReturn(true);
-        try (var ignored = startApplication()) {
+        try (var _ = startApplication()) {
             // Closing Spring must also stop a gateway with pending requests.
         }
 

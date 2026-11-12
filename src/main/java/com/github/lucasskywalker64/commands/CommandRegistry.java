@@ -40,7 +40,7 @@ public class CommandRegistry {
             if (this.modules.putIfAbsent(path, module) != null) {
                 throw new IllegalStateException("Duplicate subcommand: " + path.root() + "/" + path.group() + "/" + path.subcommand());
             }
-            var rootData = roots.computeIfAbsent(root.name(), ignored -> Commands.slash(root.name(), root.description())
+            var rootData = roots.computeIfAbsent(root.name(), _ -> Commands.slash(root.name(), root.description())
                     .setDefaultPermissions(root.defaultPermissions()));
             if (!rootData.getDescription().equals(root.description())
                     || !rootData.getDefaultPermissions().equals(root.defaultPermissions())) {
@@ -49,8 +49,8 @@ public class CommandRegistry {
             if (group == null) {
                 rootData.addSubcommands(subcommand);
             } else {
-                var groupData = groups.computeIfAbsent(root.name(), ignored -> new TreeMap<>())
-                        .computeIfAbsent(group.name(), ignored -> new SubcommandGroupData(group.name(), group.description()));
+                var groupData = groups.computeIfAbsent(root.name(), _ -> new TreeMap<>())
+                        .computeIfAbsent(group.name(), _ -> new SubcommandGroupData(group.name(), group.description()));
                 if (!groupData.getDescription().equals(group.description())) {
                     throw new IllegalStateException("Conflicting group metadata: " + root.name() + "/" + group.name());
                 }
@@ -106,8 +106,8 @@ public class CommandRegistry {
 
     private void execute(Supplier<CompletionStage<?>> operation, Function<Throwable, CompletionStage<?>> recover) {
         CompletableFuture.completedFuture(null)
-                .thenCompose(ignored -> operation.get())
-                .handle((ignored, failure) -> failure == null ? CompletableFuture.completedFuture(null) : recover.apply(failure))
+                .thenCompose(_ -> operation.get())
+                .handle((_, failure) -> failure == null ? CompletableFuture.completedFuture(null) : recover.apply(failure))
                 .thenCompose(response -> response)
                 .exceptionally(failure -> {
                     log.warn("Failed to send command failure response", failure);
