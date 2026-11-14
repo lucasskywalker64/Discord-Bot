@@ -3,6 +3,7 @@ name: Verify
 on:
   push:
     branches: [develop]
+    tags: ['v[0-9]*']
   pull_request:
     branches: [develop, main]
 
@@ -12,13 +13,101 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    outputs:
+      revision: ${{ steps.identity.outputs.revision }}
+      version: ${{ steps.identity.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Identify candidate or main release
+        id: identity
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          revision=$(git rev-parse HEAD)
+          version="sha-$revision"
+          if [ "$REF_TYPE" = tag ]; then
+            [[ "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+            git fetch --no-tags origin main
+            git merge-base --is-ancestor "$revision" FETCH_HEAD
+            version="$REF_NAME"
+          fi
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
           distribution: temurin
           java-version: '25.0.5+8'
           cache: maven
       - run: ./mvnw -B -ntp verify
+      - name: Build linux/amd64 image
+        env:
+          REVISION: ${{ steps.identity.outputs.revision }}
+          VERSION: ${{ steps.identity.outputs.version }}
+        run: |
+          docker build --platform linux/amd64 --build-arg "REVISION=$REVISION" --build-arg "VERSION=$VERSION" -t discord-bot:verified .
+      - name: Verify clean Compose installation
+        run: bash scripts/verify-compose.sh
+        env:
+          APP_IMAGE: discord-bot:verified
+      - name: Save verified image
+        if: github.event_name == 'push'
+        run: docker save discord-bot:verified -o image.tar
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: github.event_name == 'push'
+        with:
+          name: verified-image
+          path: image.tar
+          retention-days: 7
+
+  publish:
+    if: github.event_name == 'push'
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REVISION: ${{ needs.verify.outputs.revision }}
+      VERSION: ${{ needs.verify.outputs.version }}
+      REPOSITORY: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: verified-image
+      - name: Publish the tested image
+        env:
+          ACTOR: ${{ github.actor }}
+        run: |
+          image="ghcr.io/${REPOSITORY,,}"
+          docker load -i image.tar
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+          docker tag discord-bot:verified "$image:sha-$REVISION"
+          docker push "$image:sha-$REVISION"
+          digest=$(docker image inspect "$image:sha-$REVISION" --format '{{index .RepoDigests 0}}')
+          echo "IMAGE=$image" >> "$GITHUB_ENV"
+          echo "DIGEST_REF=$digest" >> "$GITHUB_ENV"
+          printf 'Image: `%s`\n\nCommit: `%s`\n' "$digest" "$REVISION" >> "$GITHUB_STEP_SUMMARY"
+      - name: Verify anonymous GHCR pull
+        run: |
+          anonymous_config=$(mktemp -d)
+          if ! docker --config "$anonymous_config" pull "$DIGEST_REF"; then
+            echo '::error::Anonymous pull failed. For a new GHCR package, the owner must set Package settings > Change visibility > Public, then rerun failed jobs.'
+            exit 1
+          fi
+          test "$(docker image inspect "$DIGEST_REF" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$REVISION"
+      - name: Publish stable version and GitHub Release
+        if: github.ref_type == 'tag'
+        run: |
+          docker tag discord-bot:verified "$IMAGE:$VERSION"
+          docker push "$IMAGE:$VERSION"
+          test "$(docker image inspect "$IMAGE:$VERSION" --format '{{index .RepoDigests 0}}')" = "$DIGEST_REF"
+          printf 'Commit: `%s`\n\nVersion: `%s`\n\nImage (linux/amd64): `%s`\n' "$REVISION" "$VERSION" "$DIGEST_REF" > release-notes.md
+          if gh release view "$VERSION" --repo "$REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$VERSION" --repo "$REPOSITORY" --notes-file release-notes.md
+          else
+            gh release create "$VERSION" --repo "$REPOSITORY" --verify-tag --target "$REVISION" --title "$VERSION" --notes-file release-notes.md
+          fi

@@ -3,6 +3,88 @@
 The rewrite on `develop` requires Java 25 and PostgreSQL. The legacy application
 remains on `main` until the rewrite release is accepted.
 
+## Container installation
+
+The container workflow publishes `linux/amd64` images to
+`ghcr.io/lucasskywalker64/discord-bot`. A verified develop build is tagged
+`sha-<full-commit>` for release rehearsal. Stable `v<major>.<minor>.<patch>`
+tags and GitHub Releases are published only for release commits on `main`.
+The rewrite has no stable image until that release integration occurs.
+
+Download `compose.yaml` and `.env.example` from the same release commit. Copy
+`.env.example` to `.env`, replace `APP_IMAGE` with the digest reference from the
+GitHub Release (or candidate workflow summary), and set a long random
+`POSTGRES_PASSWORD`. Keep `.env` private and outside source control. Public GHCR
+pulls need no login, deployment credentials or access to the operator's network.
+
+```sh
+docker compose pull
+docker compose up -d --wait --wait-timeout 180
+docker compose ps
+curl --fail http://localhost:8080/actuator/health/readiness
+```
+
+Use Docker Compose v2.20 or newer. In Dockge, put the same Compose content and
+environment values in a new stack and deploy it. Docker and Dockge must run on
+an amd64 host. The app listens on host loopback port `APP_PORT` (default 8080);
+PostgreSQL has no published host port. Docker health checks expose app readiness
+and database readiness. Flyway initializes an empty database automatically.
+HTTP readiness confirms app and database startup; it does not continuously check
+database availability or Discord connectivity.
+
+The named `postgres-data` volume retains settings across container recreation
+and `docker compose down`. `docker compose down --volumes` deletes it. Changing
+`POSTGRES_PASSWORD` after initialization does not change the stored database
+password; rotate it in PostgreSQL too. Keep the stack name and volume when
+recreating the installation.
+
+Leave `DISCORD_ENABLED=false` and `DISCORD_TOKEN` empty for an installation
+check without provider connections. To connect Discord, provision guilds as
+described below, set `DISCORD_ENABLED=true` and the token in `.env`, then recreate
+the app. PostgreSQL is accessible through the stack without publishing its port:
+
+```sh
+docker compose exec postgres psql -U discord_bot -d discord_bot
+docker compose up -d --force-recreate app
+```
+
+App and PostgreSQL versions are pinned independently. To update the app, back up
+the database, change only `APP_IMAGE` to the chosen release digest, then run
+`docker compose pull app` and `docker compose up -d --no-deps --wait app`.
+Review migration compatibility before changing releases. Database upgrades and
+recovery need their own procedure; an older image cannot undo schema changes.
+
+### Build and publication checks
+
+CI runs Maven Wrapper verification, builds the JAR into the pinned Java 25 JRE
+image as a non-root user, and runs `scripts/verify-compose.sh` against the sample
+stack. The check uses a new disposable project, random host port, its own database
+password and no provider credentials. It checks HTTP readiness, real Flyway
+migrations and three representative guild rows after app recreation and after
+recreating both containers with the same volume. It removes its test volume on
+exit. To repeat locally after `./mvnw -B -ntp verify`:
+
+```sh
+docker build --platform linux/amd64 -t discord-bot:local .
+APP_IMAGE=discord-bot:local bash scripts/verify-compose.sh
+```
+
+The Docker build context includes only the packaged JAR and Dockerfile. Runtime
+secrets come from Compose environment values and are not baked into the image.
+The publishing job loads the exact tested image artifact and is the only job
+with package-write permission. Develop builds publish a commit tag and record
+the digest in the job summary. After the maintainer merges the release into
+`main`, pushing a tag such as `v6.0.0` at that commit runs the same checks. The
+workflow rejects release tags outside main's history, publishes the version tag
+and records its commit and immutable image digest in the GitHub Release.
+
+GHCR creates a new package as private, even for a public repository. After the
+first candidate push, the package owner must open the `discord-bot` package's
+settings and change its visibility to Public, then rerun the failed publishing
+job. The workflow tests a pull by digest with an empty Docker credential
+configuration. It creates the stable version tag and Release only after that
+anonymous pull succeeds. See [GitHub's registry documentation](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry).
+
 ## Database configuration
 
 Create an empty PostgreSQL database and supply Spring Boot's environment variables:

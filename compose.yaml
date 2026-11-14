@@ -1,0 +1,35 @@
+services:
+  app:
+    image: ${APP_IMAGE:?Set APP_IMAGE to a published tag or digest}
+    platform: linux/amd64
+    restart: unless-stopped
+    stop_grace_period: 30s
+    ports:
+      - "127.0.0.1:${APP_PORT:-8080}:8080"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/discord_bot
+      SPRING_DATASOURCE_USERNAME: discord_bot
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED: "true"
+      DISCORD_ENABLED: ${DISCORD_ENABLED:-false}
+      DISCORD_TOKEN: ${DISCORD_TOKEN:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+  postgres:
+    image: postgres:17.12-alpine3.24@sha256:34261f594522cf41dfcb76aefd42b9d201098b0e6b23c9c68733f169e4218b6f
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: discord_bot
+      POSTGRES_USER: discord_bot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "discord_bot", "-d", "discord_bot"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+volumes:
+  postgres-data:
