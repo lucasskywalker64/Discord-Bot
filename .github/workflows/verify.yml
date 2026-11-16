@@ -27,7 +27,7 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
         run: |
           revision=$(git rev-parse HEAD)
-          version="sha-$revision"
+          version="$revision"
           if [ "$REF_TYPE" = tag ]; then
             [[ "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
             git fetch --no-tags origin main
@@ -66,6 +66,9 @@ jobs:
     if: github.event_name == 'push'
     needs: verify
     runs-on: ubuntu-latest
+    concurrency:
+      group: container-publish-${{ github.ref_type == 'tag' && 'release' || 'develop' }}
+      cancel-in-progress: false
     permissions:
       contents: write
       packages: write
@@ -85,9 +88,9 @@ jobs:
           image="ghcr.io/${REPOSITORY,,}"
           docker load -i image.tar
           printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
-          docker tag discord-bot:verified "$image:sha-$REVISION"
-          docker push "$image:sha-$REVISION"
-          digest=$(docker image inspect "$image:sha-$REVISION" --format '{{index .RepoDigests 0}}')
+          docker tag discord-bot:verified "$image:$VERSION"
+          docker push "$image:$VERSION"
+          digest=$(docker image inspect "$image:$VERSION" --format '{{index .RepoDigests 0}}')
           echo "IMAGE=$image" >> "$GITHUB_ENV"
           echo "DIGEST_REF=$digest" >> "$GITHUB_ENV"
           printf 'Image: `%s`\n\nCommit: `%s`\n' "$digest" "$REVISION" >> "$GITHUB_STEP_SUMMARY"
@@ -99,15 +102,23 @@ jobs:
             exit 1
           fi
           test "$(docker image inspect "$DIGEST_REF" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$REVISION"
+      - name: Publish development channel
+        if: github.ref_type == 'branch'
+        run: |
+          # An older build must not replace the current develop image.
+          current_revision=$(gh api "repos/$REPOSITORY/git/ref/heads/develop" --jq .object.sha)
+          if [ "$REVISION" = "$current_revision" ]; then
+            docker tag discord-bot:verified "$IMAGE:develop"
+            docker push "$IMAGE:develop"
+          fi
       - name: Publish stable version and GitHub Release
         if: github.ref_type == 'tag'
         run: |
-          docker tag discord-bot:verified "$IMAGE:$VERSION"
-          docker push "$IMAGE:$VERSION"
-          test "$(docker image inspect "$IMAGE:$VERSION" --format '{{index .RepoDigests 0}}')" = "$DIGEST_REF"
           printf 'Commit: `%s`\n\nVersion: `%s`\n\nImage (linux/amd64): `%s`\n' "$REVISION" "$VERSION" "$DIGEST_REF" > release-notes.md
           if gh release view "$VERSION" --repo "$REPOSITORY" >/dev/null 2>&1; then
             gh release edit "$VERSION" --repo "$REPOSITORY" --notes-file release-notes.md
           else
             gh release create "$VERSION" --repo "$REPOSITORY" --verify-tag --target "$REVISION" --title "$VERSION" --notes-file release-notes.md
           fi
+          docker tag discord-bot:verified "$IMAGE:latest"
+          docker push "$IMAGE:latest"

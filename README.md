@@ -6,16 +6,18 @@ remains on `main` until the rewrite release is accepted.
 ## Container installation
 
 The container workflow publishes `linux/amd64` images to
-`ghcr.io/lucasskywalker64/discord-bot`. A verified develop build is tagged
-`sha-<full-commit>` for release rehearsal. Stable `v<major>.<minor>.<patch>`
-tags and GitHub Releases are published only for release commits on `main`.
+`ghcr.io/lucasskywalker64/discord-bot`. Verified develop builds publish `develop`
+and the full commit hash as tags. Stable builds publish `latest` and the release
+tag, such as `v6.0.0`, only for release commits on `main`.
 The rewrite has no stable image until that release integration occurs.
 
 Download `compose.yaml` and `.env.example` from the same release commit. Copy
-`.env.example` to `.env`, replace `APP_IMAGE` with the digest reference from the
-GitHub Release (or candidate workflow summary), and set a long random
-`POSTGRES_PASSWORD`. Keep `.env` private and outside source control. Public GHCR
-pulls need no login, deployment credentials or access to the operator's network.
+`.env.example` to `.env` and set a long random `POSTGRES_PASSWORD`. `APP_IMAGE`
+defaults to `:latest`; use `:develop` for development builds. To select an exact
+build, use its version tag, full commit hash (development builds), or digest
+from the GitHub Release or candidate workflow summary. Keep `.env` private and
+outside source control. Public GHCR pulls need no login, deployment credentials
+or access to the operator's network.
 
 ```sh
 docker compose pull
@@ -48,9 +50,11 @@ docker compose exec postgres psql -U discord_bot -d discord_bot
 docker compose up -d --force-recreate app
 ```
 
-App and PostgreSQL versions are pinned independently. To update the app, back up
-the database, change only `APP_IMAGE` to the chosen release digest, then run
-`docker compose pull app` and `docker compose up -d --no-deps --wait app`.
+PostgreSQL stays pinned independently of the app. To update the app, back up
+the database, then run `docker compose pull app` and
+`docker compose up -d --no-deps --wait app`. In Dockge, use the stack's Update
+action. The `latest` and `develop` tags follow their published channels. If you
+selected an exact version, commit or digest, change `APP_IMAGE` first.
 Review migration compatibility before changing releases. Database upgrades and
 recovery need their own procedure; an older image cannot undo schema changes.
 
@@ -72,18 +76,21 @@ APP_IMAGE=discord-bot:local bash scripts/verify-compose.sh
 The Docker build context includes only the packaged JAR and Dockerfile. Runtime
 secrets come from Compose environment values and are not baked into the image.
 The publishing job loads the exact tested image artifact and is the only job
-with package-write permission. Develop builds publish a commit tag and record
-the digest in the job summary. After the maintainer merges the release into
-`main`, pushing a tag such as `v6.0.0` at that commit runs the same checks. The
+with package-write permission. Develop builds publish a full commit-hash tag and
+record the digest in the job summary; the current develop commit also updates
+`:develop`. An older build cannot replace the channel after develop has advanced.
+After the maintainer merges the release into `main`, pushing a tag such as
+`v6.0.0` at that commit runs the same checks. The
 workflow rejects release tags outside main's history, publishes the version tag
-and records its commit and immutable image digest in the GitHub Release.
+and records its commit and immutable image digest in the GitHub Release, then
+updates `:latest`. Moving tags advance only after the anonymous pull succeeds.
 
 GHCR creates a new package as private, even for a public repository. After the
 first candidate push, the package owner must open the `discord-bot` package's
 settings and change its visibility to Public, then rerun the failed publishing
 job. The workflow tests a pull by digest with an empty Docker credential
-configuration. It creates the stable version tag and Release only after that
-anonymous pull succeeds. See [GitHub's registry documentation](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry).
+configuration. It creates the Release and updates the moving channel only after
+that anonymous pull succeeds. See [GitHub's registry documentation](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry).
 
 ## Database configuration
 
