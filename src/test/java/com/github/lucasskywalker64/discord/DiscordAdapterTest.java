@@ -114,6 +114,14 @@ class DiscordAdapterTest {
     }
 
     @Test
+    void provisionsGuildsBeforeLoadingTheRoutingSnapshot() {
+        String guildId = "100000000000000099";
+        try (var application = startApplicationWithGuilds(guildId)) {
+            assertTrue(application.getBean(ConfiguredGuilds.class).contains(guildId));
+        }
+    }
+
+    @Test
     void refreshExcludesRemovedGuildsAndFailsClosedIfReloadFails() {
         try (var application = startApplication()) {
             String guildId = "100000000000000006";
@@ -741,6 +749,10 @@ class DiscordAdapterTest {
     }
 
     private ConfigurableApplicationContext startApplication(SubcommandModule... modules) {
+        return startApplicationWithGuilds("", modules);
+    }
+
+    private ConfigurableApplicationContext startApplicationWithGuilds(String guildIds, SubcommandModule... modules) {
         var application = new SpringApplication(DiscordBotApplication.class);
         application.addInitializers(context -> {
             var beans = (GenericApplicationContext) context;
@@ -757,6 +769,7 @@ class DiscordAdapterTest {
                 "--spring.datasource.username=" + postgres.getUsername(),
                 "--spring.datasource.password=" + postgres.getPassword(),
                 "--discord.enabled=true",
+                "--discord.guild-ids=" + guildIds,
                 "--spring.main.banner-mode=off",
                 "--logging.level.root=OFF");
         return activeApplication;

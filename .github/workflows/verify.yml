@@ -52,6 +52,20 @@ jobs:
         run: bash scripts/verify-compose.sh
         env:
           APP_IMAGE: discord-bot:verified
+      - name: Build setup bundle
+        run: |
+          channel=develop
+          if [ "$GITHUB_REF_TYPE" = tag ]; then channel=latest; fi
+          bash scripts/package-setup.sh "ghcr.io/${GITHUB_REPOSITORY,,}:$channel"
+      - name: Verify guided installation and rerun
+        run: bash scripts/verify-setup.sh
+        env:
+          APP_IMAGE: discord-bot:verified
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: setup-bundle
+          path: target/discord-bot-setup.tar.gz
+          retention-days: 7
       - name: Save verified image
         if: github.event_name == 'push'
         run: docker save discord-bot:verified -o image.tar
@@ -69,6 +83,7 @@ jobs:
     concurrency:
       group: container-publish-${{ github.ref_type == 'tag' && 'release' || 'develop' }}
       cancel-in-progress: false
+      queue: max
     permissions:
       contents: write
       packages: write
@@ -81,6 +96,9 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: verified-image
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: setup-bundle
       - name: Publish the tested image
         env:
           ACTOR: ${{ github.actor }}
@@ -120,5 +138,6 @@ jobs:
           else
             gh release create "$VERSION" --repo "$REPOSITORY" --verify-tag --target "$REVISION" --title "$VERSION" --notes-file release-notes.md
           fi
+          gh release upload "$VERSION" discord-bot-setup.tar.gz --repo "$REPOSITORY" --clobber
           docker tag discord-bot:verified "$IMAGE:latest"
           docker push "$IMAGE:latest"

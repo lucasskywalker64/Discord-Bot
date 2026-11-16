@@ -82,6 +82,43 @@ class DiscordBotApplicationTest {
     }
 
     @Test
+    void provisionsGuildsWithoutOverwritingStoredSettings() {
+        try (var application = startApplication(
+                "--discord.guild-ids=100000000000000001,100000000000000002,100000000000000001")) {
+            var configurations = application.getBean(GuildConfigurationRepository.class);
+            assertEquals(2, configurations.count());
+            assertNull(configurations.findById("100000000000000002").orElseThrow()
+                    .getMemberCountVoiceChannelId());
+            configurations.saveAndFlush(new GuildConfiguration("100000000000000001", "200000000000000001"));
+        }
+
+        try (var application = startApplication(
+                "--discord.guild-ids=100000000000000002,18446744073709551615")) {
+            var configurations = application.getBean(GuildConfigurationRepository.class);
+            assertEquals(3, configurations.count());
+            assertEquals("200000000000000001", configurations.findById("100000000000000001")
+                    .orElseThrow().getMemberCountVoiceChannelId());
+            assertNull(configurations.findById("18446744073709551615").orElseThrow()
+                    .getMemberCountVoiceChannelId());
+        }
+    }
+
+    @Test
+    void rejectsInvalidGuildIdsBeforeProvisioning() {
+        for (String invalidId : List.of("0", "-1", "not-an-id", "18446744073709551616")) {
+            var failure = assertThrows(BeanCreationException.class, () -> {
+                try (var _ = startApplication("--discord.guild-ids=100000000000000001," + invalidId)) {
+                    // Reject the entire provisioning list before writing any guilds.
+                }
+            });
+            assertHasCause(failure, IllegalArgumentException.class);
+        }
+        try (var application = startApplication()) {
+            assertEquals(0, application.getBean(GuildConfigurationRepository.class).count());
+        }
+    }
+
+    @Test
     void rejectsBrokenMigrationAtStartup() {
         var failure = assertThrows(BeanCreationException.class, () -> {
             try (var _ = startApplication(

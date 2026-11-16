@@ -13,6 +13,7 @@ services:
       MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED: "true"
       DISCORD_ENABLED: ${DISCORD_ENABLED:-false}
       DISCORD_TOKEN: ${DISCORD_TOKEN:-}
+      DISCORD_GUILD_IDS: ${DISCORD_GUILD_IDS:-}
     depends_on:
       postgres:
         condition: service_healthy

@@ -6,6 +6,7 @@ import com.github.lucasskywalker64.commands.general.GeneralPing;
 import com.github.lucasskywalker64.commands.general.GeneralMemberCountAdd;
 import com.github.lucasskywalker64.guild.GuildConfigurationRepository;
 import com.github.lucasskywalker64.guild.ConfiguredGuilds;
+import com.github.lucasskywalker64.guild.GuildProvisioning;
 import net.dv8tion.jda.api.JDABuilder;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -57,7 +58,7 @@ public class DiscordConfiguration {
     }
 
     @Bean
-    ConfiguredGuilds configuredGuilds(GuildConfigurationRepository configurations) {
+    ConfiguredGuilds configuredGuilds(GuildConfigurationRepository configurations, GuildProvisioning provisioning) {
         return new ConfiguredGuilds(configurations);
     }
 

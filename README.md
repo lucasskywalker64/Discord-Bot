@@ -11,26 +11,32 @@ and the full commit hash as tags. Stable builds publish `latest` and the release
 tag, such as `v6.0.0`, only for release commits on `main`.
 The rewrite has no stable image until that release integration occurs.
 
-Download `compose.yaml` and `.env.example` from the same release commit. Copy
-`.env.example` to `.env` and set a long random `POSTGRES_PASSWORD`. `APP_IMAGE`
-defaults to `:latest`; use `:develop` for development builds. To select an exact
-build, use its version tag, full commit hash (development builds), or digest
-from the GitHub Release or candidate workflow summary. Keep `.env` private and
-outside source control. Public GHCR pulls need no login, deployment credentials
-or access to the operator's network.
+Download `discord-bot-setup.tar.gz` from the GitHub Release, extract it, and run
+the included installer on a Linux amd64 host with Docker Compose v2.20 or newer:
 
 ```sh
-docker compose pull
-docker compose up -d --wait --wait-timeout 180
-docker compose ps
-curl --fail http://localhost:8080/actuator/health/readiness
+tar -xzf discord-bot-setup.tar.gz
+bash setup.sh
 ```
 
-Use Docker Compose v2.20 or newer. In Dockge, put the same Compose content and
-environment values in a new stack and deploy it. Docker and Dockge must run on
-an amd64 host. The app listens on host loopback port `APP_PORT` (default 8080);
-PostgreSQL has no published host port. Docker health checks expose app readiness
-and database readiness. Flyway initializes an empty database automatically.
+The installer asks for the stack directory (default `/opt/stacks/discord-bot`),
+image, Discord bot token and comma-separated guild IDs. It explains how to get
+the Discord values, hides token entry, generates a database password, and writes
+a private `.env` plus `compose.yaml`. Run it as the user who manages the stack;
+the selected directory must be writable. It starts the stack once, applies
+migrations and provisions the guilds before Discord connects. No SQL is needed.
+Rerunning it with the same directory reuses the existing files and credentials.
+
+With Dockge, choose a directory inside its configured stacks folder, then use
+Scan Stacks Folder if the new stack is not listed. Future updates and restarts
+can be managed in Dockge. The release bundle defaults to `:latest`; candidate
+bundles in the Actions `setup-bundle` artifact default to `:develop`. The image
+prompt also accepts an exact version, commit-hash tag or digest.
+
+Public GHCR pulls need no login or deployment credentials. Keep `.env` private
+and outside source control. The app listens on host loopback port `APP_PORT`
+(default 8080); PostgreSQL has no published host port. Docker health checks expose
+app readiness and database readiness. Flyway initializes an empty database.
 HTTP readiness confirms app and database startup; it does not continuously check
 database availability or Discord connectivity.
 
@@ -40,14 +46,13 @@ and `docker compose down`. `docker compose down --volumes` deletes it. Changing
 password; rotate it in PostgreSQL too. Keep the stack name and volume when
 recreating the installation.
 
-Leave `DISCORD_ENABLED=false` and `DISCORD_TOKEN` empty for an installation
-check without provider connections. To connect Discord, provision guilds as
-described below, set `DISCORD_ENABLED=true` and the token in `.env`, then recreate
-the app. PostgreSQL is accessible through the stack without publishing its port:
+For manual Compose/Dockge setup, copy `.env.example` to `.env`, set the database
+password, token and `DISCORD_GUILD_IDS`, and enable Discord. For a credential-free
+installation check, leave `DISCORD_ENABLED=false` and `DISCORD_TOKEN` empty.
+PostgreSQL is accessible through the stack without publishing its port:
 
 ```sh
 docker compose exec postgres psql -U discord_bot -d discord_bot
-docker compose up -d --force-recreate app
 ```
 
 PostgreSQL stays pinned independently of the app. To update the app, back up
@@ -66,11 +71,16 @@ stack. The check uses a new disposable project, random host port, its own databa
 password and no provider credentials. It checks HTTP readiness, real Flyway
 migrations and three representative guild rows after app recreation and after
 recreating both containers with the same volume. It removes its test volume on
-exit. To repeat locally after `./mvnw -B -ntp verify`:
+exit. CI also extracts the actual setup bundle and drives `setup.sh` with test
+inputs, checking invalid-ID rejection, initial provisioning and a rerun that
+retains the exact configuration, credentials and stored settings. Discord is
+disabled for these checks. To repeat locally after `./mvnw -B -ntp verify`:
 
 ```sh
 docker build --platform linux/amd64 -t discord-bot:local .
 APP_IMAGE=discord-bot:local bash scripts/verify-compose.sh
+bash scripts/package-setup.sh ghcr.io/lucasskywalker64/discord-bot:develop
+APP_IMAGE=discord-bot:local bash scripts/verify-setup.sh
 ```
 
 The Docker build context includes only the packaged JAR and Dockerfile. Runtime
@@ -84,6 +94,8 @@ After the maintainer merges the release into `main`, pushing a tag such as
 workflow rejects release tags outside main's history, publishes the version tag
 and records its commit and immutable image digest in the GitHub Release, then
 updates `:latest`. Moving tags advance only after the anonymous pull succeeds.
+The same workflow publishes the tested setup bundle as an Actions artifact and
+attaches it to stable GitHub Releases.
 
 GHCR creates a new package as private, even for a public repository. After the
 first candidate push, the package owner must open the `discord-bot` package's
@@ -130,7 +142,8 @@ can grant command access through Discord's integration settings.
 
 Configured guild IDs load from PostgreSQL before JDA starts. Gateway callbacks
 use an immutable in-memory snapshot instead of querying the database. A failed
-initial load prevents startup. Operator provisioning still requires a restart.
+initial load prevents startup. Changes to `DISCORD_GUILD_IDS` require an app
+restart or recreation.
 Code that changes guild membership must call `ConfiguredGuilds.refresh()` after
 the database transaction commits, outside gateway callbacks. A failed refresh
 clears the snapshot, rejecting guild access until a refresh succeeds. This
@@ -138,15 +151,20 @@ snapshot covers provisioning only; feature authorization remains separate.
 
 ### Guild settings
 
-On a clean installation, start the app once to apply Flyway migrations, then
-provision each intended guild through your database client:
+The installer writes the intended guild IDs to `.env`, for example:
 
-```sql
-INSERT INTO guild_configuration (guild_id) VALUES ('YOUR_GUILD_ID');
+```dotenv
+DISCORD_GUILD_IDS=100000000000000001,100000000000000002
 ```
 
-Start or restart the app after provisioning. Commands are registered only for
-provisioned guilds. The member-count channel starts unset.
+After Flyway initializes the database, startup adds missing guild rows with the
+member-count channel unset, then loads the configured-guild snapshot before JDA
+connects. Duplicate IDs are harmless; invalid IDs prevent startup. Existing rows
+and settings are preserved, including rows provisioned manually. This list adds
+guilds; removing an ID from it does not delete a stored guild or revoke access.
+Commands are registered only for provisioned guilds. Core settings still require
+the current guild owner. The optional environment property also works when
+running the JAR directly, without the installer.
 
 Only the current guild owner can read or change this setting, including when
 Discord grants another administrator access to the command. Use
@@ -196,18 +214,13 @@ thread's interrupt status. A timeout or interruption is logged.
 Use a dedicated test bot, two test guilds and a disposable PostgreSQL database.
 Invite the bot with the `bot` and `applications.commands` OAuth scopes. Supply
 the database variables above, enable Discord and supply the test token through
-the environment. Do not run this check with a production bot token or database.
+the environment. Set `DISCORD_GUILD_IDS` to the two test guild IDs before startup.
+Do not run this check with a production bot token or database.
 
 1. Build with `./mvnw -B -ntp verify` and start the packaged application with
    `java -jar target/DiscordBot-6.0.0-SNAPSHOT.jar`. Flyway creates the schema.
-2. Add the two test guild IDs through your database client, then restart:
-
-   ```sql
-   INSERT INTO guild_configuration (guild_id)
-   VALUES ('YOUR_FIRST_TEST_GUILD_ID'), ('YOUR_SECOND_TEST_GUILD_ID');
-   ```
-
-   Wait for JDA to report a connected gateway.
+2. Confirm startup provisioned the intended guilds and wait for JDA to report a
+   connected gateway.
 3. As an administrator in each guild, invoke `/general ping` and check the ephemeral reply contains
    both measured latencies. Repeat to check subsequent interactions. If Discord
    offers the command in a DM, verify it rejects the request.
