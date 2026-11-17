@@ -10,7 +10,7 @@ import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEve
 import net.dv8tion.jda.api.events.session.GenericSessionEvent;
 import net.dv8tion.jda.api.hooks.EventListener;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
-import com.github.lucasskywalker64.operator.OperatorConfiguration.State;
+import com.github.lucasskywalker64.installation.InstallationConfiguration.State;
 
 import java.util.List;
 import java.util.function.BooleanSupplier;

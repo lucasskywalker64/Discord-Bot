@@ -1,4 +1,4 @@
-package com.github.lucasskywalker64.operator;
+package com.github.lucasskywalker64.installation;
 
 import com.github.lucasskywalker64.DiscordBotApplication;
 import com.github.lucasskywalker64.discord.DiscordGatewayFactory;
@@ -33,10 +33,10 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
-import com.github.lucasskywalker64.operator.OperatorConfiguration.DiscordUpdate;
-import com.github.lucasskywalker64.operator.OperatorConfiguration.SecretUpdate;
-import com.github.lucasskywalker64.operator.OperatorConfiguration.State;
-import com.github.lucasskywalker64.operator.OperatorConfiguration.TwitchUpdate;
+import com.github.lucasskywalker64.installation.InstallationConfiguration.DiscordUpdate;
+import com.github.lucasskywalker64.installation.InstallationConfiguration.SecretUpdate;
+import com.github.lucasskywalker64.installation.InstallationConfiguration.State;
+import com.github.lucasskywalker64.installation.InstallationConfiguration.TwitchUpdate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -77,7 +77,7 @@ class RuntimeConfigurationTest {
     @Test
     void replacesDiscordAfterCommitAndIgnoresOldCallbacks() throws Exception {
         try (var application = startApplication()) {
-            var settings = application.getBean(OperatorConfigurationService.class);
+            var settings = application.getBean(InstallationConfigurationService.class);
             assertTrue(connections.isEmpty());
             updateToken(settings, "first-token");
             var first = nextConnection();
@@ -116,7 +116,7 @@ class RuntimeConfigurationTest {
     void keepsHttpReadyDuringOutageAndRetainsFailureAcrossRestart() throws Exception {
         providerUnavailable = true;
         try (var application = startApplication()) {
-            var settings = application.getBean(OperatorConfigurationService.class);
+            var settings = application.getBean(InstallationConfigurationService.class);
             updateToken(settings, "invalid-token");
             awaitState(settings, State.UNAVAILABLE);
             assertNotNull(settings.read().discord().status().lastFailure());
@@ -124,7 +124,7 @@ class RuntimeConfigurationTest {
             assertReady(application);
         }
         try (var application = startApplication()) {
-            var settings = application.getBean(OperatorConfigurationService.class);
+            var settings = application.getBean(InstallationConfigurationService.class);
             awaitState(settings, State.UNAVAILABLE);
             assertNotNull(settings.read().discord().status().lastFailure());
             assertReady(application);
@@ -139,7 +139,7 @@ class RuntimeConfigurationTest {
     @Test
     void queuesStatusPersistenceWithoutBlockingGatewayCallbacks() throws Exception {
         try (var application = startApplication()) {
-            var settings = application.getBean(OperatorConfigurationService.class);
+            var settings = application.getBean(InstallationConfigurationService.class);
             updateToken(settings, "test-token");
             var gateway = nextConnection();
             gateway.event(SessionState.READY);
@@ -164,7 +164,7 @@ class RuntimeConfigurationTest {
     @Test
     void servesHttpAndCancelsSlowLoginAfterRestart() throws Exception {
         try (var application = startApplication()) {
-            var settings = application.getBean(OperatorConfigurationService.class);
+            var settings = application.getBean(InstallationConfigurationService.class);
             updateToken(settings, "test-token");
             nextConnection().event(SessionState.READY);
             awaitState(settings, State.CONNECTED);
@@ -193,7 +193,7 @@ class RuntimeConfigurationTest {
     @Test
     void ignoresOlderCommitNotificationsWhileLatestLoginIsPending() throws Exception {
         try (var application = startApplication()) {
-            var settings = application.getBean(OperatorConfigurationService.class);
+            var settings = application.getBean(InstallationConfigurationService.class);
             updateToken(settings, "initial-token");
             nextConnection().event(SessionState.READY);
             awaitState(settings, State.CONNECTED);
@@ -288,13 +288,13 @@ class RuntimeConfigurationTest {
         return connection;
     }
 
-    private static void updateToken(OperatorConfigurationService settings, String token) {
+    private static void updateToken(InstallationConfigurationService settings, String token) {
         var result = settings.updateDiscord(new DiscordUpdate(true, SecretUpdate.replace(token), false,
                 null, SecretUpdate.keep(), null));
         assertTrue(result.errors().isEmpty());
     }
 
-    private static void awaitState(OperatorConfigurationService settings, State state) {
+    private static void awaitState(InstallationConfigurationService settings, State state) {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (System.nanoTime() < deadline) {
             if (settings.read().discord().status().state() == state) {

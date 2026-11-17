@@ -1,12 +1,12 @@
-package com.github.lucasskywalker64.operator;
+package com.github.lucasskywalker64.installation;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.util.Map;
 
-public final class OperatorConfiguration {
+public final class InstallationConfiguration {
 
-    private OperatorConfiguration() {
+    private InstallationConfiguration() {
     }
 
     public enum SetupStep { PROVIDERS, DEPLOYMENT, STORAGE, COMPLETE }

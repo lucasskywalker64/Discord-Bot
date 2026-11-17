@@ -1,4 +1,4 @@
-package com.github.lucasskywalker64.operator;
+package com.github.lucasskywalker64.installation;
 
 import com.github.lucasskywalker64.DiscordBotApplication;
 import org.junit.jupiter.api.BeforeEach;
@@ -12,19 +12,19 @@ import tools.jackson.databind.json.JsonMapper;
 
 import java.sql.DriverManager;
 
-import com.github.lucasskywalker64.operator.OperatorConfiguration.DiscordUpdate;
-import com.github.lucasskywalker64.operator.OperatorConfiguration.SecretUpdate;
-import com.github.lucasskywalker64.operator.OperatorConfiguration.SetupStep;
-import com.github.lucasskywalker64.operator.OperatorConfiguration.State;
-import com.github.lucasskywalker64.operator.OperatorConfiguration.StorageUpdate;
-import com.github.lucasskywalker64.operator.OperatorConfiguration.TwitchUpdate;
+import com.github.lucasskywalker64.installation.InstallationConfiguration.DiscordUpdate;
+import com.github.lucasskywalker64.installation.InstallationConfiguration.SecretUpdate;
+import com.github.lucasskywalker64.installation.InstallationConfiguration.SetupStep;
+import com.github.lucasskywalker64.installation.InstallationConfiguration.State;
+import com.github.lucasskywalker64.installation.InstallationConfiguration.StorageUpdate;
+import com.github.lucasskywalker64.installation.InstallationConfiguration.TwitchUpdate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @Testcontainers
-class OperatorConfigurationTest {
+class InstallationConfigurationTest {
 
     @Container
     static final PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:17-alpine");
@@ -42,7 +42,7 @@ class OperatorConfigurationTest {
     @Test
     void retainsSetupAndCredentialsAcrossRestartWithoutReturningSecrets() {
         try (var application = startApplication()) {
-            var settings = application.getBean(OperatorConfigurationService.class);
+            var settings = application.getBean(InstallationConfigurationService.class);
             assertEquals(SetupStep.PROVIDERS, settings.read().setupStep());
             assertFalse(settings.read().discord().botEnabled());
             assertFalse(settings.read().discord().botTokenConfigured());
@@ -65,7 +65,7 @@ class OperatorConfigurationTest {
         }
 
         try (var application = startApplication()) {
-            var settings = application.getBean(OperatorConfigurationService.class);
+            var settings = application.getBean(InstallationConfigurationService.class);
             var saved = settings.read();
             assertEquals(SetupStep.STORAGE, saved.setupStep());
             assertEquals("https://bot.example", saved.publicUrl());
@@ -100,7 +100,7 @@ class OperatorConfigurationTest {
     @Test
     void rejectsInvalidCapabilitiesWithoutChangingWorkingSettings() {
         try (var application = startApplication()) {
-            var settings = application.getBean(OperatorConfigurationService.class);
+            var settings = application.getBean(InstallationConfigurationService.class);
             var invalid = settings.updateDiscord(new DiscordUpdate(true, SecretUpdate.keep(), true,
                     "", SecretUpdate.keep(), "javascript:callback"));
             assertEquals(java.util.Set.of("discord.botToken", "discord.clientId", "discord.clientSecret",

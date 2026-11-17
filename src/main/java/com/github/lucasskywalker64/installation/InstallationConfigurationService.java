@@ -1,4 +1,4 @@
-package com.github.lucasskywalker64.operator;
+package com.github.lucasskywalker64.installation;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import org.springframework.context.ApplicationEventPublisher;
@@ -10,27 +10,27 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 
-import com.github.lucasskywalker64.operator.OperatorConfiguration.DiscordUpdate;
-import com.github.lucasskywalker64.operator.OperatorConfiguration.DiscordView;
-import com.github.lucasskywalker64.operator.OperatorConfiguration.SecretUpdate;
-import com.github.lucasskywalker64.operator.OperatorConfiguration.SetupStep;
-import com.github.lucasskywalker64.operator.OperatorConfiguration.Snapshot;
-import com.github.lucasskywalker64.operator.OperatorConfiguration.State;
-import com.github.lucasskywalker64.operator.OperatorConfiguration.Status;
-import com.github.lucasskywalker64.operator.OperatorConfiguration.StorageUpdate;
-import com.github.lucasskywalker64.operator.OperatorConfiguration.StorageView;
-import com.github.lucasskywalker64.operator.OperatorConfiguration.TwitchUpdate;
-import com.github.lucasskywalker64.operator.OperatorConfiguration.TwitchView;
-import com.github.lucasskywalker64.operator.OperatorConfiguration.UpdateResult;
+import com.github.lucasskywalker64.installation.InstallationConfiguration.DiscordUpdate;
+import com.github.lucasskywalker64.installation.InstallationConfiguration.DiscordView;
+import com.github.lucasskywalker64.installation.InstallationConfiguration.SecretUpdate;
+import com.github.lucasskywalker64.installation.InstallationConfiguration.SetupStep;
+import com.github.lucasskywalker64.installation.InstallationConfiguration.Snapshot;
+import com.github.lucasskywalker64.installation.InstallationConfiguration.State;
+import com.github.lucasskywalker64.installation.InstallationConfiguration.Status;
+import com.github.lucasskywalker64.installation.InstallationConfiguration.StorageUpdate;
+import com.github.lucasskywalker64.installation.InstallationConfiguration.StorageView;
+import com.github.lucasskywalker64.installation.InstallationConfiguration.TwitchUpdate;
+import com.github.lucasskywalker64.installation.InstallationConfiguration.TwitchView;
+import com.github.lucasskywalker64.installation.InstallationConfiguration.UpdateResult;
 
 @Service
 @Transactional(timeout = 5)
-public class OperatorConfigurationService {
+public class InstallationConfigurationService {
 
     private final InstallationConfigurationRepository configurations;
     private final ApplicationEventPublisher events;
 
-    public OperatorConfigurationService(InstallationConfigurationRepository configurations, ApplicationEventPublisher events) {
+    public InstallationConfigurationService(InstallationConfigurationRepository configurations, ApplicationEventPublisher events) {
         this.configurations = configurations;
         this.events = events;
     }
@@ -177,7 +177,7 @@ public class OperatorConfigurationService {
         }
     }
 
-    private static Snapshot snapshot(InstallationConfiguration saved) {
+    private static Snapshot snapshot(InstallationConfigurationEntity saved) {
         var status = new Status(saved.discordState, switch (saved.discordState) {
             case DISABLED -> "Enable Discord and supply a bot token.";
             case CONNECTING -> "Connecting to Discord.";

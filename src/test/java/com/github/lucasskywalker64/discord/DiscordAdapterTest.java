@@ -7,9 +7,9 @@ import com.github.lucasskywalker64.commands.CommandDefinition;
 import com.github.lucasskywalker64.guild.GuildConfiguration;
 import com.github.lucasskywalker64.guild.GuildConfigurationRepository;
 import com.github.lucasskywalker64.guild.ConfiguredGuilds;
-import com.github.lucasskywalker64.operator.OperatorConfigurationService;
-import com.github.lucasskywalker64.operator.OperatorConfiguration.DiscordUpdate;
-import com.github.lucasskywalker64.operator.OperatorConfiguration.SecretUpdate;
+import com.github.lucasskywalker64.installation.InstallationConfigurationService;
+import com.github.lucasskywalker64.installation.InstallationConfiguration.DiscordUpdate;
+import com.github.lucasskywalker64.installation.InstallationConfiguration.SecretUpdate;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.JDABuilder;
 import net.dv8tion.jda.api.entities.Guild;
@@ -767,7 +767,7 @@ class DiscordAdapterTest {
                 "--spring.datasource.password=" + postgres.getPassword(),
                 "--spring.main.banner-mode=off",
                 "--logging.level.root=OFF");
-        activeApplication.getBean(OperatorConfigurationService.class).updateDiscord(new DiscordUpdate(
+        activeApplication.getBean(InstallationConfigurationService.class).updateDiscord(new DiscordUpdate(
                 true, SecretUpdate.replace("test-token"), false, null, SecretUpdate.keep(), null));
         verify(builder, timeout(5_000).atLeastOnce()).build();
         return activeApplication;

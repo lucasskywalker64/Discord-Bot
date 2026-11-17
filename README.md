@@ -27,7 +27,7 @@ full unsigned snowflake range. An unset channel is stored as SQL `NULL`.
 
 Discord is disabled by default. Provider settings now live in PostgreSQL;
 `DISCORD_ENABLED` and `DISCORD_TOKEN` no longer configure the gateway. The
-server-side `OperatorConfigurationService` provides typed reads and updates for
+server-side `InstallationConfigurationService` provides typed reads and updates for
 Discord bot/OAuth settings, Twitch application settings, public and callback URLs,
 S3-compatible attachment storage, capability enablement and resumable setup
 progress. The authenticated private console that calls these operations belongs
@@ -70,7 +70,7 @@ database, including this table, guild data and Flyway history. Restore them
 together. There is no application-local secret file or encryption key to lose
 when recreating an application container. Credentials are stored as database
 secrets, not encrypted by the application. Restrict PostgreSQL login/network
-access to the application and trusted operators, use encrypted volumes/backups,
+access to the application and trusted administrators, use encrypted volumes/backups,
 and keep SQL parameter/body logging disabled. The migration revokes table access
 from `PUBLIC`; do not grant this table to dashboard or reporting database roles.
 
@@ -92,7 +92,7 @@ can grant command access through Discord's integration settings.
 
 Configured guild IDs load from PostgreSQL before JDA starts. Gateway callbacks
 use an immutable in-memory snapshot instead of querying the database. A failed
-initial load prevents startup. Operator provisioning still requires a restart.
+initial load prevents startup. Administrator provisioning still requires a restart.
 Code that changes guild membership must call `ConfiguredGuilds.refresh()` after
 the database transaction commits, outside gateway callbacks. A failed refresh
 clears the snapshot, rejecting guild access until a refresh succeeds. This
@@ -147,7 +147,7 @@ separate.
 
 Spring starts the gateway asynchronously. HTTP readiness confirms application
 and database startup, not Discord connectivity. Check JDA's connection logs and
-the live ping before accepting an operator deployment. JDA's JVM shutdown hook
+the live ping before accepting an installation. JDA's JVM shutdown hook
 is disabled so Spring can drain requests for up to 10 seconds before cancelling
 them. If the drain times out, Spring waits up to 5 more seconds after cancellation.
 If the drain is interrupted, Spring cancels pending requests and restores the
@@ -158,7 +158,7 @@ thread's interrupt status. A timeout or interruption is logged.
 Use a dedicated test bot, two test guilds and a disposable PostgreSQL database.
 Invite the bot with the `bot` and `applications.commands` OAuth scopes. Supply
 the database variables above. Until #86 supplies the private console, a trusted
-in-process harness must call `OperatorConfigurationService.updateDiscord` with
+in-process harness must call `InstallationConfigurationService.updateDiscord` with
 the test token and bot enablement. Do not use production credentials or data.
 
 1. Build with `./mvnw -B -ntp verify` and start the packaged application with

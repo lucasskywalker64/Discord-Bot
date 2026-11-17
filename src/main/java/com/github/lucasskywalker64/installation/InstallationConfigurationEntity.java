@@ -1,4 +1,4 @@
-package com.github.lucasskywalker64.operator;
+package com.github.lucasskywalker64.installation;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -7,13 +7,13 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
-import static com.github.lucasskywalker64.operator.OperatorConfiguration.SetupStep;
-import static com.github.lucasskywalker64.operator.OperatorConfiguration.State;
+import static com.github.lucasskywalker64.installation.InstallationConfiguration.SetupStep;
+import static com.github.lucasskywalker64.installation.InstallationConfiguration.State;
 
 // Internal persistence model. Browser reads use the secret-free Snapshot only.
 @Entity
 @Table(name = "installation_configuration")
-class InstallationConfiguration {
+class InstallationConfigurationEntity {
 
     @Id
     int id;
@@ -57,6 +57,6 @@ class InstallationConfiguration {
     @Enumerated(EnumType.STRING)
     SetupStep setupStep;
 
-    protected InstallationConfiguration() {
+    protected InstallationConfigurationEntity() {
     }
 }

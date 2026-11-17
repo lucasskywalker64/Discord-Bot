@@ -6,7 +6,7 @@ import com.github.lucasskywalker64.commands.general.GeneralPing;
 import com.github.lucasskywalker64.commands.general.GeneralMemberCountAdd;
 import com.github.lucasskywalker64.guild.GuildConfigurationRepository;
 import com.github.lucasskywalker64.guild.ConfiguredGuilds;
-import com.github.lucasskywalker64.operator.OperatorConfigurationService;
+import com.github.lucasskywalker64.installation.InstallationConfigurationService;
 import net.dv8tion.jda.api.JDABuilder;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
@@ -78,7 +78,7 @@ public class DiscordConfiguration {
 
     @Bean
     DiscordLifecycle discordLifecycle(DiscordGatewayFactory factory, DiscordListener listener,
-                                      GuildCommandRegistration registrations, OperatorConfigurationService settings,
+                                      GuildCommandRegistration registrations, InstallationConfigurationService settings,
                                       ExecutorService discordLifecycleExecutor) {
         return new DiscordLifecycle(factory, listener, registrations, settings, discordLifecycleExecutor);
     }

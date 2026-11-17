@@ -1,8 +1,8 @@
 package com.github.lucasskywalker64.discord;
 
 import net.dv8tion.jda.api.JDA;
-import com.github.lucasskywalker64.operator.OperatorConfigurationService;
-import com.github.lucasskywalker64.operator.OperatorConfiguration.State;
+import com.github.lucasskywalker64.installation.InstallationConfigurationService;
+import com.github.lucasskywalker64.installation.InstallationConfiguration.State;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.SmartLifecycle;
@@ -19,7 +19,7 @@ public class DiscordLifecycle implements SmartLifecycle {
     private final DiscordGatewayFactory factory;
     private final DiscordListener listener;
     private final GuildCommandRegistration registrations;
-    private final OperatorConfigurationService settings;
+    private final InstallationConfigurationService settings;
     private final ExecutorService executor;
     private JDA discord;
     private volatile boolean running;
@@ -29,7 +29,7 @@ public class DiscordLifecycle implements SmartLifecycle {
     private Thread connectingThread;
 
     public DiscordLifecycle(DiscordGatewayFactory factory, DiscordListener listener, GuildCommandRegistration registrations,
-                            OperatorConfigurationService settings, ExecutorService executor) {
+                            InstallationConfigurationService settings, ExecutorService executor) {
         this.factory = factory;
         this.listener = listener;
         this.registrations = registrations;
@@ -46,7 +46,7 @@ public class DiscordLifecycle implements SmartLifecycle {
     }
 
     @TransactionalEventListener
-    public synchronized void configurationChanged(OperatorConfigurationService.Changed event) {
+    public synchronized void configurationChanged(InstallationConfigurationService.Changed event) {
         requestedRevision = Math.max(requestedRevision, event.discordBotRevision());
         if (event.discordBotRevision() > revision && connectingThread != null) {
             generation++;
@@ -113,7 +113,7 @@ public class DiscordLifecycle implements SmartLifecycle {
                 registrations.stop();
             }
             settings.reportDiscordState(configuredRevision, State.UNAVAILABLE);
-            log.warn("Discord could not start; check operator configuration and provider availability");
+            log.warn("Discord could not start; check installation configuration and provider availability");
         }
     }
 

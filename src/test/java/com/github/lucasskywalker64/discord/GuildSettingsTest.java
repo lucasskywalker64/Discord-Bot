@@ -1,9 +1,9 @@
 package com.github.lucasskywalker64.discord;
 
 import com.github.lucasskywalker64.DiscordBotApplication;
-import com.github.lucasskywalker64.operator.OperatorConfigurationService;
-import com.github.lucasskywalker64.operator.OperatorConfiguration.DiscordUpdate;
-import com.github.lucasskywalker64.operator.OperatorConfiguration.SecretUpdate;
+import com.github.lucasskywalker64.installation.InstallationConfigurationService;
+import com.github.lucasskywalker64.installation.InstallationConfiguration.DiscordUpdate;
+import com.github.lucasskywalker64.installation.InstallationConfiguration.SecretUpdate;
 import net.dv8tion.jda.api.hooks.EventListener;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.JDABuilder;
@@ -303,7 +303,7 @@ class GuildSettingsTest {
                 "--spring.datasource.username=" + postgres.getUsername(),
                 "--spring.datasource.password=" + postgres.getPassword(),
                 "--spring.main.banner-mode=off", "--logging.level.root=OFF");
-        context.getBean(OperatorConfigurationService.class).updateDiscord(new DiscordUpdate(
+        context.getBean(InstallationConfigurationService.class).updateDiscord(new DiscordUpdate(
                 true, SecretUpdate.replace("test-token"), false, null, SecretUpdate.keep(), null));
         verify(builder, timeout(5_000)).build();
         var listener = ArgumentCaptor.forClass(Object.class);
