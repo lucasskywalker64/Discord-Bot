@@ -205,6 +205,7 @@ class DiscordAdapterTest {
             shutdown.verify(scheduled).cancel(false);
             shutdown.verify(discord).shutdown();
             application.start();
+            verify(builder, timeout(5_000).times(2)).build();
             listener.onEvent(new GuildReadyEvent(discord, 2, guild));
             verify(registration).queue(any(), any());
             listener().onEvent(new GuildReadyEvent(restarted, 2, guild));
@@ -720,6 +721,7 @@ class DiscordAdapterTest {
         try (var application = startApplication()) {
             application.stop();
             application.start();
+            verify(builder, timeout(5_000).times(2)).build();
         }
 
         verify(builder, times(2)).addEventListeners(any(EventListener.class));

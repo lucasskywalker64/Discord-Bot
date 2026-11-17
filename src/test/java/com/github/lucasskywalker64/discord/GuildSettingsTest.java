@@ -165,7 +165,7 @@ class GuildSettingsTest {
             var guild = guild(GUILD_A, OWNER_A);
             var registration = mock(CommandListUpdateAction.class, RETURNS_SELF);
             when(guild.updateCommands()).thenReturn(registration);
-            var listener = application.getBean(DiscordListener.class);
+            var listener = activeListener;
             listener.onEvent(new GuildReadyEvent(discord, 1, guild));
             var commands = ArgumentCaptor.forClass(CommandData[].class);
             verify(registration).addCommands(commands.capture());

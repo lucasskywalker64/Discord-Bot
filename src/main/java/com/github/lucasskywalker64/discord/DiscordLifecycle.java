@@ -25,6 +25,8 @@ public class DiscordLifecycle implements SmartLifecycle {
     private volatile boolean running;
     private volatile long generation;
     private long revision = -1;
+    private long requestedRevision = -1;
+    private Thread connectingThread;
 
     public DiscordLifecycle(DiscordGatewayFactory factory, DiscordListener listener, GuildCommandRegistration registrations,
                             OperatorConfigurationService settings, ExecutorService executor) {
@@ -39,33 +41,51 @@ public class DiscordLifecycle implements SmartLifecycle {
     public synchronized void start() {
         if (!running) {
             running = true;
-            reconcile();
+            enqueue(this::reconcile);
         }
     }
 
     @TransactionalEventListener
-    public void configurationChanged(OperatorConfigurationService.Changed event) {
+    public synchronized void configurationChanged(OperatorConfigurationService.Changed event) {
+        requestedRevision = Math.max(requestedRevision, event.discordBotRevision());
+        if (event.discordBotRevision() > revision && connectingThread != null) {
+            generation++;
+            connectingThread.interrupt();
+        }
         enqueue(this::reconcile);
     }
 
-    private synchronized void reconcile() {
+    private void reconcile() {
         if (!running) {
             return;
         }
         var configuration = settings.discordConnectionSettings();
-        if (revision == configuration.revision()) {
-            return;
+        JDA previous;
+        long session;
+        synchronized (this) {
+            if (!running || revision == configuration.revision() || configuration.revision() < requestedRevision) {
+                return;
+            }
+            session = ++generation;
+            registrations.stop();
+            previous = discord;
+            discord = null;
+            revision = configuration.revision();
         }
-        generation++;
-        stopConnection();
-        revision = configuration.revision();
+        stopConnection(previous);
         if (!configuration.enabled()) {
             return;
         }
-        long session = generation;
-        long configuredRevision = revision;
+        long configuredRevision = configuration.revision();
         settings.reportDiscordState(configuredRevision, State.CONNECTING);
-        long registrationSession = registrations.start();
+        long registrationSession;
+        synchronized (this) {
+            if (!running || generation != session || configuration.revision() < requestedRevision) {
+                return;
+            }
+            registrationSession = registrations.start();
+            connectingThread = Thread.currentThread();
+        }
         var sessionListener = listener.forSession(registrationSession, () -> running && generation == session,
                 state -> enqueue(() -> {
                     if (running && generation == session) {
@@ -73,44 +93,64 @@ public class DiscordLifecycle implements SmartLifecycle {
                     }
                 }));
         try {
-            discord = factory.create(configuration.token()).setEnableShutdownHook(false)
+            var connected = factory.create(configuration.token()).setEnableShutdownHook(false)
                     .addEventListeners(sessionListener).build();
+            synchronized (this) {
+                connectingThread = null;
+                if (running && generation == session) {
+                    discord = connected;
+                    return;
+                }
+            }
+            stopConnection(connected);
         } catch (RuntimeException _) {
-            generation++;
-            registrations.stop();
+            synchronized (this) {
+                connectingThread = null;
+                if (!running || generation != session) {
+                    return;
+                }
+                generation++;
+                registrations.stop();
+            }
             settings.reportDiscordState(configuredRevision, State.UNAVAILABLE);
             log.warn("Discord could not start; check operator configuration and provider availability");
         }
     }
 
     @Override
-    public synchronized void stop() {
-        running = false;
-        generation++;
-        revision = -1;
-        stopConnection();
+    public void stop() {
+        JDA previous;
+        synchronized (this) {
+            running = false;
+            generation++;
+            revision = -1;
+            registrations.stop();
+            if (connectingThread != null) {
+                connectingThread.interrupt();
+            }
+            previous = discord;
+            discord = null;
+        }
+        stopConnection(previous);
     }
 
-    private void stopConnection() {
-        registrations.stop();
-        if (discord == null) {
+    private void stopConnection(JDA connection) {
+        if (connection == null) {
             return;
         }
-        discord.shutdown();
+        connection.shutdown();
         try {
-            if (!discord.awaitShutdown(Duration.ofSeconds(10))) {
+            if (!connection.awaitShutdown(Duration.ofSeconds(10))) {
                 log.warn("Discord shutdown exceeded 10 seconds; cancelling pending requests");
-                discord.shutdownNow();
-                if (!discord.awaitShutdown(Duration.ofSeconds(5))) {
+                connection.shutdownNow();
+                if (!connection.awaitShutdown(Duration.ofSeconds(5))) {
                     log.warn("Discord did not finish shutting down after cancellation");
                 }
             }
         } catch (InterruptedException _) {
             log.warn("Discord shutdown interrupted; cancelling pending requests");
-            discord.shutdownNow();
+            connection.shutdownNow();
             Thread.currentThread().interrupt();
-        } finally {
-            discord = null;
         }
     }
 

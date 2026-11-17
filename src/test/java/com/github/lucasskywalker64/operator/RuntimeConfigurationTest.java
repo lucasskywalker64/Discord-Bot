@@ -13,8 +13,11 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.web.server.context.WebServerApplicationContext;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.support.GenericApplicationContext;
+import org.springframework.core.Ordered;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
@@ -25,6 +28,8 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.sql.DriverManager;
 import java.time.Duration;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
@@ -38,7 +43,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.assertTimeout;
 import static org.junit.jupiter.api.Assertions.fail;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.RETURNS_SELF;
@@ -56,6 +60,9 @@ class RuntimeConfigurationTest {
 
     private final LinkedBlockingQueue<Connection> connections = new LinkedBlockingQueue<>();
     private volatile boolean providerUnavailable;
+    private volatile CountDownLatch loginStarted;
+    private volatile CountDownLatch loginReleased;
+    private volatile CountDownLatch loginCancelled;
 
     @BeforeEach
     void resetDatabase() throws Exception {
@@ -143,10 +150,97 @@ class RuntimeConfigurationTest {
                 try (var statement = connection.createStatement()) {
                     statement.executeQuery("SELECT id FROM installation_configuration WHERE id = 1 FOR UPDATE").close();
                 }
-                assertTimeout(Duration.ofSeconds(1), () -> gateway.event(SessionState.DISCONNECTED));
-                connection.rollback();
+                var callback = CompletableFuture.runAsync(() -> gateway.event(SessionState.DISCONNECTED));
+                try {
+                    callback.get(1, TimeUnit.SECONDS);
+                } finally {
+                    connection.rollback();
+                }
             }
             awaitState(settings, State.UNAVAILABLE);
+        }
+    }
+
+    @Test
+    void servesHttpAndCancelsSlowLoginAfterRestart() throws Exception {
+        try (var application = startApplication()) {
+            var settings = application.getBean(OperatorConfigurationService.class);
+            updateToken(settings, "test-token");
+            nextConnection().event(SessionState.READY);
+            awaitState(settings, State.CONNECTED);
+        }
+        loginStarted = new CountDownLatch(1);
+        loginReleased = new CountDownLatch(1);
+        loginCancelled = new CountDownLatch(1);
+        var startup = CompletableFuture.supplyAsync(this::startApplication);
+        ConfigurableApplicationContext application = null;
+        try {
+            assertTrue(loginStarted.await(10, TimeUnit.SECONDS));
+            application = startup.get(2, TimeUnit.SECONDS);
+            assertReady(application);
+            var stop = CompletableFuture.runAsync(application::stop);
+            stop.get(2, TimeUnit.SECONDS);
+            assertTrue(loginCancelled.await(2, TimeUnit.SECONDS));
+        } finally {
+            loginReleased.countDown();
+            if (application == null) {
+                application = startup.get(10, TimeUnit.SECONDS);
+            }
+            application.close();
+        }
+    }
+
+    @Test
+    void ignoresOlderCommitNotificationsWhileLatestLoginIsPending() throws Exception {
+        try (var application = startApplication()) {
+            var settings = application.getBean(OperatorConfigurationService.class);
+            updateToken(settings, "initial-token");
+            nextConnection().event(SessionState.READY);
+            awaitState(settings, State.CONNECTED);
+            var firstCommitted = new CountDownLatch(1);
+            var releaseFirstNotification = new CountDownLatch(1);
+            var transaction = new TransactionTemplate(application.getBean(PlatformTransactionManager.class));
+            var olderUpdate = CompletableFuture.runAsync(() -> transaction.executeWithoutResult(_ -> {
+                TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                    @Override
+                    public int getOrder() {
+                        return Ordered.HIGHEST_PRECEDENCE;
+                    }
+
+                    @Override
+                    public void afterCompletion(int status) {
+                        firstCommitted.countDown();
+                        try {
+                            releaseFirstNotification.await();
+                        } catch (InterruptedException failure) {
+                            Thread.currentThread().interrupt();
+                            throw new AssertionError(failure);
+                        }
+                    }
+                });
+                updateToken(settings, "older-token");
+            }));
+            try {
+                assertTrue(firstCommitted.await(10, TimeUnit.SECONDS));
+                loginStarted = new CountDownLatch(1);
+                loginReleased = new CountDownLatch(1);
+                loginCancelled = new CountDownLatch(1);
+                updateToken(settings, "latest-token");
+                assertTrue(loginStarted.await(10, TimeUnit.SECONDS));
+                releaseFirstNotification.countDown();
+                olderUpdate.get(5, TimeUnit.SECONDS);
+                loginReleased.countDown();
+                nextConnection().event(SessionState.READY);
+                awaitState(settings, State.CONNECTED);
+                assertEquals(1, loginCancelled.getCount());
+                assertTrue(connections.isEmpty());
+            } finally {
+                releaseFirstNotification.countDown();
+                if (loginReleased != null) {
+                    loginReleased.countDown();
+                }
+                olderUpdate.get(10, TimeUnit.SECONDS);
+            }
         }
     }
 
@@ -154,6 +248,16 @@ class RuntimeConfigurationTest {
         var application = new SpringApplication(DiscordBotApplication.class);
         application.addInitializers(context -> ((GenericApplicationContext) context).registerBean(
                 "testGatewayFactory", DiscordGatewayFactory.class, () -> token -> {
+                    if (loginStarted != null) {
+                        loginStarted.countDown();
+                        try {
+                            loginReleased.await();
+                        } catch (InterruptedException _) {
+                            loginCancelled.countDown();
+                            Thread.currentThread().interrupt();
+                            throw new IllegalStateException("Login interrupted");
+                        }
+                    }
                     if (providerUnavailable) {
                         throw new IllegalArgumentException("Provider rejected " + token);
                     }

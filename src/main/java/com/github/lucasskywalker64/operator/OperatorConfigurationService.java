@@ -70,7 +70,7 @@ public class OperatorConfigurationService {
         saved.discordClientId = update.clientId();
         saved.discordClientSecret = clientSecret;
         saved.discordCallbackUrl = update.callbackUrl();
-        events.publishEvent(new Changed());
+        events.publishEvent(new Changed(saved.discordBotRevision));
         return new UpdateResult(snapshot(saved), Map.of());
     }
 
@@ -80,7 +80,7 @@ public class OperatorConfigurationService {
         url("publicUrl", publicUrl, false, errors);
         if (errors.isEmpty()) {
             saved.publicUrl = publicUrl;
-            events.publishEvent(new Changed());
+            events.publishEvent(new Changed(saved.discordBotRevision));
         }
         return new UpdateResult(snapshot(saved), errors);
     }
@@ -105,7 +105,7 @@ public class OperatorConfigurationService {
         saved.twitchClientId = update.clientId();
         saved.twitchClientSecret = clientSecret;
         saved.twitchCallbackUrl = update.callbackUrl();
-        events.publishEvent(new Changed());
+        events.publishEvent(new Changed(saved.discordBotRevision));
         return new UpdateResult(snapshot(saved), Map.of());
     }
 
@@ -130,7 +130,7 @@ public class OperatorConfigurationService {
         saved.storageRegion = update.region();
         saved.storageAccessKey = accessKey;
         saved.storageSecretKey = secretKey;
-        events.publishEvent(new Changed());
+        events.publishEvent(new Changed(saved.discordBotRevision));
         return new UpdateResult(snapshot(saved), Map.of());
     }
 
@@ -148,7 +148,7 @@ public class OperatorConfigurationService {
         if (saved.discordBotEnabled) {
             saved.discordBotRevision++;
             saved.discordState = State.CONNECTING;
-            events.publishEvent(new Changed());
+            events.publishEvent(new Changed(saved.discordBotRevision));
         }
         return new UpdateResult(snapshot(saved), Map.of());
     }
@@ -241,6 +241,6 @@ public class OperatorConfigurationService {
         return value != null && !value.isBlank();
     }
 
-    public record Changed() {
+    public record Changed(long discordBotRevision) {
     }
 }
