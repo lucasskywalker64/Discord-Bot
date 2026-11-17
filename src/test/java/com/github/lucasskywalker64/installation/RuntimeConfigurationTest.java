@@ -7,8 +7,11 @@ import net.dv8tion.jda.api.JDABuilder;
 import net.dv8tion.jda.api.events.session.GenericSessionEvent;
 import net.dv8tion.jda.api.events.session.SessionState;
 import net.dv8tion.jda.api.hooks.EventListener;
+import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.web.server.context.WebServerApplicationContext;
 import org.springframework.context.ConfigurableApplicationContext;
@@ -23,6 +26,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import java.net.URI;
+import java.net.InetSocketAddress;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -63,6 +67,8 @@ class RuntimeConfigurationTest {
     private volatile CountDownLatch loginStarted;
     private volatile CountDownLatch loginReleased;
     private volatile CountDownLatch loginCancelled;
+    private volatile URI tokenEndpoint;
+    private volatile CountDownLatch tokenRequestFinished;
 
     @BeforeEach
     void resetDatabase() throws Exception {
@@ -190,6 +196,50 @@ class RuntimeConfigurationTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void cancelsRealTokenVerificationBeforeTheProviderResponds(boolean stopApplication) throws Exception {
+        var requestStarted = new CountDownLatch(1);
+        var releaseResponse = new CompletableFuture<Void>();
+        tokenRequestFinished = new CountDownLatch(1);
+        var provider = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        provider.createContext("/", exchange -> {
+            requestStarted.countDown();
+            releaseResponse.join();
+            try {
+                exchange.sendResponseHeaders(401, -1);
+            } finally {
+                exchange.close();
+            }
+        });
+        provider.start();
+        tokenEndpoint = URI.create("http://127.0.0.1:" + provider.getAddress().getPort() + "/");
+        try (var application = startApplication()) {
+            var settings = application.getBean(InstallationConfigurationService.class);
+            updateToken(settings, "slow-token");
+            assertTrue(requestStarted.await(10, TimeUnit.SECONDS), "JDA did not reach token verification");
+            assertReady(application);
+            if (stopApplication) {
+                application.stop();
+            } else {
+                updateToken(settings, "replacement-token");
+            }
+            try {
+                assertTrue(tokenRequestFinished.await(2, TimeUnit.SECONDS),
+                        "Cancellation did not release JDA's token verification request");
+                if (!stopApplication) {
+                    nextConnection().event(SessionState.READY);
+                    awaitState(settings, State.CONNECTED);
+                }
+            } finally {
+                releaseResponse.complete(null);
+            }
+        } finally {
+            releaseResponse.complete(null);
+            provider.stop(0);
+        }
+    }
+
     @Test
     void ignoresOlderCommitNotificationsWhileLatestLoginIsPending() throws Exception {
         try (var application = startApplication()) {
@@ -247,7 +297,17 @@ class RuntimeConfigurationTest {
     private ConfigurableApplicationContext startApplication() {
         var application = new SpringApplication(DiscordBotApplication.class);
         application.addInitializers(context -> ((GenericApplicationContext) context).registerBean(
-                "testGatewayFactory", DiscordGatewayFactory.class, () -> token -> {
+                "testGatewayFactory", DiscordGatewayFactory.class, () -> (token, httpClient) -> {
+                    if (tokenEndpoint != null && token.equals("slow-token")) {
+                        var transport = httpClient.newBuilder().addInterceptor(chain -> {
+                            try {
+                                return chain.proceed(chain.request().newBuilder().url(tokenEndpoint.toString()).build());
+                            } finally {
+                                tokenRequestFinished.countDown();
+                            }
+                        }).build();
+                        return JDABuilder.createLight(token).setHttpClient(transport);
+                    }
                     if (loginStarted != null) {
                         loginStarted.countDown();
                         try {

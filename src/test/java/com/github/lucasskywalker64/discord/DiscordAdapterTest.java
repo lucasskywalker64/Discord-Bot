@@ -67,6 +67,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -206,6 +207,7 @@ class DiscordAdapterTest {
             shutdown.verify(discord).shutdown();
             application.start();
             verify(builder, timeout(5_000).times(2)).build();
+            awaitLifecycle(application);
             listener.onEvent(new GuildReadyEvent(discord, 2, guild));
             verify(registration).queue(any(), any());
             listener().onEvent(new GuildReadyEvent(restarted, 2, guild));
@@ -722,6 +724,7 @@ class DiscordAdapterTest {
             application.stop();
             application.start();
             verify(builder, timeout(5_000).times(2)).build();
+            awaitLifecycle(application);
         }
 
         verify(builder, times(2)).addEventListeners(any(EventListener.class));
@@ -753,7 +756,7 @@ class DiscordAdapterTest {
         var application = new SpringApplication(DiscordBotApplication.class);
         application.addInitializers(context -> {
             var beans = (GenericApplicationContext) context;
-            beans.registerBean("testDiscordFactory", DiscordGatewayFactory.class, () -> _ -> builder);
+            beans.registerBean("testDiscordFactory", DiscordGatewayFactory.class, () -> (_, _) -> builder);
             beans.registerBean("testRegistrationScheduler", ScheduledExecutorService.class, () -> registrationScheduler);
             for (int index = 0; index < modules.length; index++) {
                 var module = modules[index];
@@ -770,7 +773,14 @@ class DiscordAdapterTest {
         activeApplication.getBean(InstallationConfigurationService.class).updateDiscord(new DiscordUpdate(
                 true, SecretUpdate.replace("test-token"), false, null, SecretUpdate.keep(), null));
         verify(builder, timeout(5_000).atLeastOnce()).build();
+        awaitLifecycle(activeApplication);
         return activeApplication;
+    }
+
+    private static void awaitLifecycle(ConfigurableApplicationContext application) {
+        var completed = new CompletableFuture<Void>();
+        application.getBean("discordLifecycleExecutor", ExecutorService.class).execute(() -> completed.complete(null));
+        completed.orTimeout(5, TimeUnit.SECONDS).join();
     }
 
     private Throwable startupFailure(SubcommandModule... modules) {

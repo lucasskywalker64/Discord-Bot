@@ -25,7 +25,7 @@ public class DiscordConfiguration {
     @Bean
     @ConditionalOnMissingBean
     DiscordGatewayFactory discordGatewayFactory() {
-        return JDABuilder::createLight;
+        return (token, httpClient) -> JDABuilder.createLight(token).setHttpClient(httpClient);
     }
 
     @Bean

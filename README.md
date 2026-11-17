@@ -47,7 +47,9 @@ restart work or overwrite the new connection status. Gateway status events queue
 database writes outside the callback thread. `retryDiscord()` retries a failed
 connection without restarting HTTP. Startup also retries enabled connections.
 Initial login runs on the worker so slow token validation cannot delay HTTP
-readiness. Shutdown and newer bot revisions interrupt pending login; delayed
+readiness. Each connection owns its HTTP client. Shutdown and newer bot revisions
+cancel pending HTTP calls and reject calls started after cancellation, releasing
+JDA's token-verification wait and its allocated resources. Delayed
 notifications from older commits cannot cancel the latest attempt.
 
 Discord connection status and the last sanitized failure persist independently

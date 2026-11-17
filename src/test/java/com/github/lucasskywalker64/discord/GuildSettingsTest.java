@@ -49,6 +49,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -296,7 +297,7 @@ class GuildSettingsTest {
         when(builder.build()).thenReturn(discord);
         var application = new SpringApplication(DiscordBotApplication.class);
         application.addInitializers(context -> ((GenericApplicationContext) context)
-                .registerBean("testDiscordFactory", DiscordGatewayFactory.class, () -> _ -> builder));
+                .registerBean("testDiscordFactory", DiscordGatewayFactory.class, () -> (_, _) -> builder));
         var context = application.run(
                 "--spring.main.web-application-type=none",
                 "--spring.datasource.url=" + postgres.getJdbcUrl(),
@@ -306,6 +307,9 @@ class GuildSettingsTest {
         context.getBean(InstallationConfigurationService.class).updateDiscord(new DiscordUpdate(
                 true, SecretUpdate.replace("test-token"), false, null, SecretUpdate.keep(), null));
         verify(builder, timeout(5_000)).build();
+        var completed = new CompletableFuture<Void>();
+        context.getBean("discordLifecycleExecutor", ExecutorService.class).execute(() -> completed.complete(null));
+        completed.orTimeout(5, TimeUnit.SECONDS).join();
         var listener = ArgumentCaptor.forClass(Object.class);
         verify(builder).addEventListeners(listener.capture());
         activeListener = (EventListener) listener.getValue();
