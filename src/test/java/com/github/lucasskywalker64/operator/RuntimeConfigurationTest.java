@@ -1,0 +1,220 @@
+package com.github.lucasskywalker64.operator;
+
+import com.github.lucasskywalker64.DiscordBotApplication;
+import com.github.lucasskywalker64.discord.DiscordGatewayFactory;
+import net.dv8tion.jda.api.JDA;
+import net.dv8tion.jda.api.JDABuilder;
+import net.dv8tion.jda.api.events.session.GenericSessionEvent;
+import net.dv8tion.jda.api.events.session.SessionState;
+import net.dv8tion.jda.api.hooks.EventListener;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.web.server.context.WebServerApplicationContext;
+import org.springframework.context.ConfigurableApplicationContext;
+import org.springframework.context.support.GenericApplicationContext;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.postgresql.PostgreSQLContainer;
+
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.sql.DriverManager;
+import java.time.Duration;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
+
+import com.github.lucasskywalker64.operator.OperatorConfiguration.DiscordUpdate;
+import com.github.lucasskywalker64.operator.OperatorConfiguration.SecretUpdate;
+import com.github.lucasskywalker64.operator.OperatorConfiguration.State;
+import com.github.lucasskywalker64.operator.OperatorConfiguration.TwitchUpdate;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertTimeout;
+import static org.junit.jupiter.api.Assertions.fail;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.RETURNS_SELF;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.timeout;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+@Testcontainers
+class RuntimeConfigurationTest {
+
+    @Container
+    static final PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:17-alpine");
+
+    private final LinkedBlockingQueue<Connection> connections = new LinkedBlockingQueue<>();
+    private volatile boolean providerUnavailable;
+
+    @BeforeEach
+    void resetDatabase() throws Exception {
+        try (var connection = DriverManager.getConnection(
+                postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+             var statement = connection.createStatement()) {
+            statement.execute("DROP SCHEMA public CASCADE");
+            statement.execute("CREATE SCHEMA public");
+        }
+    }
+
+    @Test
+    void replacesDiscordAfterCommitAndIgnoresOldCallbacks() throws Exception {
+        try (var application = startApplication()) {
+            var settings = application.getBean(OperatorConfigurationService.class);
+            assertTrue(connections.isEmpty());
+            updateToken(settings, "first-token");
+            var first = nextConnection();
+            first.event(SessionState.READY);
+            awaitState(settings, State.CONNECTED);
+
+            var transaction = new TransactionTemplate(application.getBean(PlatformTransactionManager.class));
+            transaction.executeWithoutResult(status -> {
+                updateToken(settings, "rolled-back-token");
+                assertTrue(connections.isEmpty());
+                status.setRollbackOnly();
+            });
+            assertEquals(State.CONNECTED, settings.read().discord().status().state());
+
+            settings.updatePublicUrl("https://bot.example");
+            settings.updateTwitch(new TwitchUpdate(true, "client", SecretUpdate.replace("twitch-secret"),
+                    "https://bot.example/callback"));
+            settings.updateDiscord(new DiscordUpdate(true, SecretUpdate.keep(), true, "123",
+                    SecretUpdate.replace("oauth-secret"), "https://bot.example/callback"));
+            updateToken(settings, "second-token");
+            var second = nextConnection();
+            verify(first.discord()).shutdown();
+            first.event(SessionState.SHUTDOWN);
+            second.event(SessionState.READY);
+            awaitState(settings, State.CONNECTED);
+            assertNull(settings.read().discord().status().lastFailure());
+            assertTrue(connections.isEmpty());
+            settings.updateDiscord(new DiscordUpdate(false, SecretUpdate.keep(), false, "123",
+                    SecretUpdate.keep(), "https://bot.example/callback"));
+            awaitState(settings, State.DISABLED);
+            verify(second.discord(), timeout(5_000)).shutdown();
+        }
+    }
+
+    @Test
+    void keepsHttpReadyDuringOutageAndRetainsFailureAcrossRestart() throws Exception {
+        providerUnavailable = true;
+        try (var application = startApplication()) {
+            var settings = application.getBean(OperatorConfigurationService.class);
+            updateToken(settings, "invalid-token");
+            awaitState(settings, State.UNAVAILABLE);
+            assertNotNull(settings.read().discord().status().lastFailure());
+            assertFalse(settings.read().toString().contains("invalid-token"));
+            assertReady(application);
+        }
+        try (var application = startApplication()) {
+            var settings = application.getBean(OperatorConfigurationService.class);
+            awaitState(settings, State.UNAVAILABLE);
+            assertNotNull(settings.read().discord().status().lastFailure());
+            assertReady(application);
+            providerUnavailable = false;
+            settings.retryDiscord();
+            nextConnection().event(SessionState.READY);
+            awaitState(settings, State.CONNECTED);
+            assertNotNull(settings.read().discord().status().lastFailure());
+        }
+    }
+
+    @Test
+    void queuesStatusPersistenceWithoutBlockingGatewayCallbacks() throws Exception {
+        try (var application = startApplication()) {
+            var settings = application.getBean(OperatorConfigurationService.class);
+            updateToken(settings, "test-token");
+            var gateway = nextConnection();
+            gateway.event(SessionState.READY);
+            awaitState(settings, State.CONNECTED);
+            try (var connection = DriverManager.getConnection(
+                    postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())) {
+                connection.setAutoCommit(false);
+                try (var statement = connection.createStatement()) {
+                    statement.executeQuery("SELECT id FROM installation_configuration WHERE id = 1 FOR UPDATE").close();
+                }
+                assertTimeout(Duration.ofSeconds(1), () -> gateway.event(SessionState.DISCONNECTED));
+                connection.rollback();
+            }
+            awaitState(settings, State.UNAVAILABLE);
+        }
+    }
+
+    private ConfigurableApplicationContext startApplication() {
+        var application = new SpringApplication(DiscordBotApplication.class);
+        application.addInitializers(context -> ((GenericApplicationContext) context).registerBean(
+                "testGatewayFactory", DiscordGatewayFactory.class, () -> token -> {
+                    if (providerUnavailable) {
+                        throw new IllegalArgumentException("Provider rejected " + token);
+                    }
+                    var discord = mock(JDA.class);
+                    var builder = mock(JDABuilder.class, RETURNS_SELF);
+                    try {
+                        when(discord.awaitShutdown(Duration.ofSeconds(10))).thenReturn(true);
+                    } catch (InterruptedException failure) {
+                        throw new AssertionError(failure);
+                    }
+                    doAnswer(call -> {
+                        connections.add(new Connection(discord, call.getArgument(0)));
+                        return builder;
+                    }).when(builder).addEventListeners(any(Object.class));
+                    when(builder.build()).thenReturn(discord);
+                    return builder;
+                }));
+        return application.run("--server.port=0",
+                "--spring.datasource.url=" + postgres.getJdbcUrl(),
+                "--spring.datasource.username=" + postgres.getUsername(),
+                "--spring.datasource.password=" + postgres.getPassword(),
+                "--spring.main.banner-mode=off", "--logging.level.root=OFF");
+    }
+
+    private Connection nextConnection() throws InterruptedException {
+        var connection = connections.poll(10, TimeUnit.SECONDS);
+        assertNotNull(connection, "Discord did not start");
+        return connection;
+    }
+
+    private static void updateToken(OperatorConfigurationService settings, String token) {
+        var result = settings.updateDiscord(new DiscordUpdate(true, SecretUpdate.replace(token), false,
+                null, SecretUpdate.keep(), null));
+        assertTrue(result.errors().isEmpty());
+    }
+
+    private static void awaitState(OperatorConfigurationService settings, State state) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (System.nanoTime() < deadline) {
+            if (settings.read().discord().status().state() == state) {
+                return;
+            }
+        }
+        fail("Expected " + state + ", got " + settings.read().discord().status());
+    }
+
+    private static void assertReady(ConfigurableApplicationContext application) throws Exception {
+        int port = ((WebServerApplicationContext) application).getWebServer().getPort();
+        try (var client = HttpClient.newHttpClient()) {
+            var response = client.send(HttpRequest.newBuilder(
+                    URI.create("http://127.0.0.1:" + port + "/actuator/health/readiness")).build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertEquals(200, response.statusCode());
+        }
+    }
+
+    private record Connection(JDA discord, EventListener listener) {
+        void event(SessionState state) {
+            var event = mock(GenericSessionEvent.class);
+            when(event.getState()).thenReturn(state);
+            listener.onEvent(event);
+        }
+    }
+}

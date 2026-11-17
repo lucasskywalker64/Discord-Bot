@@ -25,10 +25,58 @@ full unsigned snowflake range. An unset channel is stored as SQL `NULL`.
 
 ## Discord configuration
 
-Discord is disabled by default. Set `DISCORD_ENABLED=true` and `DISCORD_TOKEN`
-to a bot token to start the JDA 6.7.0 gateway with Spring. Keep the token outside
-source control. Startup tests explicitly disable Discord; adapter tests replace
-the outbound JDA connection and use disposable PostgreSQL.
+Discord is disabled by default. Provider settings now live in PostgreSQL;
+`DISCORD_ENABLED` and `DISCORD_TOKEN` no longer configure the gateway. The
+server-side `OperatorConfigurationService` provides typed reads and updates for
+Discord bot/OAuth settings, Twitch application settings, public and callback URLs,
+S3-compatible attachment storage, capability enablement and resumable setup
+progress. The authenticated private console that calls these operations belongs
+to #86. This slice adds no HTTP configuration endpoints.
+
+Updates validate required fields for enabled capabilities and return errors keyed
+by field. Secret updates explicitly choose `KEEP`, `REPLACE` or `CLEAR`. Reads
+return presence flags, never saved tokens, client secrets or storage keys. Invalid
+updates leave saved settings and running connections unchanged. Disabling a
+capability retains its credentials unless explicitly cleared.
+
+Successful commits queue Discord reconciliation on a dedicated worker. Changing
+the bot token or enablement stops the old gateway before starting one new JDA
+connection with one listener. OAuth, Twitch, storage, URL and setup changes do
+not restart that gateway. Old session events and registration callbacks cannot
+restart work or overwrite the new connection status. Gateway status events queue
+database writes outside the callback thread. `retryDiscord()` retries a failed
+connection without restarting HTTP. Startup also retries enabled connections.
+
+Discord connection status and the last sanitized failure persist independently
+of application/database readiness. Missing settings or provider rejection do not
+prevent HTTP startup. Failure messages contain no provider exception text or
+secrets. Twitch and storage report `CONFIGURED`, not connected: their consuming
+features own live connectivity checks and workers.
+
+Discord and Twitch OAuth application credential changes advance separate durable
+`oauthRevision` values. Grant consumers must bind grants to the application
+revision and require revalidation/reauthorization on a mismatch before use.
+Configuration changes never delete personal grants or change their identities.
+Those grant consumers arrive with their owning OAuth feature tickets.
+
+### Configuration backup and access
+
+`installation_configuration` contains all installation settings, setup progress,
+provider credentials and Discord failure state. Back up the entire PostgreSQL
+database, including this table, guild data and Flyway history. Restore them
+together. There is no application-local secret file or encryption key to lose
+when recreating an application container. Credentials are stored as database
+secrets, not encrypted by the application. Restrict PostgreSQL login/network
+access to the application and trusted operators, use encrypted volumes/backups,
+and keep SQL parameter/body logging disabled. The migration revokes table access
+from `PUBLIC`; do not grant this table to dashboard or reporting database roles.
+
+Database connection credentials and private ingress/bind configuration remain
+bootstrap inputs outside the database. Preserve them in the deployment's secret
+store and back them up separately. Also back up the configured attachment bucket
+and its objects when that feature is enabled. The future Compose packaging owns
+database-secret bootstrap; provider configuration cannot supply the database
+credentials needed to read itself.
 
 A configured guild has a row in `guild_configuration`. When Discord reports
 that a guild is ready, joined, or newly available, the adapter registers the
@@ -106,11 +154,13 @@ thread's interrupt status. A timeout or interruption is logged.
 
 Use a dedicated test bot, two test guilds and a disposable PostgreSQL database.
 Invite the bot with the `bot` and `applications.commands` OAuth scopes. Supply
-the database variables above, enable Discord and supply the test token through
-the environment. Do not run this check with a production bot token or database.
+the database variables above. Until #86 supplies the private console, a trusted
+in-process harness must call `OperatorConfigurationService.updateDiscord` with
+the test token and bot enablement. Do not use production credentials or data.
 
 1. Build with `./mvnw -B -ntp verify` and start the packaged application with
    `java -jar target/DiscordBot-6.0.0-SNAPSHOT.jar`. Flyway creates the schema.
+   Save the test bot configuration through the trusted harness.
 2. Add the two test guild IDs through your database client, then restart:
 
    ```sql

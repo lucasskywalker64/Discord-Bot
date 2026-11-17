@@ -7,9 +7,14 @@ import net.dv8tion.jda.api.events.guild.GuildJoinEvent;
 import net.dv8tion.jda.api.events.guild.GuildReadyEvent;
 import net.dv8tion.jda.api.events.interaction.command.CommandAutoCompleteInteractionEvent;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
+import net.dv8tion.jda.api.events.session.GenericSessionEvent;
+import net.dv8tion.jda.api.hooks.EventListener;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
+import com.github.lucasskywalker64.operator.OperatorConfiguration.State;
 
 import java.util.List;
+import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 
 public class DiscordListener extends ListenerAdapter {
 
@@ -23,19 +28,24 @@ public class DiscordListener extends ListenerAdapter {
         this.registrations = registrations;
     }
 
-    @Override
-    public void onGuildReady(GuildReadyEvent event) {
-        registrations.register(event.getGuild());
-    }
-
-    @Override
-    public void onGuildJoin(GuildJoinEvent event) {
-        registrations.register(event.getGuild());
-    }
-
-    @Override
-    public void onGuildAvailable(GuildAvailableEvent event) {
-        registrations.register(event.getGuild());
+    EventListener forSession(long registrationSession, BooleanSupplier active, Consumer<State> status) {
+        return event -> {
+            if (!active.getAsBoolean()) {
+                return;
+            }
+            if (event instanceof GenericSessionEvent session) {
+                switch (session.getState()) {
+                    case READY, RESUMED, RECREATED -> status.accept(State.CONNECTED);
+                    case DISCONNECTED, INVALIDATED, SHUTDOWN -> status.accept(State.UNAVAILABLE);
+                }
+            }
+            switch (event) {
+                case GuildReadyEvent ready -> registrations.register(ready.getGuild(), registrationSession);
+                case GuildJoinEvent joined -> registrations.register(joined.getGuild(), registrationSession);
+                case GuildAvailableEvent available -> registrations.register(available.getGuild(), registrationSession);
+                default -> onEvent(event);
+            }
+        };
     }
 
     @Override

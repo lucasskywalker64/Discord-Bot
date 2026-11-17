@@ -1,6 +1,10 @@
 package com.github.lucasskywalker64.discord;
 
 import com.github.lucasskywalker64.DiscordBotApplication;
+import com.github.lucasskywalker64.operator.OperatorConfigurationService;
+import com.github.lucasskywalker64.operator.OperatorConfiguration.DiscordUpdate;
+import com.github.lucasskywalker64.operator.OperatorConfiguration.SecretUpdate;
+import net.dv8tion.jda.api.hooks.EventListener;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.JDABuilder;
 import net.dv8tion.jda.api.entities.Guild;
@@ -57,6 +61,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.timeout;
 
 @Testcontainers
 @ExtendWith(MockitoExtension.class)
@@ -75,6 +80,7 @@ class GuildSettingsTest {
     static final PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:17-alpine");
 
     private JDA discord;
+    private EventListener activeListener;
 
     @BeforeEach
     void resetDatabase() throws SQLException {
@@ -290,13 +296,20 @@ class GuildSettingsTest {
         when(builder.build()).thenReturn(discord);
         var application = new SpringApplication(DiscordBotApplication.class);
         application.addInitializers(context -> ((GenericApplicationContext) context)
-                .registerBean("testDiscordBuilder", JDABuilder.class, () -> builder));
-        return application.run(
+                .registerBean("testDiscordFactory", DiscordGatewayFactory.class, () -> _ -> builder));
+        var context = application.run(
                 "--spring.main.web-application-type=none",
                 "--spring.datasource.url=" + postgres.getJdbcUrl(),
                 "--spring.datasource.username=" + postgres.getUsername(),
                 "--spring.datasource.password=" + postgres.getPassword(),
-                "--discord.enabled=true", "--spring.main.banner-mode=off", "--logging.level.root=OFF");
+                "--spring.main.banner-mode=off", "--logging.level.root=OFF");
+        context.getBean(OperatorConfigurationService.class).updateDiscord(new DiscordUpdate(
+                true, SecretUpdate.replace("test-token"), false, null, SecretUpdate.keep(), null));
+        verify(builder, timeout(5_000)).build();
+        var listener = ArgumentCaptor.forClass(Object.class);
+        verify(builder).addEventListeners(listener.capture());
+        activeListener = (EventListener) listener.getValue();
+        return context;
     }
 
     private String invoke(ConfigurableApplicationContext application, Guild guild, String actor,
@@ -310,8 +323,7 @@ class GuildSettingsTest {
     }
 
     private void dispatch(ConfigurableApplicationContext application, Request request) {
-        application.getBean(DiscordListener.class)
-                .onEvent(new SlashCommandInteractionEvent(discord, 1, request.interaction()));
+        activeListener.onEvent(new SlashCommandInteractionEvent(discord, 1, request.interaction()));
     }
 
     private static Request request(Guild guild, String actor, GuildChannelUnion channel) {

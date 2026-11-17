@@ -6,11 +6,9 @@ import com.github.lucasskywalker64.commands.general.GeneralPing;
 import com.github.lucasskywalker64.commands.general.GeneralMemberCountAdd;
 import com.github.lucasskywalker64.guild.GuildConfigurationRepository;
 import com.github.lucasskywalker64.guild.ConfiguredGuilds;
+import com.github.lucasskywalker64.operator.OperatorConfigurationService;
 import net.dv8tion.jda.api.JDABuilder;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.task.SimpleAsyncTaskExecutor;
@@ -18,17 +16,16 @@ import org.springframework.transaction.PlatformTransactionManager;
 
 import java.util.List;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
 
 @Configuration(proxyBeanMethods = false)
-@ConditionalOnProperty(name = "discord.enabled", havingValue = "true")
-@EnableConfigurationProperties(DiscordConfiguration.DiscordProperties.class)
 public class DiscordConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    JDABuilder discordBuilder(DiscordProperties properties) {
-        return JDABuilder.createLight(properties.token());
+    DiscordGatewayFactory discordGatewayFactory() {
+        return JDABuilder::createLight;
     }
 
     @Bean
@@ -80,11 +77,14 @@ public class DiscordConfiguration {
     }
 
     @Bean
-    DiscordLifecycle discordLifecycle(JDABuilder builder, DiscordListener listener, GuildCommandRegistration registrations) {
-        return new DiscordLifecycle(builder.setEnableShutdownHook(false).addEventListeners(listener), registrations);
+    DiscordLifecycle discordLifecycle(DiscordGatewayFactory factory, DiscordListener listener,
+                                      GuildCommandRegistration registrations, OperatorConfigurationService settings,
+                                      ExecutorService discordLifecycleExecutor) {
+        return new DiscordLifecycle(factory, listener, registrations, settings, discordLifecycleExecutor);
     }
 
-    @ConfigurationProperties("discord")
-    public record DiscordProperties(String token) {
+    @Bean(destroyMethod = "shutdownNow")
+    ExecutorService discordLifecycleExecutor() {
+        return Executors.newSingleThreadExecutor(Thread.ofPlatform().daemon().name("discord-lifecycle").factory());
     }
 }
