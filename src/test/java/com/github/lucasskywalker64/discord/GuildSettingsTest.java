@@ -1,6 +1,10 @@
 package com.github.lucasskywalker64.discord;
 
 import com.github.lucasskywalker64.DiscordBotApplication;
+import com.github.lucasskywalker64.installation.InstallationConfigurationService;
+import com.github.lucasskywalker64.installation.InstallationConfiguration.DiscordUpdate;
+import com.github.lucasskywalker64.installation.InstallationConfiguration.SecretUpdate;
+import net.dv8tion.jda.api.hooks.EventListener;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.JDABuilder;
 import net.dv8tion.jda.api.entities.Guild;
@@ -45,6 +49,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -57,6 +62,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.timeout;
 
 @Testcontainers
 @ExtendWith(MockitoExtension.class)
@@ -75,6 +81,7 @@ class GuildSettingsTest {
     static final PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:17-alpine");
 
     private JDA discord;
+    private EventListener activeListener;
 
     @BeforeEach
     void resetDatabase() throws SQLException {
@@ -159,7 +166,7 @@ class GuildSettingsTest {
             var guild = guild(GUILD_A, OWNER_A);
             var registration = mock(CommandListUpdateAction.class, RETURNS_SELF);
             when(guild.updateCommands()).thenReturn(registration);
-            var listener = application.getBean(DiscordListener.class);
+            var listener = activeListener;
             listener.onEvent(new GuildReadyEvent(discord, 1, guild));
             var commands = ArgumentCaptor.forClass(CommandData[].class);
             verify(registration).addCommands(commands.capture());
@@ -290,13 +297,23 @@ class GuildSettingsTest {
         when(builder.build()).thenReturn(discord);
         var application = new SpringApplication(DiscordBotApplication.class);
         application.addInitializers(context -> ((GenericApplicationContext) context)
-                .registerBean("testDiscordBuilder", JDABuilder.class, () -> builder));
-        return application.run(
+                .registerBean("testDiscordFactory", DiscordGatewayFactory.class, () -> (_, _) -> builder));
+        var context = application.run(
                 "--spring.main.web-application-type=none",
                 "--spring.datasource.url=" + postgres.getJdbcUrl(),
                 "--spring.datasource.username=" + postgres.getUsername(),
                 "--spring.datasource.password=" + postgres.getPassword(),
-                "--discord.enabled=true", "--spring.main.banner-mode=off", "--logging.level.root=OFF");
+                "--spring.main.banner-mode=off", "--logging.level.root=OFF");
+        context.getBean(InstallationConfigurationService.class).updateDiscord(new DiscordUpdate(
+                true, SecretUpdate.replace("test-token"), false, null, SecretUpdate.keep(), null));
+        verify(builder, timeout(5_000)).build();
+        var completed = new CompletableFuture<Void>();
+        context.getBean("discordLifecycleExecutor", ExecutorService.class).execute(() -> completed.complete(null));
+        completed.orTimeout(5, TimeUnit.SECONDS).join();
+        var listener = ArgumentCaptor.forClass(Object.class);
+        verify(builder).addEventListeners(listener.capture());
+        activeListener = (EventListener) listener.getValue();
+        return context;
     }
 
     private String invoke(ConfigurableApplicationContext application, Guild guild, String actor,
@@ -310,8 +327,7 @@ class GuildSettingsTest {
     }
 
     private void dispatch(ConfigurableApplicationContext application, Request request) {
-        application.getBean(DiscordListener.class)
-                .onEvent(new SlashCommandInteractionEvent(discord, 1, request.interaction()));
+        activeListener.onEvent(new SlashCommandInteractionEvent(discord, 1, request.interaction()));
     }
 
     private static Request request(Guild guild, String actor, GuildChannelUnion channel) {

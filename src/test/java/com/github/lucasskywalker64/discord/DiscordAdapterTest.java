@@ -7,6 +7,9 @@ import com.github.lucasskywalker64.commands.CommandDefinition;
 import com.github.lucasskywalker64.guild.GuildConfiguration;
 import com.github.lucasskywalker64.guild.GuildConfigurationRepository;
 import com.github.lucasskywalker64.guild.ConfiguredGuilds;
+import com.github.lucasskywalker64.installation.InstallationConfigurationService;
+import com.github.lucasskywalker64.installation.InstallationConfiguration.DiscordUpdate;
+import com.github.lucasskywalker64.installation.InstallationConfiguration.SecretUpdate;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.JDABuilder;
 import net.dv8tion.jda.api.entities.Guild;
@@ -21,7 +24,7 @@ import net.dv8tion.jda.api.events.guild.GuildReadyEvent;
 import net.dv8tion.jda.api.events.guild.UnavailableGuildJoinedEvent;
 import net.dv8tion.jda.api.events.interaction.command.CommandAutoCompleteInteractionEvent;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
-import net.dv8tion.jda.api.hooks.ListenerAdapter;
+import net.dv8tion.jda.api.hooks.EventListener;
 import net.dv8tion.jda.api.interactions.InteractionHook;
 import net.dv8tion.jda.api.interactions.Interaction;
 import net.dv8tion.jda.api.interactions.commands.Command;
@@ -64,6 +67,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -86,6 +90,8 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.timeout;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -200,7 +206,11 @@ class DiscordAdapterTest {
             shutdown.verify(scheduled).cancel(false);
             shutdown.verify(discord).shutdown();
             application.start();
-            listener.onEvent(new GuildReadyEvent(restarted, 2, guild));
+            verify(builder, timeout(5_000).times(2)).build();
+            awaitLifecycle(application);
+            listener.onEvent(new GuildReadyEvent(discord, 2, guild));
+            verify(registration).queue(any(), any());
+            listener().onEvent(new GuildReadyEvent(restarted, 2, guild));
             failures.getFirst().accept(new IOException("late callback"));
             retry.getValue().run();
 
@@ -713,9 +723,11 @@ class DiscordAdapterTest {
         try (var application = startApplication()) {
             application.stop();
             application.start();
+            verify(builder, timeout(5_000).times(2)).build();
+            awaitLifecycle(application);
         }
 
-        verify(builder).addEventListeners(any(DiscordListener.class));
+        verify(builder, times(2)).addEventListeners(any(EventListener.class));
         var builderOrder = inOrder(builder);
         builderOrder.verify(builder).setEnableShutdownHook(false);
         builderOrder.verify(builder, times(2)).build();
@@ -744,7 +756,7 @@ class DiscordAdapterTest {
         var application = new SpringApplication(DiscordBotApplication.class);
         application.addInitializers(context -> {
             var beans = (GenericApplicationContext) context;
-            beans.registerBean("testDiscordBuilder", JDABuilder.class, () -> builder);
+            beans.registerBean("testDiscordFactory", DiscordGatewayFactory.class, () -> (_, _) -> builder);
             beans.registerBean("testRegistrationScheduler", ScheduledExecutorService.class, () -> registrationScheduler);
             for (int index = 0; index < modules.length; index++) {
                 var module = modules[index];
@@ -756,10 +768,19 @@ class DiscordAdapterTest {
                 "--spring.datasource.url=" + postgres.getJdbcUrl(),
                 "--spring.datasource.username=" + postgres.getUsername(),
                 "--spring.datasource.password=" + postgres.getPassword(),
-                "--discord.enabled=true",
                 "--spring.main.banner-mode=off",
                 "--logging.level.root=OFF");
+        activeApplication.getBean(InstallationConfigurationService.class).updateDiscord(new DiscordUpdate(
+                true, SecretUpdate.replace("test-token"), false, null, SecretUpdate.keep(), null));
+        verify(builder, timeout(5_000).atLeastOnce()).build();
+        awaitLifecycle(activeApplication);
         return activeApplication;
+    }
+
+    private static void awaitLifecycle(ConfigurableApplicationContext application) {
+        var completed = new CompletableFuture<Void>();
+        application.getBean("discordLifecycleExecutor", ExecutorService.class).execute(() -> completed.complete(null));
+        completed.orTimeout(5, TimeUnit.SECONDS).join();
     }
 
     private Throwable startupFailure(SubcommandModule... modules) {
@@ -772,12 +793,12 @@ class DiscordAdapterTest {
         return failure;
     }
 
-    private ListenerAdapter listener() {
+    private EventListener listener() {
         // Fixtures provision guilds after startup; reload before delivering gateway events.
         activeApplication.getBean(ConfiguredGuilds.class).refresh();
         var listener = ArgumentCaptor.forClass(Object.class);
-        verify(builder).addEventListeners(listener.capture());
-        return (ListenerAdapter) listener.getValue();
+        verify(builder, atLeastOnce()).addEventListeners(listener.capture());
+        return (EventListener) listener.getValue();
     }
 
     private static Guild guild(String id) {

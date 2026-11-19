@@ -26,6 +26,7 @@ public class GuildCommandRegistration {
     private final ScheduledExecutorService scheduler;
     private final Map<String, Registration> pending = new HashMap<>();
     private boolean running;
+    private long generation;
 
     public GuildCommandRegistration(ConfiguredGuilds configuredGuilds, CommandRegistry commands,
                                     ScheduledExecutorService scheduler) {
@@ -34,12 +35,14 @@ public class GuildCommandRegistration {
         this.scheduler = scheduler;
     }
 
-    public synchronized void start() {
+    public synchronized long start() {
         running = true;
+        return ++generation;
     }
 
     public synchronized void stop() {
         running = false;
+        generation++;
         pending.values().forEach(registration -> {
             if (registration.retry != null) {
                 registration.retry.cancel(false);
@@ -48,8 +51,9 @@ public class GuildCommandRegistration {
         pending.clear();
     }
 
-    public synchronized void register(Guild guild) {
-        if (!running || !configuredGuilds.contains(guild.getId()) || pending.containsKey(guild.getId())) {
+    synchronized void register(Guild guild, long session) {
+        if (!running || session != generation || !configuredGuilds.contains(guild.getId())
+                || pending.containsKey(guild.getId())) {
             return;
         }
         var registration = new Registration(guild);
