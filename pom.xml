@@ -102,7 +102,10 @@
                         <id>build-private-console</id>
                         <goals><goal>npm</goal></goals>
                         <configuration>
-                            <arguments>run build -- --outDir "${project.build.outputDirectory}/static/admin"</arguments>
+                            <arguments>run build</arguments>
+                            <environmentVariables>
+                                <DISCORD_BOT_ADMIN_OUT_DIR>${project.build.outputDirectory}/static/admin</DISCORD_BOT_ADMIN_OUT_DIR>
+                            </environmentVariables>
                         </configuration>
                     </execution>
                 </executions>
