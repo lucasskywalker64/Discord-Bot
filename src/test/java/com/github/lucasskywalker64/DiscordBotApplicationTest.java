@@ -64,7 +64,7 @@ class DiscordBotApplicationTest {
             assertThrows(DuplicateKeyException.class, () -> jdbc.update(
                     "INSERT INTO guild_configuration (guild_id) VALUES (?)", "100000000000000001"));
             migrations = appliedMigrations(jdbc);
-            assertEquals(2, migrations.size());
+            assertEquals(3, migrations.size());
         }
 
         try (var application = startApplication()) {
@@ -110,6 +110,7 @@ class DiscordBotApplicationTest {
     private static ConfigurableApplicationContext startApplication(String... additionalArguments) {
         var arguments = new ArrayList<>(List.of(
                 "--server.port=0",
+                "--installation.admin.port=0",
                 "--spring.datasource.url=" + postgres.getJdbcUrl(),
                 "--spring.datasource.username=" + postgres.getUsername(),
                 "--spring.datasource.password=" + postgres.getPassword(),

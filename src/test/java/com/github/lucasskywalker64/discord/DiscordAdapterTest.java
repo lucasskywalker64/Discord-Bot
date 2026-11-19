@@ -765,6 +765,7 @@ class DiscordAdapterTest {
         });
         activeApplication = application.run(
                 "--server.port=0",
+                "--installation.admin.port=0",
                 "--spring.datasource.url=" + postgres.getJdbcUrl(),
                 "--spring.datasource.username=" + postgres.getUsername(),
                 "--spring.datasource.password=" + postgres.getPassword(),
