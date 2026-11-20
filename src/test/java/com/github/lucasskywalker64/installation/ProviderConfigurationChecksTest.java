@@ -50,10 +50,23 @@ class ProviderConfigurationChecksTest {
     }
 
     @Test
-    void rejectsAStorageRegionDifferentFromTheRegionReturnedByTheProvider() throws Exception {
+    void rejectsAStorageRegionWhenTheProviderRejectsRequestsSignedForThatRegion() throws Exception {
         try (var server = new ProviderTestServer()) {
-            assertEquals(ProviderCheck.FAILED, server.checks().verify(inputs(server.endpoint(), "us-west-2"))
-                    .checks().get("storage.endpoint"));
+            server.bucketListingError(400, "AuthorizationHeaderMalformed");
+            var verification = server.checks().verify(inputs(server.endpoint(), "us-west-2"));
+            assertEquals(ProviderCheck.FAILED, verification.checks().get("storage.endpoint"));
+            assertEquals("Storage rejected the endpoint or signing region.", verification.errors().get("storage.endpoint"));
+        }
+    }
+
+    @Test
+    void acceptsAutoSigningWhenTheHeadBucketHeaderReportsADifferentRegion() throws Exception {
+        try (var server = new ProviderTestServer()) {
+            var verification = server.checks().verify(inputs(server.endpoint(), "auto"));
+            assertEquals(SUCCEEDED, verification.checks().get("storage.endpoint"));
+            var request = server.received("/attachments");
+            assertEquals("GET", request.method());
+            assertTrue(request.authorization().contains("/auto/s3/aws4_request"));
         }
     }
 
@@ -71,6 +84,7 @@ class ProviderConfigurationChecksTest {
     @Test
     void reportsAnActionableStorageRejectionWithoutExposingTheProviderResponse() throws Exception {
         try (var server = new ProviderTestServer()) {
+            server.headBucketStatus(403);
             server.bucketListingError(403, "SignatureDoesNotMatch");
             var verification = server.checks().verify(inputs(server.endpoint(), "auto"));
             assertEquals(ProviderCheck.FAILED, verification.checks().get("storage.endpoint"));

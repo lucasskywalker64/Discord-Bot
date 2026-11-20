@@ -23,6 +23,7 @@ import java.net.URI;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Predicate;
 
 import static com.github.lucasskywalker64.installation.InstallationConfiguration.ProviderCheck.FAILED;
@@ -122,20 +123,19 @@ class ProviderConfigurationChecks {
                         .retryStrategy(StandardRetryStrategy.builder().maxAttempts(1).build())).build()) {
             try {
                 var response = client.headBucket(request -> request.bucket(credentials.bucket()));
-                if (response.bucketRegion() != null && !credentials.region().equals(response.bucketRegion())) {
-                    return new StorageCheck(FAILED, "The bucket responded, but its region differs from the configured region.");
+                if (response.bucketRegion() == null || credentials.region().equals(response.bucketRegion())) {
+                    return new StorageCheck(SUCCEEDED, null);
                 }
             } catch (S3Exception rejected) {
-                // HEAD rejections have no response body. A signed listing can return a specific S3 error.
-                switch (rejected.statusCode()) {
-                    case 400, 401, 403, 404 -> {
-                        var listing = client.listObjectsV2(request -> request.bucket(credentials.bucket()).maxKeys(1));
-                        if (!credentials.bucket().equals(listing.name())) {
-                            return new StorageCheck(FAILED, "The endpoint did not return a listing for this bucket.");
-                        }
-                    }
-                    default -> throw rejected;
+                if (!Set.of(400, 401, 403, 404).contains(rejected.statusCode())) {
+                    throw rejected;
                 }
+            }
+
+            // A listing verifies the configured signing region and can return detailed errors after a rejected HEAD.
+            var listing = client.listObjectsV2(request -> request.bucket(credentials.bucket()).maxKeys(1));
+            if (!credentials.bucket().equals(listing.name())) {
+                return new StorageCheck(FAILED, "The endpoint did not return a listing for this bucket.");
             }
             return new StorageCheck(SUCCEEDED, null);
         } catch (S3Exception failure) {

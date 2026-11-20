@@ -15,6 +15,7 @@ public final class ProviderTestServer implements AutoCloseable {
     private final Map<String, Integer> statuses = new ConcurrentHashMap<>();
     private final Map<String, Received> requests = new ConcurrentHashMap<>();
     private volatile int headBucketStatus = 200;
+    private volatile int listingStatus = 200;
     private volatile String listingBody = "<ListBucketResult><Name>attachments</Name><IsTruncated>false</IsTruncated></ListBucketResult>";
 
     public ProviderTestServer() throws IOException {
@@ -28,7 +29,7 @@ public final class ProviderTestServer implements AutoCloseable {
                 respond(request, "", statuses.getOrDefault("/attachments", headBucketStatus));
             } else {
                 request.getResponseHeaders().set("Content-Type", "application/xml");
-                respond(request, listingBody);
+                respond(request, listingBody, statuses.getOrDefault("/attachments", listingStatus));
             }
         });
         server.start();
@@ -57,7 +58,7 @@ public final class ProviderTestServer implements AutoCloseable {
 
     void bucketListingError(int status, String code) {
         listingBody = "<Error><Code>" + code + "</Code><Message>Raw provider detail</Message></Error>";
-        status("/attachments", status);
+        listingStatus = status;
     }
 
     Received received(String path) {
