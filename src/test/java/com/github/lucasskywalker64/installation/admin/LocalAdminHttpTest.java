@@ -180,14 +180,26 @@ class LocalAdminHttpTest {
             assertEquals("SUCCEEDED", JSON.readTree(storageSaved.body()).path("providerChecks").path("storage.endpoint").asString());
             assertFalse(storageSaved.body().contains("test-storage-secret-key"));
 
+            providers.registerStorageBucket("new-attachments");
             providers.storageError("DELETE", 403, "AccessDenied");
             var invalidStorage = browser.post("configuration/storage", Map.of("enabled", true, "endpoint", providers.endpoint(),
-                    "bucket", "attachments", "region", "us-east-1", "accessKey", keep(), "secretKey", keep()));
+                    "bucket", "new-attachments", "region", "us-east-1",
+                    "accessKey", Map.of("action", "REPLACE", "value", "new-storage-access-key"),
+                    "secretKey", Map.of("action", "REPLACE", "value", "new-storage-secret-key")));
             assertEquals(422, invalidStorage.statusCode(), invalidStorage::body);
+            var requests = providers.storageRequests();
+            var attemptedReplacement = requests.subList(3, requests.size());
+            assertEquals(List.of("PUT", "GET", "DELETE"), attemptedReplacement.stream()
+                    .map(ProviderTestServer.Received::method).toList());
+            assertTrue(attemptedReplacement.stream().allMatch(request -> request.path().startsWith("/new-attachments/")
+                    && request.authorization().contains("Credential=new-storage-access-key/")));
             var cleanupError = JSON.readTree(invalidStorage.body()).path("errors").path("storage.endpoint").asString();
             assertTrue(cleanupError.startsWith("Storage test cleanup failed: access denied for this operation."));
-            assertTrue(cleanupError.contains("Test object key: discord-bot/validation/"));
-            assertEquals("auto", JSON.readTree(browser.get("configuration").body()).path("storage").path("region").asString());
+            assertTrue(cleanupError.contains("Test object: s3://new-attachments/discord-bot/validation/"), cleanupError);
+            assertFalse(invalidStorage.body().contains("new-storage-secret-key"));
+            var persistedStorage = JSON.readTree(browser.get("configuration").body()).path("storage");
+            assertEquals("attachments", persistedStorage.path("bucket").asString());
+            assertEquals("auto", persistedStorage.path("region").asString());
         }
     }
 

@@ -20,6 +20,7 @@ public final class ProviderTestServer implements AutoCloseable {
     private final Map<String, String> storageObjects = new ConcurrentHashMap<>();
     private final Map<String, StorageError> storageErrors = new ConcurrentHashMap<>();
     private volatile String versionId;
+    private volatile boolean rejectVersionedRequests;
     private volatile String downloadOverride;
 
     public ProviderTestServer() throws IOException {
@@ -27,7 +28,7 @@ public final class ProviderTestServer implements AutoCloseable {
         server.createContext("/discord/users/@me", request -> respond(request, "{\"bot\":true}"));
         server.createContext("/discord/oauth2/token", request -> respond(request, "{\"access_token\":\"discord-test\"}"));
         server.createContext("/twitch/oauth2/token", request -> respond(request, "{\"access_token\":\"twitch-test\"}"));
-        server.createContext("/attachments/", this::storage);
+        registerStorageBucket("attachments");
         server.start();
     }
 
@@ -52,15 +53,23 @@ public final class ProviderTestServer implements AutoCloseable {
         storageErrors.put(method, new StorageError(status, code));
     }
 
+    public void registerStorageBucket(String bucket) {
+        server.createContext("/" + bucket + "/", this::storage);
+    }
+
     void versionUploads(String version) {
         versionId = version;
+    }
+
+    void rejectVersionedRequests() {
+        rejectVersionedRequests = true;
     }
 
     void overrideDownload(String body) {
         downloadOverride = body;
     }
 
-    List<Received> storageRequests() {
+    public List<Received> storageRequests() {
         return List.copyOf(storageRequests);
     }
 
@@ -85,6 +94,10 @@ public final class ProviderTestServer implements AutoCloseable {
             var received = receive(request);
             storageRequests.add(received);
             var error = storageErrors.get(received.method());
+            if (error == null && rejectVersionedRequests && received.query() != null
+                    && received.query().startsWith("versionId=")) {
+                error = new StorageError(501, "NotImplemented");
+            }
             int status = statuses.getOrDefault("/attachments", 200);
             if (error != null) {
                 request.getResponseHeaders().set("Content-Type", "application/xml");
@@ -136,7 +149,7 @@ public final class ProviderTestServer implements AutoCloseable {
         server.stop(0);
     }
 
-    record Received(String method, String authorization, String body, String path, String query) {
+    public record Received(String method, String authorization, String body, String path, String query) {
     }
 
     private record StorageError(int status, String code) {

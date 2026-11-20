@@ -11,6 +11,7 @@ import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.core.checksums.RequestChecksumCalculation;
 import software.amazon.awssdk.core.checksums.ResponseChecksumValidation;
+import software.amazon.awssdk.core.exception.ApiCallTimeoutException;
 import software.amazon.awssdk.core.exception.SdkException;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.regions.Region;
@@ -28,6 +29,7 @@ import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Function;
 import java.util.function.Predicate;
 
 import static com.github.lucasskywalker64.installation.InstallationConfiguration.ProviderCheck.FAILED;
@@ -151,7 +153,8 @@ class ProviderConfigurationChecks {
 
         StorageCheck download;
         try {
-            var downloaded = client.getObjectAsBytes(request -> request.bucket(bucket).key(key).versionId(version));
+            var downloaded = requestProbeVersion(version, versionId ->
+                    client.getObjectAsBytes(request -> request.bucket(bucket).key(key).versionId(versionId)));
             download = STORAGE_TEST_CONTENT.equals(downloaded.asUtf8String()) ? new StorageCheck(SUCCEEDED, null)
                     : new StorageCheck(FAILED, "Storage test download returned different contents from the upload.");
         } catch (SdkException failure) {
@@ -164,23 +167,45 @@ class ProviderConfigurationChecks {
                                                    StorageCheck result) {
         StorageCheck cleanup;
         try {
-            var deleted = client.deleteObject(request -> request.bucket(bucket).key(key).versionId(version));
-            if (version != null || !Boolean.TRUE.equals(deleted.deleteMarker())) {
+            boolean removed = requestProbeVersion(version, versionId -> {
+                var deleted = client.deleteObject(request -> request.bucket(bucket).key(key).versionId(versionId));
+                return versionId != null || !Boolean.TRUE.equals(deleted.deleteMarker());
+            });
+            if (removed) {
                 return result;
             }
             cleanup = new StorageCheck(UNAVAILABLE, "Storage did not confirm removal of the test object version.");
         } catch (SdkException failure) {
             cleanup = storageFailure("cleanup", failure);
         }
-        String details = cleanup.error() + " Test object key: " + key;
+        String details = cleanup.error() + " Test object: s3://" + bucket + "/" + key;
         return result.state() == SUCCEEDED ? new StorageCheck(cleanup.state(), details)
                 : new StorageCheck(result.state(), result.error() + " " + details);
     }
 
+    private static <T> T requestProbeVersion(String version, Function<String, T> request) {
+        try {
+            return request.apply(version);
+        } catch (S3Exception response) {
+            // Some S3-compatible providers return a version ID on upload but reject it on read or delete.
+            if (version != null && response.statusCode() == 501 && response.awsErrorDetails() != null
+                    && "NotImplemented".equals(response.awsErrorDetails().errorCode())) {
+                return request.apply(null);
+            }
+            throw response;
+        }
+    }
+
     private static StorageCheck storageFailure(String step, SdkException failure) {
-        if (!(failure instanceof S3Exception response) || response.isThrottlingException()
-                || failure(response.statusCode()) == UNAVAILABLE) {
+        if (failure instanceof ApiCallTimeoutException) {
+            return new StorageCheck(UNAVAILABLE, "Storage test " + step + " timed out. Try again.");
+        }
+        if (!(failure instanceof S3Exception response)) {
             return new StorageCheck(UNAVAILABLE, "Storage test " + step + " could not finish. Try again.");
+        }
+        if (response.isThrottlingException() || failure(response.statusCode()) == UNAVAILABLE) {
+            return new StorageCheck(UNAVAILABLE, "Storage test " + step + " could not finish (HTTP "
+                    + response.statusCode() + "). Try again.");
         }
         String code = response.awsErrorDetails() == null ? null : response.awsErrorDetails().errorCode();
         String reason = switch (code) {

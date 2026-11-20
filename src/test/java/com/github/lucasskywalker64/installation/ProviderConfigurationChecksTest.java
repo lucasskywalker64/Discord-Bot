@@ -14,6 +14,7 @@ import static com.github.lucasskywalker64.installation.InstallationConfiguration
 import static com.github.lucasskywalker64.installation.InstallationConfiguration.ProviderCheck.SUCCEEDED;
 import static com.github.lucasskywalker64.installation.InstallationConfiguration.SecretUpdate.replace;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ProviderConfigurationChecksTest {
@@ -79,6 +80,24 @@ class ProviderConfigurationChecksTest {
     }
 
     @Test
+    void verifiesAndDeletesByKeyWhenTheProviderRejectsVersionedRequests() throws Exception {
+        try (var server = new ProviderTestServer()) {
+            server.versionUploads("test-version");
+            server.rejectVersionedRequests();
+            var verification = server.checks().verify(inputs(server.endpoint(), "auto"));
+            assertEquals(SUCCEEDED, verification.checks().get("storage.endpoint"), verification.errors()::toString);
+            assertEquals(0, server.storedObjects());
+            var requests = server.storageRequests();
+            assertEquals(List.of("PUT", "GET", "GET", "DELETE", "DELETE"),
+                    requests.stream().map(ProviderTestServer.Received::method).toList());
+            assertEquals("versionId=test-version", requests.get(1).query());
+            assertNull(requests.get(2).query());
+            assertEquals("versionId=test-version", requests.get(3).query());
+            assertNull(requests.get(4).query());
+        }
+    }
+
+    @Test
     void cleansUpAfterARejectedDownload() throws Exception {
         try (var server = new ProviderTestServer()) {
             server.storageError("GET", 403, "AccessDenied");
@@ -108,7 +127,7 @@ class ProviderConfigurationChecksTest {
             server.storageError("PUT", 503, "ServiceUnavailable");
             var result = server.checks().verify(inputs(server.endpoint(), "auto"));
             assertEquals(ProviderCheck.UNAVAILABLE, result.checks().get("storage.endpoint"));
-            assertEquals("Storage test upload could not finish. Try again.", result.errors().get("storage.endpoint"));
+            assertEquals("Storage test upload could not finish (HTTP 503). Try again.", result.errors().get("storage.endpoint"));
             assertEquals(List.of("PUT", "DELETE"), server.storageRequests().stream().map(ProviderTestServer.Received::method).toList());
         }
     }
