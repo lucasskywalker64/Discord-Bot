@@ -99,6 +99,7 @@ export function IntegrationStatus({ configuration, busy, retry }: {
   retry: () => void;
 }) {
   const [poll, setPoll] = useState<{ source: Configuration; latest?: Configuration; failed: boolean }>();
+  const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
     let stopped = false;
@@ -138,7 +139,11 @@ export function IntegrationStatus({ configuration, busy, retry }: {
     { title: "Attachment storage", status: overview.storage.status, verifiedAt: overview.storage.verifiedAt },
   ];
   return <Panel title="Integration status">
-    <dl className="integrations">
+    <button className="secondary status-details-toggle" type="button" aria-expanded={expanded}
+      aria-controls="integration-details" onClick={() => setExpanded(!expanded)}>
+      {expanded ? "Hide details" : "Show details"}
+    </button>
+    <dl className="integrations" id="integration-details" data-expanded={expanded}>
       {integrations.map(({ title, status, verifiedAt }) => <div key={title}>
         <dt>{title}<span className={`status ${verifiedAt ? "verified" : status.state.toLowerCase()}`}>
           {verifiedAt ? "Verified" : labels[status.state]}

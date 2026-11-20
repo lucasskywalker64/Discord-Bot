@@ -269,7 +269,7 @@ function AdminConsole() {
       <button aria-current={active === "password" ? "page" : undefined}
         onClick={() => setActive("password")}>Password</button>
     </>}
-    account={<><span>{session.username}</span>
+    account={<><span className="account-name">{session.username}</span>
       <button onClick={() => void perform(() => endSession("logout"))} disabled={busy}>Sign out</button></>}>
     <header className="heading"><h1>{title}</h1></header>
     {error && <p role="alert" className="form-error">{error}</p>}
@@ -288,10 +288,10 @@ function AdminConsole() {
         </>}
       </SaveForm>
     </Panel> : <div className="content-grid">
-      <div>{setup ? <Wizard configuration={configuration} save={save} />
-        : <Settings configuration={configuration} save={save} />}</div>
-      <div><IntegrationStatus configuration={configuration} busy={busy}
+      <div className="status-overview"><IntegrationStatus configuration={configuration} busy={busy}
         retry={() => void perform(() => save("configuration/discord/retry", {}))} /></div>
+      <div className="settings-column">{setup ? <Wizard configuration={configuration} save={save} />
+        : <Settings configuration={configuration} save={save} />}</div>
     </div>}
   </DashboardShell>;
 }

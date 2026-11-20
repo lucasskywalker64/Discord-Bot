@@ -1,5 +1,38 @@
 import type { ComponentPropsWithoutRef, ReactNode } from "react";
 
+const themeKey = "discord-bot-theme";
+
+function storedTheme() {
+  try {
+    const theme = localStorage.getItem(themeKey);
+    if (theme === "light" || theme === "dark") return theme;
+  } catch {
+    // The system theme remains available when storage is blocked.
+  }
+  return "system";
+}
+
+document.documentElement.dataset.theme = storedTheme();
+
+function ThemeControl() {
+  return <label className="theme-control">
+    Theme
+    <select defaultValue={document.documentElement.dataset.theme} onChange={event => {
+      const theme = event.currentTarget.value;
+      document.documentElement.dataset.theme = theme;
+      try {
+        localStorage.setItem(themeKey, theme);
+      } catch {
+        // Apply the preference to the current page even when it cannot be saved.
+      }
+    }}>
+      <option value="system">System</option>
+      <option value="light">Light</option>
+      <option value="dark">Dark</option>
+    </select>
+  </label>;
+}
+
 export function DashboardShell({ context, navigation, account, children }: {
   context: string;
   navigation: ReactNode;
@@ -14,9 +47,12 @@ export function DashboardShell({ context, navigation, account, children }: {
           <div><strong>Discord Bot</strong><span>{context}</span></div>
         </div>
         <nav aria-label="Dashboard">{navigation}</nav>
-        <div className="account">{account}</div>
+        <div className="account">
+          <ThemeControl />
+          <div className="account-actions">{account}</div>
+        </div>
       </aside>
-      <main id="main" className="main" tabIndex={-1}>{children}</main>
+      <main id="main" className="main" tabIndex={-1}><div className="main-content">{children}</div></main>
     </div>
   );
 }
