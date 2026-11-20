@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
+import java.util.List;
 import java.util.Map;
 
 import static com.github.lucasskywalker64.installation.InstallationConfiguration.ProviderCheck;
@@ -17,9 +18,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ProviderConfigurationChecksTest {
     @Test
-    void verifiesBothOAuthCredentialsTheDiscordBotTokenAndSignedBucketAccess() throws Exception {
+    void verifiesBothOAuthCredentialsTheDiscordBotTokenAndStorageRoundTrip() throws Exception {
         try (var server = new ProviderTestServer()) {
-            var checks = server.checks().verify(inputs(server.endpoint(), "us-east-1")).checks();
+            var checks = server.checks().verify(inputs(server.endpoint(), "auto")).checks();
             assertEquals(Map.of("discord.botToken", SUCCEEDED, "discord.clientSecret", SUCCEEDED,
                     "twitch.clientSecret", SUCCEEDED, "storage.endpoint", SUCCEEDED), checks);
             assertEquals("Bot test-bot", server.received("/discord/users/@me").authorization());
@@ -28,10 +29,14 @@ class ProviderConfigurationChecksTest {
             assertEquals("grant_type=client_credentials&scope=identify", discord.body());
             var twitch = server.received("/twitch/oauth2/token");
             assertEquals("grant_type=client_credentials&client_id=twitch&client_secret=t%2Bsecret", twitch.body());
-            var storage = server.received("/attachments");
-            assertEquals("HEAD", storage.method());
-            assertTrue(storage.authorization().startsWith("AWS4-HMAC-SHA256 Credential=storage-key/"));
-            assertTrue(storage.authorization().contains("/us-east-1/s3/aws4_request"));
+            var storage = server.storageRequests();
+            assertEquals(List.of("PUT", "GET", "DELETE"), storage.stream().map(ProviderTestServer.Received::method).toList());
+            String key = storage.getFirst().path();
+            assertTrue(key.startsWith("/attachments/discord-bot/validation/"));
+            assertTrue(storage.stream().allMatch(request -> request.path().equals(key)
+                    && request.authorization().startsWith("AWS4-HMAC-SHA256 Credential=storage-key/")
+                    && request.authorization().contains("/auto/s3/aws4_request")));
+            assertEquals(0, server.storedObjects());
         }
     }
 
@@ -52,43 +57,69 @@ class ProviderConfigurationChecksTest {
     @Test
     void rejectsAStorageRegionWhenTheProviderRejectsRequestsSignedForThatRegion() throws Exception {
         try (var server = new ProviderTestServer()) {
-            server.bucketListingError(400, "AuthorizationHeaderMalformed");
+            server.storageError("PUT", 400, "AuthorizationHeaderMalformed");
             var verification = server.checks().verify(inputs(server.endpoint(), "us-west-2"));
             assertEquals(ProviderCheck.FAILED, verification.checks().get("storage.endpoint"));
-            assertEquals("Storage rejected the endpoint or signing region.", verification.errors().get("storage.endpoint"));
+            assertEquals("Storage test upload failed: the endpoint or signing region was rejected.",
+                    verification.errors().get("storage.endpoint"));
+            assertEquals(1, server.storageRequests().size());
         }
     }
 
     @Test
-    void acceptsAutoSigningWhenTheHeadBucketHeaderReportsADifferentRegion() throws Exception {
+    void verifiesAndDeletesTheExactUploadedVersion() throws Exception {
         try (var server = new ProviderTestServer()) {
+            server.versionUploads("test-version");
             var verification = server.checks().verify(inputs(server.endpoint(), "auto"));
             assertEquals(SUCCEEDED, verification.checks().get("storage.endpoint"));
-            var request = server.received("/attachments");
-            assertEquals("GET", request.method());
-            assertTrue(request.authorization().contains("/auto/s3/aws4_request"));
+            var requests = server.storageRequests();
+            assertEquals("versionId=test-version", requests.get(1).query());
+            assertEquals("versionId=test-version", requests.get(2).query());
         }
     }
 
     @Test
-    void acceptsSignedR2BucketAccessWhenListingSucceedsAfterHeadBucketIsDenied() throws Exception {
+    void cleansUpAfterARejectedDownload() throws Exception {
         try (var server = new ProviderTestServer()) {
-            server.headBucketStatus(403);
-            assertEquals(SUCCEEDED, server.checks().verify(inputs(server.endpoint(), "auto")).checks().get("storage.endpoint"));
-            var request = server.received("/attachments");
-            assertEquals("GET", request.method());
-            assertTrue(request.authorization().contains("/auto/s3/aws4_request"));
+            server.storageError("GET", 403, "AccessDenied");
+            var verification = server.checks().verify(inputs(server.endpoint(), "auto"));
+            assertEquals(ProviderCheck.FAILED, verification.checks().get("storage.endpoint"));
+            assertEquals("Storage test download failed: access denied for this operation.",
+                    verification.errors().get("storage.endpoint"));
+            assertEquals(0, server.storedObjects());
+        }
+    }
+
+    @Test
+    void rejectsMismatchedBytesAndCleansUp() throws Exception {
+        try (var server = new ProviderTestServer()) {
+            server.overrideDownload("wrong bytes");
+            var result = server.checks().verify(inputs(server.endpoint(), "auto"));
+            assertEquals(ProviderCheck.FAILED, result.checks().get("storage.endpoint"));
+            assertEquals("Storage test download returned different contents from the upload.",
+                    result.errors().get("storage.endpoint"));
+            assertEquals(0, server.storedObjects());
+        }
+    }
+
+    @Test
+    void triesCleanupWhenTheProviderDoesNotConfirmTheUpload() throws Exception {
+        try (var server = new ProviderTestServer()) {
+            server.storageError("PUT", 503, "ServiceUnavailable");
+            var result = server.checks().verify(inputs(server.endpoint(), "auto"));
+            assertEquals(ProviderCheck.UNAVAILABLE, result.checks().get("storage.endpoint"));
+            assertEquals("Storage test upload could not finish. Try again.", result.errors().get("storage.endpoint"));
+            assertEquals(List.of("PUT", "DELETE"), server.storageRequests().stream().map(ProviderTestServer.Received::method).toList());
         }
     }
 
     @Test
     void reportsAnActionableStorageRejectionWithoutExposingTheProviderResponse() throws Exception {
         try (var server = new ProviderTestServer()) {
-            server.headBucketStatus(403);
-            server.bucketListingError(403, "SignatureDoesNotMatch");
+            server.storageError("PUT", 403, "SignatureDoesNotMatch");
             var verification = server.checks().verify(inputs(server.endpoint(), "auto"));
             assertEquals(ProviderCheck.FAILED, verification.checks().get("storage.endpoint"));
-            assertEquals("Storage rejected the request signature. Check the secret key, endpoint and region.",
+            assertEquals("Storage test upload failed: the request signature was rejected. Check the secret key, endpoint and region.",
                     verification.errors().get("storage.endpoint"));
         }
     }

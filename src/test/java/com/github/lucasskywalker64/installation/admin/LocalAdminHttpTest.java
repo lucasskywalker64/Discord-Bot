@@ -171,6 +171,23 @@ class LocalAdminHttpTest {
             var stillSaved = JSON.readTree(browser.get("configuration").body());
             assertEquals("twitch-client", stillSaved.path("twitch").path("clientId").asString());
             assertEquals(saved.path("twitch").path("oauthRevision"), stillSaved.path("twitch").path("oauthRevision"));
+
+            var storage = Map.of("enabled", true, "endpoint", providers.endpoint(), "bucket", "attachments", "region", "auto",
+                    "accessKey", Map.of("action", "REPLACE", "value", "test-storage-access-key"),
+                    "secretKey", Map.of("action", "REPLACE", "value", "test-storage-secret-key"));
+            var storageSaved = browser.post("configuration/storage", storage);
+            assertEquals(200, storageSaved.statusCode(), storageSaved::body);
+            assertEquals("SUCCEEDED", JSON.readTree(storageSaved.body()).path("providerChecks").path("storage.endpoint").asString());
+            assertFalse(storageSaved.body().contains("test-storage-secret-key"));
+
+            providers.storageError("DELETE", 403, "AccessDenied");
+            var invalidStorage = browser.post("configuration/storage", Map.of("enabled", true, "endpoint", providers.endpoint(),
+                    "bucket", "attachments", "region", "us-east-1", "accessKey", keep(), "secretKey", keep()));
+            assertEquals(422, invalidStorage.statusCode(), invalidStorage::body);
+            var cleanupError = JSON.readTree(invalidStorage.body()).path("errors").path("storage.endpoint").asString();
+            assertTrue(cleanupError.startsWith("Storage test cleanup failed: access denied for this operation."));
+            assertTrue(cleanupError.contains("Test object key: discord-bot/validation/"));
+            assertEquals("auto", JSON.readTree(browser.get("configuration").body()).path("storage").path("region").asString());
         }
     }
 

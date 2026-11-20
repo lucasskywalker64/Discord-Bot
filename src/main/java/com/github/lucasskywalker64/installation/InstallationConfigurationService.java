@@ -171,7 +171,9 @@ public class InstallationConfigurationService {
                 new TwitchView(saved.twitchEnabled, saved.twitchClientId, present(saved.twitchClientSecret),
                         saved.twitchCallbackUrl, saved.twitchOauthRevision, configuredStatus(saved.twitchEnabled)),
                 new StorageView(saved.storageEnabled, saved.storageEndpoint, saved.storageBucket, saved.storageRegion,
-                        present(saved.storageAccessKey), present(saved.storageSecretKey), configuredStatus(saved.storageEnabled)),
+                        present(saved.storageAccessKey), present(saved.storageSecretKey), saved.storageEnabled
+                                ? new Status(State.CONFIGURED, "Storage settings are saved.", null)
+                                : configuredStatus(false)),
                 saved.publicUrl, saved.setupStep);
     }
 

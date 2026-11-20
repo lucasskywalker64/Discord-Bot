@@ -9,10 +9,14 @@ import okhttp3.Request;
 import org.springframework.stereotype.Component;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
-import software.amazon.awssdk.core.exception.SdkClientException;
+import software.amazon.awssdk.core.checksums.RequestChecksumCalculation;
+import software.amazon.awssdk.core.checksums.ResponseChecksumValidation;
+import software.amazon.awssdk.core.exception.SdkException;
+import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.retries.StandardRetryStrategy;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.S3Configuration;
 import software.amazon.awssdk.services.s3.model.S3Exception;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
@@ -23,7 +27,7 @@ import java.net.URI;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.Set;
+import java.util.UUID;
 import java.util.function.Predicate;
 
 import static com.github.lucasskywalker64.installation.InstallationConfiguration.ProviderCheck.FAILED;
@@ -33,6 +37,7 @@ import static com.github.lucasskywalker64.installation.InstallationConfiguration
 @Component
 class ProviderConfigurationChecks {
     private static final Duration TIMEOUT = Duration.ofSeconds(3);
+    private static final String STORAGE_TEST_CONTENT = "Discord Bot storage validation\n";
     private final OkHttpClient http = new OkHttpClient.Builder().callTimeout(TIMEOUT)
             .followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false).build();
     private final JsonMapper json = new JsonMapper();
@@ -69,7 +74,7 @@ class ProviderConfigurationChecks {
         }
         checks.forEach((field, state) -> {
             if (state == UNAVAILABLE) {
-                errors.put(field, "The provider could not verify these settings right now. Try again.");
+                errors.putIfAbsent(field, "The provider could not verify these settings right now. Try again.");
             } else if (state == FAILED) {
                 errors.putIfAbsent(field, "The provider rejected these credentials. Check them and try again.");
             }
@@ -116,49 +121,78 @@ class ProviderConfigurationChecks {
 
     private static StorageCheck storage(Storage credentials) {
         try (var client = S3Client.builder().endpointOverride(URI.create(credentials.endpoint()))
-                .region(Region.of(credentials.region())).forcePathStyle(true)
+                .region(Region.of(credentials.region()))
+                .serviceConfiguration(S3Configuration.builder().pathStyleAccessEnabled(true).chunkedEncodingEnabled(false).build())
+                .requestChecksumCalculation(RequestChecksumCalculation.WHEN_REQUIRED)
+                .responseChecksumValidation(ResponseChecksumValidation.WHEN_REQUIRED)
                 .credentialsProvider(StaticCredentialsProvider.create(
                         AwsBasicCredentials.create(credentials.accessKey().value(), credentials.secretKey().value())))
                 .overrideConfiguration(config -> config.apiCallTimeout(TIMEOUT)
                         .retryStrategy(StandardRetryStrategy.builder().maxAttempts(1).build())).build()) {
-            try {
-                var response = client.headBucket(request -> request.bucket(credentials.bucket()));
-                if (response.bucketRegion() == null || credentials.region().equals(response.bucketRegion())) {
-                    return new StorageCheck(SUCCEEDED, null);
-                }
-            } catch (S3Exception rejected) {
-                if (!Set.of(400, 401, 403, 404).contains(rejected.statusCode())) {
-                    throw rejected;
-                }
-            }
-
-            // A listing verifies the configured signing region and can return detailed errors after a rejected HEAD.
-            var listing = client.listObjectsV2(request -> request.bucket(credentials.bucket()).maxKeys(1));
-            if (!credentials.bucket().equals(listing.name())) {
-                return new StorageCheck(FAILED, "The endpoint did not return a listing for this bucket.");
-            }
-            return new StorageCheck(SUCCEEDED, null);
-        } catch (S3Exception failure) {
-            if (failure.isThrottlingException() || failure(failure.statusCode()) == UNAVAILABLE) {
-                return new StorageCheck(UNAVAILABLE, null);
-            }
-            String code = failure.awsErrorDetails() == null ? null : failure.awsErrorDetails().errorCode();
-            String message = switch (code) {
-                case "AccessDenied" -> "Storage denied listing this bucket. Check the access key's permissions for it.";
-                case "NoSuchBucket" -> "Storage could not find this bucket at the configured endpoint.";
-                case "InvalidAccessKeyId", "Unauthorized" -> "Storage did not accept the access key ID.";
-                case "SignatureDoesNotMatch" -> "Storage rejected the request signature. Check the secret key, endpoint and region.";
-                case "AuthorizationHeaderMalformed", "IncorrectEndpoint", "PermanentRedirect" ->
-                        "Storage rejected the endpoint or signing region.";
-                case null, default -> "Storage rejected the bucket check (HTTP " + failure.statusCode()
-                        + "). Check the endpoint, bucket, region and credentials.";
-            };
-            return new StorageCheck(FAILED, message);
-        } catch (SdkClientException _) {
-            return new StorageCheck(UNAVAILABLE, null);
+            return storageRoundTrip(client, credentials.bucket());
+        } catch (SdkException failure) {
+            return storageFailure("setup", failure);
         } catch (IllegalArgumentException _) {
             return new StorageCheck(FAILED, "Check the storage endpoint, bucket, region and credentials.");
         }
+    }
+
+    private static StorageCheck storageRoundTrip(S3Client client, String bucket) {
+        String key = "discord-bot/validation/" + UUID.randomUUID() + ".txt";
+        String version;
+        try {
+            version = client.putObject(request -> request.bucket(bucket).key(key).contentType("text/plain"),
+                    RequestBody.fromString(STORAGE_TEST_CONTENT)).versionId();
+        } catch (SdkException failure) {
+            var upload = storageFailure("upload", failure);
+            // A timed-out request may have reached the provider.
+            return upload.state() == UNAVAILABLE ? deleteStorageProbe(client, bucket, key, null, upload) : upload;
+        }
+
+        StorageCheck download;
+        try {
+            var downloaded = client.getObjectAsBytes(request -> request.bucket(bucket).key(key).versionId(version));
+            download = STORAGE_TEST_CONTENT.equals(downloaded.asUtf8String()) ? new StorageCheck(SUCCEEDED, null)
+                    : new StorageCheck(FAILED, "Storage test download returned different contents from the upload.");
+        } catch (SdkException failure) {
+            download = storageFailure("download", failure);
+        }
+        return deleteStorageProbe(client, bucket, key, version, download);
+    }
+
+    private static StorageCheck deleteStorageProbe(S3Client client, String bucket, String key, String version,
+                                                   StorageCheck result) {
+        StorageCheck cleanup;
+        try {
+            var deleted = client.deleteObject(request -> request.bucket(bucket).key(key).versionId(version));
+            if (version != null || !Boolean.TRUE.equals(deleted.deleteMarker())) {
+                return result;
+            }
+            cleanup = new StorageCheck(UNAVAILABLE, "Storage did not confirm removal of the test object version.");
+        } catch (SdkException failure) {
+            cleanup = storageFailure("cleanup", failure);
+        }
+        String details = cleanup.error() + " Test object key: " + key;
+        return result.state() == SUCCEEDED ? new StorageCheck(cleanup.state(), details)
+                : new StorageCheck(result.state(), result.error() + " " + details);
+    }
+
+    private static StorageCheck storageFailure(String step, SdkException failure) {
+        if (!(failure instanceof S3Exception response) || response.isThrottlingException()
+                || failure(response.statusCode()) == UNAVAILABLE) {
+            return new StorageCheck(UNAVAILABLE, "Storage test " + step + " could not finish. Try again.");
+        }
+        String code = response.awsErrorDetails() == null ? null : response.awsErrorDetails().errorCode();
+        String reason = switch (code) {
+            case "AccessDenied" -> "access denied for this operation.";
+            case "NoSuchBucket" -> "the bucket was not found at this endpoint.";
+            case "InvalidAccessKeyId", "Unauthorized" -> "the access key was not accepted.";
+            case "SignatureDoesNotMatch" -> "the request signature was rejected. Check the secret key, endpoint and region.";
+            case "AuthorizationHeaderMalformed", "IncorrectEndpoint", "PermanentRedirect" ->
+                    "the endpoint or signing region was rejected.";
+            case null, default -> "the provider returned HTTP " + response.statusCode() + ".";
+        };
+        return new StorageCheck(FAILED, "Storage test " + step + " failed: " + reason);
     }
 
     private static ProviderCheck failure(int status) {

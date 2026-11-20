@@ -22,7 +22,8 @@ const discordGuide = <>Find the bot token in the <a href="https://discord.com/de
 const twitchGuide = <>Register an application in the <a href="https://dev.twitch.tv/console/apps"
   target="_blank" rel="noreferrer">Twitch Developer Console</a>. Add the OAuth callback URL there and copy its
   client ID and secret here.</>;
-const storageGuide = "Enter the endpoint and credentials from your S3-compatible provider. You can enable storage later.";
+const storageGuide = "Enter the endpoint and credentials from your S3-compatible provider. "
+  + "Saving enabled storage uploads, reads and deletes a temporary test object. You can enable storage later.";
 
 function feedback(error: unknown): FieldErrors {
   if (error instanceof ApiError) {

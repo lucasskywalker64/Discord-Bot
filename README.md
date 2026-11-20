@@ -35,10 +35,12 @@ credential, type over its mask. To clear it, delete the mask and save. Disable
 the associated feature when clearing a credential it requires.
 
 Saving enabled integrations checks Discord bot and OAuth credentials, Twitch
-application credentials, or signed access to the configured S3 bucket. A
-rejection or provider outage preserves previously saved settings. Test OAuth
-callback routing with a real sign-in. The storage check requires bucket access
-(`s3:ListBucket` on AWS) and does not upload an object.
+application credentials, or the configured S3 bucket. A rejection or provider
+outage preserves previously saved settings. Test OAuth callback routing with a
+real sign-in. The storage check uploads, reads and deletes a temporary object
+under `discord-bot/validation/`. Its credentials need permission for those
+operations, including reading and deleting the test object's version when the
+bucket uses versioning.
 
 The normal HTTP listener serves public routes and readiness. The private
 listener defaults to `127.0.0.1:8081`. Set `INSTALLATION_ADMIN_PORT` and
