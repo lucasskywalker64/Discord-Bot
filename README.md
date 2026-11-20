@@ -30,7 +30,9 @@ administrator creates a local account with a passphrase of 12 to 256 characters.
 Sign in to finish setup. The wizard saves your progress in PostgreSQL. Enter a
 Discord bot token to finish. Public Discord sign-in, Twitch and attachment
 storage can be configured later. Settings remain available during provider
-outages. Use **Refresh status** to see the latest Discord connection state.
+outages. The integration status panel updates automatically. To update a saved
+credential, type over its mask. To clear it, delete the mask and save. Disable
+the associated feature when clearing a credential it requires.
 
 The normal HTTP listener serves public routes and readiness. The private
 listener defaults to `127.0.0.1:8081`. Set `INSTALLATION_ADMIN_PORT` and

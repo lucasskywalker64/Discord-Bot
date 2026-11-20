@@ -50,7 +50,8 @@ function SaveForm({ label, submit, children, showSaved }: {
     event.preventDefault();
     const form = event.currentTarget;
     const submitted = new FormData(form);
-    form.querySelectorAll<HTMLInputElement>('input[type="password"]').forEach(input => { input.value = ""; });
+    form.querySelectorAll<HTMLInputElement>('input[type="password"]:not([data-provider-secret])')
+      .forEach(input => { input.value = ""; });
     setPending(true);
     setSaved(false);
     setErrors({});
@@ -287,7 +288,6 @@ function AdminConsole() {
       <div>{setup ? <Wizard configuration={configuration} save={save} />
         : <Settings configuration={configuration} save={save} />}</div>
       <div><IntegrationStatus configuration={configuration} busy={busy}
-        refresh={() => void perform(() => serialize(async () => setConfiguration(await adminRequest("configuration"))))}
         retry={() => void perform(() => save("configuration/discord/retry", {}))} /></div>
     </div>}
   </DashboardShell>;

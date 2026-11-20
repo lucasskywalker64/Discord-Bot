@@ -1,7 +1,17 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Field, Panel, Toggle } from "./dashboard";
 import type { FieldErrors } from "./dashboard";
+import { adminRequest } from "./api";
 import type { Configuration, Status } from "./api";
+
+// This placeholder is masked by the input. PostgreSQL cannot store a NUL in a secret.
+const MASK_CHARACTER = "\0";
+const SAVED_SECRET_MASK = MASK_CHARACTER.repeat(8);
+const STATUS_POLL_INTERVAL_MS = 3000;
+
+function selectSavedSecret({ currentTarget }: { currentTarget: HTMLInputElement }) {
+  if (currentTarget.value === SAVED_SECRET_MASK) currentTarget.select();
+}
 
 function SecretField({ name, label, configured, error }: {
   name: string;
@@ -9,23 +19,18 @@ function SecretField({ name, label, configured, error }: {
   configured: boolean;
   error?: string;
 }) {
-  const [action, setAction] = useState("KEEP");
-  return <div className="secret">
-    {configured && <label className="field">
-      <span>{label}</span>
-      <select name={`${name}.action`} value={action} onChange={event => setAction(event.target.value)}
-        aria-invalid={error && action !== "REPLACE" ? true : undefined}
-        aria-describedby={error && action !== "REPLACE" ? `${name}-error` : undefined}>
-        <option value="KEEP">Keep saved value</option>
-        <option value="REPLACE">Replace saved value</option>
-        <option value="CLEAR">Clear saved value</option>
-      </select>
-      {error && action !== "REPLACE" && <span className="field-error" id={`${name}-error`}>{error}</span>}
-    </label>}
-    {(!configured || action === "REPLACE") &&
-      <Field name={name} label={configured ? `New ${label.toLowerCase()}` : label}
-        type="password" autoComplete="off" error={error} />}
-  </div>;
+  return <>
+    {configured && <input type="hidden" name={`${name}.configured`} value="true" />}
+    <Field name={name} label={label} type="password" autoComplete="off" error={error}
+      data-provider-secret defaultValue={configured ? SAVED_SECRET_MASK : ""}
+      aria-description={configured ? "A value is saved. Type to replace it or delete it to clear it on save." : undefined}
+      onFocus={selectSavedSecret} onClick={selectSavedSecret}
+      onChange={({ currentTarget }) => {
+        if (currentTarget.value.includes(MASK_CHARACTER)) {
+          currentTarget.value = currentTarget.value.replaceAll(MASK_CHARACTER, "");
+        }
+      }} />
+  </>;
 }
 
 export function DiscordFields({ value, errors, setup }: {
@@ -86,21 +91,49 @@ const labels: Record<Status["state"], string> = {
   CONNECTED: "Connected", UNAVAILABLE: "Unavailable",
 };
 
-export function IntegrationStatus({ configuration, busy, refresh, retry }: {
+export function IntegrationStatus({ configuration, busy, retry }: {
   configuration: Configuration;
   busy: boolean;
-  refresh: () => void;
   retry: () => void;
 }) {
+  const [poll, setPoll] = useState<{ source: Configuration; latest?: Configuration; failed: boolean }>();
+
+  useEffect(() => {
+    let stopped = false;
+    let timer = window.setTimeout(refresh, STATUS_POLL_INTERVAL_MS);
+
+    async function refresh() {
+      try {
+        const latest = await adminRequest<Configuration>("configuration");
+        if (!stopped) setPoll({ source: configuration, latest, failed: false });
+      } catch {
+        if (!stopped) setPoll(previous => ({
+          source: configuration,
+          latest: previous?.source === configuration ? previous.latest : undefined,
+          failed: true,
+        }));
+      } finally {
+        if (!stopped) timer = window.setTimeout(refresh, STATUS_POLL_INTERVAL_MS);
+      }
+    }
+
+    return () => {
+      stopped = true;
+      window.clearTimeout(timer);
+    };
+  }, [configuration]);
+
+  const currentPoll = poll?.source === configuration ? poll : undefined;
+  const overview = currentPoll?.latest ?? configuration;
   const integrations: { title: string; status: Status }[] = [
-    { title: "Discord bot", status: configuration.discord.status },
+    { title: "Discord bot", status: overview.discord.status },
     { title: "Discord OAuth", status: {
-      state: configuration.discord.oauthEnabled ? "CONFIGURED" : "DISABLED",
+      state: overview.discord.oauthEnabled ? "CONFIGURED" : "DISABLED",
       message: "Application credentials saved.",
       lastFailure: null,
     } },
-    { title: "Twitch", status: configuration.twitch.status },
-    { title: "Attachment storage", status: configuration.storage.status },
+    { title: "Twitch", status: overview.twitch.status },
+    { title: "Attachment storage", status: overview.storage.status },
   ];
   return <Panel title="Integration status">
     <dl className="integrations">
@@ -111,7 +144,7 @@ export function IntegrationStatus({ configuration, busy, refresh, retry }: {
           <dd><button className="secondary" type="button" onClick={retry} disabled={busy}>Retry connection</button></dd>}
       </div>)}
     </dl>
-    <button className="secondary" type="button" onClick={refresh} disabled={busy}>Refresh status</button>
+    {currentPoll?.failed && <p role="status" className="muted">Could not update status. Retrying…</p>}
   </Panel>;
 }
 
@@ -120,8 +153,11 @@ function value(form: FormData, name: string) {
 }
 
 function secret(form: FormData, name: string) {
-  const entered = value(form, name);
-  return { action: value(form, `${name}.action`) || (entered ? "REPLACE" : "KEEP"), value: entered || undefined };
+  const input = value(form, name);
+  if (input === SAVED_SECRET_MASK) return { action: "KEEP" };
+  const entered = input.replaceAll(MASK_CHARACTER, "");
+  if (entered) return { action: "REPLACE", value: entered };
+  return { action: form.has(`${name}.configured`) ? "CLEAR" : "KEEP" };
 }
 
 export function discordUpdate(form: FormData, setup = false) {
