@@ -3,6 +3,7 @@ package com.github.lucasskywalker64.installation;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import java.time.Instant;
 import java.util.Map;
 
 public final class InstallationConfiguration {
@@ -61,7 +62,7 @@ public final class InstallationConfiguration {
     }
 
     public record StorageView(boolean enabled, String endpoint, String bucket, String region,
-                              boolean accessKeyConfigured, boolean secretKeyConfigured, Status status) {
+                              boolean accessKeyConfigured, boolean secretKeyConfigured, Status status, Instant verifiedAt) {
     }
 
     public record Snapshot(DiscordView discord, TwitchView twitch, StorageView storage, String publicUrl,

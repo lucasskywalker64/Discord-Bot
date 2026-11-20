@@ -6,6 +6,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.net.URI;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -97,7 +98,7 @@ public class InstallationConfigurationService {
         return new UpdateResult(snapshot(saved), Map.of());
     }
 
-    public UpdateResult updateStorage(StorageUpdate update) {
+    UpdateResult updateStorage(StorageUpdate update, Instant verifiedAt) {
         var saved = configurations.lock();
         var errors = new LinkedHashMap<String, String>();
         var secrets = validateStorage(saved, update, errors);
@@ -110,6 +111,7 @@ public class InstallationConfigurationService {
         saved.storageRegion = update.region();
         saved.storageAccessKey = secrets.accessKey().value();
         saved.storageSecretKey = secrets.secretKey().value();
+        saved.storageVerifiedAt = update.enabled() ? verifiedAt : null;
         events.publishEvent(new Changed(saved.discordBotRevision));
         return new UpdateResult(snapshot(saved), Map.of());
     }
@@ -173,7 +175,7 @@ public class InstallationConfigurationService {
                 new StorageView(saved.storageEnabled, saved.storageEndpoint, saved.storageBucket, saved.storageRegion,
                         present(saved.storageAccessKey), present(saved.storageSecretKey), saved.storageEnabled
                                 ? new Status(State.CONFIGURED, "Storage settings are saved.", null)
-                                : configuredStatus(false)),
+                                : configuredStatus(false), saved.storageVerifiedAt),
                 saved.publicUrl, saved.setupStep);
     }
 

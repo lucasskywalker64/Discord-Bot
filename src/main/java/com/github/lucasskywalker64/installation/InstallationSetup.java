@@ -11,6 +11,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.function.Supplier;
@@ -54,10 +56,7 @@ public class InstallationSetup {
     }
 
     public Snapshot saveStorage(StorageUpdate update) {
-        return saveVerified(SetupStep.STORAGE, null, null, update, () -> {
-            accept(configuration.updateStorage(update));
-            return configuration.updateSetupStep(SetupStep.COMPLETE).configuration();
-        });
+        return saveStorage(SetupStep.STORAGE, update);
     }
 
     public Snapshot updateDiscord(DiscordUpdate update) {
@@ -76,7 +75,15 @@ public class InstallationSetup {
     }
 
     public Snapshot updateStorage(StorageUpdate update) {
-        return saveVerified(SetupStep.COMPLETE, null, null, update, () -> accept(configuration.updateStorage(update)));
+        return saveStorage(SetupStep.COMPLETE, update);
+    }
+
+    private Snapshot saveStorage(SetupStep step, StorageUpdate update) {
+        return saveVerified(step, null, null, update, () -> {
+            var verifiedAt = update.enabled() ? Instant.now().truncatedTo(ChronoUnit.MILLIS) : null;
+            var snapshot = accept(configuration.updateStorage(update, verifiedAt));
+            return step == SetupStep.STORAGE ? configuration.updateSetupStep(SetupStep.COMPLETE).configuration() : snapshot;
+        });
     }
 
     private Snapshot saveVerified(SetupStep step, DiscordUpdate discord, TwitchUpdate twitch, StorageUpdate storage,

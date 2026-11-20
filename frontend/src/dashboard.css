@@ -109,7 +109,7 @@ fieldset { border: 0; padding: 0; margin: 0; min-inline-size: 0; }
 .integrations dt { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 0.35rem; font-size: 0.88rem; font-weight: 650; }
 .integrations dd { margin: 0.35rem 0 0; color: var(--muted); font-size: 0.83rem; line-height: 1.45; }
 .status { padding: 0.15rem 0.4rem; color: #3c4a62; background: #e9edf4; border-radius: 0.3rem; font-size: 0.75rem; }
-.status.connected { color: #16573b; background: #d8f3e4; }
+.status.connected, .status.verified { color: #16573b; background: #d8f3e4; }
 .status.configured, .status.connecting { color: #302581; background: #eae7ff; }
 .status.unavailable { color: #8e212a; background: #ffe6e8; }
 

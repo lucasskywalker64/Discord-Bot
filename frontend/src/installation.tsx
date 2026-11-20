@@ -91,6 +91,8 @@ const labels: Record<Status["state"], string> = {
   CONNECTED: "Connected", UNAVAILABLE: "Unavailable",
 };
 
+const storageCheckTime = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
+
 export function IntegrationStatus({ configuration, busy, retry }: {
   configuration: Configuration;
   busy: boolean;
@@ -125,7 +127,7 @@ export function IntegrationStatus({ configuration, busy, retry }: {
 
   const currentPoll = poll?.source === configuration ? poll : undefined;
   const overview = currentPoll?.latest ?? configuration;
-  const integrations: { title: string; status: Status }[] = [
+  const integrations: { title: string; status: Status; verifiedAt?: string | null }[] = [
     { title: "Discord bot", status: overview.discord.status },
     { title: "Discord OAuth", status: {
       state: overview.discord.oauthEnabled ? "CONFIGURED" : "DISABLED",
@@ -133,13 +135,18 @@ export function IntegrationStatus({ configuration, busy, retry }: {
       lastFailure: null,
     } },
     { title: "Twitch", status: overview.twitch.status },
-    { title: "Attachment storage", status: overview.storage.status },
+    { title: "Attachment storage", status: overview.storage.status, verifiedAt: overview.storage.verifiedAt },
   ];
   return <Panel title="Integration status">
     <dl className="integrations">
-      {integrations.map(({ title, status }) => <div key={title}>
-        <dt>{title}<span className={`status ${status.state.toLowerCase()}`}>{labels[status.state]}</span></dt>
-        {status.state !== "DISABLED" && <dd>{status.message}</dd>}
+      {integrations.map(({ title, status, verifiedAt }) => <div key={title}>
+        <dt>{title}<span className={`status ${verifiedAt ? "verified" : status.state.toLowerCase()}`}>
+          {verifiedAt ? "Verified" : labels[status.state]}
+        </span></dt>
+        {status.state !== "DISABLED" && <dd>{verifiedAt ? <>
+          Upload, download, and cleanup passed on{" "}
+          <time dateTime={verifiedAt}>{storageCheckTime.format(new Date(verifiedAt))}</time>.
+        </> : status.message}</dd>}
         {title === "Discord bot" && status.state === "UNAVAILABLE" &&
           <dd><button className="secondary" type="button" onClick={retry} disabled={busy}>Retry connection</button></dd>}
       </div>)}

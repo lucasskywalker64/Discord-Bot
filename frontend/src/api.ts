@@ -39,6 +39,7 @@ export type Configuration = {
     accessKeyConfigured: boolean;
     secretKeyConfigured: boolean;
     status: Status;
+    verifiedAt: string | null;
   };
 };
 

@@ -28,6 +28,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.sql.DriverManager;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -126,6 +127,7 @@ class LocalAdminHttpTest {
             assertFalse(saved.body().contains(BOT_TOKEN));
         }
 
+        Instant storageVerifiedAt;
         try (var application = startApplication(); var browser = new Browser(adminPort(webServer(application)))) {
             assertFalse(JSON.readTree(browser.get("session").body()).get("claimAvailable").asBoolean());
             browser.login(CREDENTIALS);
@@ -177,7 +179,9 @@ class LocalAdminHttpTest {
                     "secretKey", Map.of("action", "REPLACE", "value", "test-storage-secret-key"));
             var storageSaved = browser.post("configuration/storage", storage);
             assertEquals(200, storageSaved.statusCode(), storageSaved::body);
-            assertEquals("SUCCEEDED", JSON.readTree(storageSaved.body()).path("providerChecks").path("storage.endpoint").asString());
+            var storageResult = JSON.readTree(storageSaved.body());
+            assertEquals("SUCCEEDED", storageResult.path("providerChecks").path("storage.endpoint").asString());
+            storageVerifiedAt = Instant.parse(storageResult.path("storage").path("verifiedAt").asString());
             assertFalse(storageSaved.body().contains("test-storage-secret-key"));
 
             providers.registerStorageBucket("new-attachments");
@@ -200,6 +204,19 @@ class LocalAdminHttpTest {
             var persistedStorage = JSON.readTree(browser.get("configuration").body()).path("storage");
             assertEquals("attachments", persistedStorage.path("bucket").asString());
             assertEquals("auto", persistedStorage.path("region").asString());
+            assertEquals(storageVerifiedAt, Instant.parse(persistedStorage.path("verifiedAt").asString()));
+        }
+
+        try (var application = startApplication(); var browser = new Browser(adminPort(webServer(application)))) {
+            browser.login(CREDENTIALS);
+            var storage = JSON.readTree(browser.get("configuration").body()).path("storage");
+            assertEquals(storageVerifiedAt, Instant.parse(storage.path("verifiedAt").asString()));
+
+            var disabled = browser.post("configuration/storage", storageDisabled());
+            assertEquals(200, disabled.statusCode(), disabled::body);
+            var disabledStorage = JSON.readTree(disabled.body()).path("storage");
+            assertEquals("DISABLED", disabledStorage.path("status").path("state").asString());
+            assertTrue(disabledStorage.path("verifiedAt").isNull());
         }
     }
 
