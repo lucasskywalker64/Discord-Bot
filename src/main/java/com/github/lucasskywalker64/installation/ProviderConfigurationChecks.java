@@ -47,8 +47,9 @@ class ProviderConfigurationChecks {
         this.twitchApi = twitchApi;
     }
 
-    Map<String, ProviderCheck> verify(Inputs inputs) {
+    Verification verify(Inputs inputs) {
         var checks = new LinkedHashMap<String, ProviderCheck>();
+        var errors = new LinkedHashMap<String, String>();
         if (inputs.botToken() != null) {
             checks.put("discord.botToken", discordBot(inputs.botToken().value()));
         }
@@ -59,9 +60,20 @@ class ProviderConfigurationChecks {
             checks.put("twitch.clientSecret", twitch(inputs.twitch()));
         }
         if (inputs.storage() != null) {
-            checks.put("storage.endpoint", storage(inputs.storage()));
+            var result = storage(inputs.storage());
+            checks.put("storage.endpoint", result.state());
+            if (result.error() != null) {
+                errors.put("storage.endpoint", result.error());
+            }
         }
-        return checks;
+        checks.forEach((field, state) -> {
+            if (state == UNAVAILABLE) {
+                errors.put(field, "The provider could not verify these settings right now. Try again.");
+            } else if (state == FAILED) {
+                errors.putIfAbsent(field, "The provider rejected these credentials. Check them and try again.");
+            }
+        });
+        return new Verification(Map.copyOf(checks), Map.copyOf(errors));
     }
 
     private ProviderCheck discordBot(String token) {
@@ -101,22 +113,51 @@ class ProviderConfigurationChecks {
         return !response.path("access_token").asString("").isBlank();
     }
 
-    private static ProviderCheck storage(Storage credentials) {
+    private static StorageCheck storage(Storage credentials) {
         try (var client = S3Client.builder().endpointOverride(URI.create(credentials.endpoint()))
                 .region(Region.of(credentials.region())).forcePathStyle(true)
                 .credentialsProvider(StaticCredentialsProvider.create(
                         AwsBasicCredentials.create(credentials.accessKey().value(), credentials.secretKey().value())))
                 .overrideConfiguration(config -> config.apiCallTimeout(TIMEOUT)
                         .retryStrategy(StandardRetryStrategy.builder().maxAttempts(1).build())).build()) {
-            var response = client.headBucket(request -> request.bucket(credentials.bucket()));
-            return response.bucketRegion() == null || credentials.region().equals(response.bucketRegion())
-                    ? SUCCEEDED : FAILED;
+            try {
+                var response = client.headBucket(request -> request.bucket(credentials.bucket()));
+                if (response.bucketRegion() != null && !credentials.region().equals(response.bucketRegion())) {
+                    return new StorageCheck(FAILED, "The bucket responded, but its region differs from the configured region.");
+                }
+            } catch (S3Exception rejected) {
+                // HEAD rejections have no response body. A signed listing can return a specific S3 error.
+                switch (rejected.statusCode()) {
+                    case 400, 401, 403, 404 -> {
+                        var listing = client.listObjectsV2(request -> request.bucket(credentials.bucket()).maxKeys(1));
+                        if (!credentials.bucket().equals(listing.name())) {
+                            return new StorageCheck(FAILED, "The endpoint did not return a listing for this bucket.");
+                        }
+                    }
+                    default -> throw rejected;
+                }
+            }
+            return new StorageCheck(SUCCEEDED, null);
         } catch (S3Exception failure) {
-            return failure.isThrottlingException() ? UNAVAILABLE : failure(failure.statusCode());
+            if (failure.isThrottlingException() || failure(failure.statusCode()) == UNAVAILABLE) {
+                return new StorageCheck(UNAVAILABLE, null);
+            }
+            String code = failure.awsErrorDetails() == null ? null : failure.awsErrorDetails().errorCode();
+            String message = switch (code) {
+                case "AccessDenied" -> "Storage denied listing this bucket. Check the access key's permissions for it.";
+                case "NoSuchBucket" -> "Storage could not find this bucket at the configured endpoint.";
+                case "InvalidAccessKeyId", "Unauthorized" -> "Storage did not accept the access key ID.";
+                case "SignatureDoesNotMatch" -> "Storage rejected the request signature. Check the secret key, endpoint and region.";
+                case "AuthorizationHeaderMalformed", "IncorrectEndpoint", "PermanentRedirect" ->
+                        "Storage rejected the endpoint or signing region.";
+                case null, default -> "Storage rejected the bucket check (HTTP " + failure.statusCode()
+                        + "). Check the endpoint, bucket, region and credentials.";
+            };
+            return new StorageCheck(FAILED, message);
         } catch (SdkClientException _) {
-            return UNAVAILABLE;
+            return new StorageCheck(UNAVAILABLE, null);
         } catch (IllegalArgumentException _) {
-            return FAILED;
+            return new StorageCheck(FAILED, "Check the storage endpoint, bucket, region and credentials.");
         }
     }
 
@@ -131,5 +172,11 @@ class ProviderConfigurationChecks {
     }
 
     record Storage(String endpoint, String bucket, String region, SecretUpdate accessKey, SecretUpdate secretKey) {
+    }
+
+    record Verification(Map<String, ProviderCheck> checks, Map<String, String> errors) {
+    }
+
+    private record StorageCheck(ProviderCheck state, String error) {
     }
 }

@@ -19,7 +19,7 @@ class ProviderConfigurationChecksTest {
     @Test
     void verifiesBothOAuthCredentialsTheDiscordBotTokenAndSignedBucketAccess() throws Exception {
         try (var server = new ProviderTestServer()) {
-            var checks = server.checks().verify(inputs(server.endpoint(), "us-east-1"));
+            var checks = server.checks().verify(inputs(server.endpoint(), "us-east-1")).checks();
             assertEquals(Map.of("discord.botToken", SUCCEEDED, "discord.clientSecret", SUCCEEDED,
                     "twitch.clientSecret", SUCCEEDED, "storage.endpoint", SUCCEEDED), checks);
             assertEquals("Bot test-bot", server.received("/discord/users/@me").authorization());
@@ -45,7 +45,7 @@ class ProviderConfigurationChecksTest {
             server.status("/attachments", status);
             assertEquals(Map.of("discord.botToken", outcome, "discord.clientSecret", outcome,
                     "twitch.clientSecret", outcome, "storage.endpoint", outcome),
-                    server.checks().verify(inputs(server.endpoint(), "us-east-1")));
+                    server.checks().verify(inputs(server.endpoint(), "us-east-1")).checks());
         }
     }
 
@@ -53,7 +53,29 @@ class ProviderConfigurationChecksTest {
     void rejectsAStorageRegionDifferentFromTheRegionReturnedByTheProvider() throws Exception {
         try (var server = new ProviderTestServer()) {
             assertEquals(ProviderCheck.FAILED, server.checks().verify(inputs(server.endpoint(), "us-west-2"))
-                    .get("storage.endpoint"));
+                    .checks().get("storage.endpoint"));
+        }
+    }
+
+    @Test
+    void acceptsSignedR2BucketAccessWhenListingSucceedsAfterHeadBucketIsDenied() throws Exception {
+        try (var server = new ProviderTestServer()) {
+            server.headBucketStatus(403);
+            assertEquals(SUCCEEDED, server.checks().verify(inputs(server.endpoint(), "auto")).checks().get("storage.endpoint"));
+            var request = server.received("/attachments");
+            assertEquals("GET", request.method());
+            assertTrue(request.authorization().contains("/auto/s3/aws4_request"));
+        }
+    }
+
+    @Test
+    void reportsAnActionableStorageRejectionWithoutExposingTheProviderResponse() throws Exception {
+        try (var server = new ProviderTestServer()) {
+            server.bucketListingError(403, "SignatureDoesNotMatch");
+            var verification = server.checks().verify(inputs(server.endpoint(), "auto"));
+            assertEquals(ProviderCheck.FAILED, verification.checks().get("storage.endpoint"));
+            assertEquals("Storage rejected the request signature. Check the secret key, endpoint and region.",
+                    verification.errors().get("storage.endpoint"));
         }
     }
 

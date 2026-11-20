@@ -15,9 +15,6 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.function.Supplier;
 
-import static com.github.lucasskywalker64.installation.InstallationConfiguration.ProviderCheck.SUCCEEDED;
-import static com.github.lucasskywalker64.installation.InstallationConfiguration.ProviderCheck.UNAVAILABLE;
-
 @Service
 public class InstallationSetup {
     private final InstallationConfigurationRepository repository;
@@ -87,8 +84,10 @@ public class InstallationSetup {
         var current = repository.findById(1).orElseThrow();
         requireStep(current, step);
         var inputs = providerInputs(current, discord, twitch, storage);
-        var checks = providers.verify(inputs);
-        rejectFailedChecks(checks);
+        var verification = providers.verify(inputs);
+        if (!verification.errors().isEmpty()) {
+            throw new Rejected(verification.errors(), verification.checks());
+        }
 
         // A concurrent save can change a credential referenced by KEEP while the provider is checking it.
         return transactions.execute(_ -> {
@@ -97,7 +96,7 @@ public class InstallationSetup {
             if (!inputs.equals(providerInputs(saved, discord, twitch, storage))) {
                 throw new ChangedDuringVerification();
             }
-            return save.get().withProviderChecks(checks);
+            return save.get().withProviderChecks(verification.checks());
         });
     }
 
@@ -115,22 +114,6 @@ public class InstallationSetup {
                 twitch != null && twitch.enabled() ? new ProviderConfigurationChecks.OAuth(twitch.clientId(), twitchSecret) : null,
                 storage != null && storage.enabled() ? new ProviderConfigurationChecks.Storage(storage.endpoint(),
                         storage.bucket(), storage.region(), storageSecrets.accessKey(), storageSecrets.secretKey()) : null);
-    }
-
-    private static void rejectFailedChecks(Map<String, ProviderCheck> checks) {
-        var errors = new LinkedHashMap<String, String>();
-        checks.forEach((field, result) -> {
-            if (result == UNAVAILABLE) {
-                errors.put(field, "The provider could not verify these settings right now. Try again.");
-            } else if (result != SUCCEEDED) {
-                errors.put(field, field.equals("storage.endpoint")
-                        ? "Storage rejected the bucket check. Verify the endpoint, bucket, region and credentials."
-                        : "The provider rejected these credentials. Check them and try again.");
-            }
-        });
-        if (!errors.isEmpty()) {
-            throw new Rejected(errors, checks);
-        }
     }
 
     private static Snapshot accept(UpdateResult result) {
