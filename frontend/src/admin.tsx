@@ -37,14 +37,14 @@ function feedback(error: unknown): FieldErrors {
 
 function SaveForm({ label, submit, children, showSaved }: {
   label: string;
-  submit: (form: FormData) => Promise<void>;
+  submit: (form: FormData) => Promise<boolean | void>;
   children: (errors: FieldErrors) => ReactNode;
   showSaved?: boolean;
 }) {
   const [errors, setErrors] = useState<FieldErrors>({});
   const [pending, setPending] = useState(false);
   const [saves, setSaves] = useState(0);
-  const [saved, setSaved] = useState(false);
+  const [saved, setSaved] = useState("");
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -53,12 +53,12 @@ function SaveForm({ label, submit, children, showSaved }: {
     form.querySelectorAll<HTMLInputElement>('input[type="password"]:not([data-provider-secret])')
       .forEach(input => { input.value = ""; });
     setPending(true);
-    setSaved(false);
+    setSaved("");
     setErrors({});
     try {
-      await submit(submitted);
+      const verified = await submit(submitted);
       setSaves(value => value + 1);
-      setSaved(true);
+      setSaved(verified ? "Settings saved. Provider checks passed." : "Settings saved");
     } catch (error) {
       setErrors(feedback(error));
       requestAnimationFrame(() => {
@@ -79,7 +79,7 @@ function SaveForm({ label, submit, children, showSaved }: {
       </p>}
       <div className="form-actions">
         <button className="primary" type="submit">{pending ? "Working…" : label}</button>
-        {saved && showSaved && <span role="status" className="saved">Settings saved</span>}
+        {saved && showSaved && <span role="status" className="saved">{saved}</span>}
       </div>
     </fieldset>
   </form>;
@@ -110,7 +110,7 @@ function SignIn({ session, submit }: {
 
 function Wizard({ configuration, save }: {
   configuration: Configuration;
-  save: (route: string, body: object) => Promise<void>;
+  save: (route: string, body: object) => Promise<boolean>;
 }) {
   const activeStep = steps.findIndex(({ step }) => step === configuration.setupStep);
   return <>
@@ -147,7 +147,7 @@ function Wizard({ configuration, save }: {
 
 function Settings({ configuration, save }: {
   configuration: Configuration;
-  save: (route: string, body: object) => Promise<void>;
+  save: (route: string, body: object) => Promise<boolean>;
 }) {
   return <>
     <Panel title="Discord" description={discordGuide}>
@@ -189,7 +189,7 @@ function AdminConsole() {
     setActive("installation");
   }
 
-  async function perform(task: () => Promise<void>) {
+  async function perform(task: () => Promise<unknown>) {
     setBusy(true);
     setError("");
     try {
@@ -233,16 +233,18 @@ function AdminConsole() {
     </main>;
   }
 
-  function serialize(task: () => Promise<void>) {
+  function serialize<T>(task: () => Promise<T>) {
     const next = operations.current.then(task);
-    operations.current = next.catch(() => undefined);
+    operations.current = next.then(() => undefined, () => undefined);
     return next;
   }
 
   function save(route: string, body: object) {
     return serialize(async () => {
       try {
-        setConfiguration(await adminRequest<Configuration>(route, JSON.stringify(body), session!.csrfToken));
+        const updated = await adminRequest<Configuration>(route, JSON.stringify(body), session!.csrfToken);
+        setConfiguration(updated);
+        return Object.keys(updated.providerChecks ?? {}).length > 0;
       } catch (failure) {
         if (failure instanceof ApiError && failure.status === 401) await load();
         throw failure;

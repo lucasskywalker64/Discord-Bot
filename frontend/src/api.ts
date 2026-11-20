@@ -12,6 +12,7 @@ export type Status = {
 };
 
 export type Configuration = {
+  providerChecks?: Record<string, "SUCCEEDED" | "FAILED" | "UNAVAILABLE">;
   setupStep: "PROVIDERS" | "DEPLOYMENT" | "STORAGE" | "COMPLETE";
   publicUrl: string | null;
   discord: {

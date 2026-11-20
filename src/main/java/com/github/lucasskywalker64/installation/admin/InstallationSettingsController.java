@@ -1,6 +1,8 @@
 package com.github.lucasskywalker64.installation.admin;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.github.lucasskywalker64.installation.InstallationConfiguration.DiscordUpdate;
+import com.github.lucasskywalker64.installation.InstallationConfiguration.ProviderCheck;
 import com.github.lucasskywalker64.installation.InstallationConfiguration.Snapshot;
 import com.github.lucasskywalker64.installation.InstallationConfiguration.StorageUpdate;
 import com.github.lucasskywalker64.installation.InstallationConfiguration.TwitchUpdate;
@@ -75,8 +77,12 @@ class InstallationSettingsController {
     }
 
     @ExceptionHandler(InstallationSetup.Rejected.class)
-    ResponseEntity<Map<String, Map<String, String>>> invalid(InstallationSetup.Rejected rejected) {
-        return ResponseEntity.badRequest().body(Map.of("errors", rejected.errors()));
+    ResponseEntity<ValidationErrors> invalid(InstallationSetup.Rejected rejected) {
+        var checks = rejected.checks();
+        var status = checks.isEmpty() ? HttpStatus.BAD_REQUEST
+                : checks.containsValue(ProviderCheck.FAILED) ? HttpStatus.UNPROCESSABLE_CONTENT
+                : HttpStatus.SERVICE_UNAVAILABLE;
+        return ResponseEntity.status(status).body(new ValidationErrors(rejected.errors(), checks));
     }
 
     @ExceptionHandler(HttpMessageNotReadableException.class)
@@ -88,6 +94,16 @@ class InstallationSettingsController {
     ResponseEntity<Map<String, Map<String, String>>> wrongStep() {
         return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(Map.of("errors", Map.of("setupStep", "Setup has moved to a different step. Reload the console.")));
+    }
+
+    @ExceptionHandler(InstallationSetup.ChangedDuringVerification.class)
+    ResponseEntity<Map<String, Map<String, String>>> changedDuringVerification() {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("errors",
+                Map.of("form", "A saved credential changed during verification. Reload and try again.")));
+    }
+
+    record ValidationErrors(Map<String, String> errors, @JsonInclude(JsonInclude.Include.NON_EMPTY)
+                            Map<String, ProviderCheck> providerChecks) {
     }
 
     record ProvidersUpdate(DiscordUpdate discord, TwitchUpdate twitch) {

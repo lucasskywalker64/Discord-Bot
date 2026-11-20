@@ -1,5 +1,6 @@
 package com.github.lucasskywalker64.installation;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.util.Map;
@@ -14,6 +15,8 @@ public final class InstallationConfiguration {
     public enum SecretAction { KEEP, REPLACE, CLEAR }
 
     public enum State { DISABLED, CONFIGURED, CONNECTING, CONNECTED, UNAVAILABLE }
+
+    public enum ProviderCheck { SUCCEEDED, FAILED, UNAVAILABLE }
 
     public record SecretUpdate(SecretAction action, @JsonProperty(access = JsonProperty.Access.WRITE_ONLY) String value) {
         public static SecretUpdate keep() {
@@ -61,8 +64,16 @@ public final class InstallationConfiguration {
                               boolean accessKeyConfigured, boolean secretKeyConfigured, Status status) {
     }
 
-    public record Snapshot(DiscordView discord, TwitchView twitch, StorageView storage,
-                           String publicUrl, SetupStep setupStep) {
+    public record Snapshot(DiscordView discord, TwitchView twitch, StorageView storage, String publicUrl,
+                           SetupStep setupStep, @JsonInclude(JsonInclude.Include.NON_EMPTY)
+                           Map<String, ProviderCheck> providerChecks) {
+        Snapshot(DiscordView discord, TwitchView twitch, StorageView storage, String publicUrl, SetupStep setupStep) {
+            this(discord, twitch, storage, publicUrl, setupStep, Map.of());
+        }
+
+        Snapshot withProviderChecks(Map<String, ProviderCheck> checks) {
+            return new Snapshot(discord, twitch, storage, publicUrl, setupStep, Map.copyOf(checks));
+        }
     }
 
     public record UpdateResult(Snapshot configuration, Map<String, String> errors) {

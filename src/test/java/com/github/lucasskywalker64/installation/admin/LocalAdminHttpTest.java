@@ -2,7 +2,9 @@ package com.github.lucasskywalker64.installation.admin;
 
 import com.github.lucasskywalker64.DiscordBotApplication;
 import com.github.lucasskywalker64.discord.DiscordGatewayFactory;
+import com.github.lucasskywalker64.installation.ProviderTestServer;
 import org.apache.catalina.connector.Connector;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.SpringApplication;
@@ -25,7 +27,6 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.sql.DriverManager;
-import java.sql.SQLException;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
@@ -48,15 +49,22 @@ class LocalAdminHttpTest {
     private static final Map<String, String> CREDENTIALS = Map.of("username", "local-admin", "password", PASSWORD);
     @Container
     static final PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:17-alpine");
+    private ProviderTestServer providers;
 
     @BeforeEach
-    void resetDatabase() throws SQLException {
+    void resetDatabase() throws Exception {
         try (var connection = DriverManager.getConnection(
                 postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
              var statement = connection.createStatement()) {
             statement.execute("DROP SCHEMA public CASCADE");
             statement.execute("CREATE SCHEMA public");
         }
+        providers = new ProviderTestServer();
+    }
+
+    @AfterEach
+    void closeProviderServer() {
+        if (providers != null) providers.close();
     }
 
     @Test
@@ -111,7 +119,10 @@ class LocalAdminHttpTest {
             var saved = browser.post("setup/providers", Map.of("discord", discord,
                     "twitch", Map.of("enabled", false, "clientSecret", keep())));
             assertEquals(200, saved.statusCode(), saved::body);
-            assertEquals("DEPLOYMENT", JSON.readTree(saved.body()).get("setupStep").asString());
+            var result = JSON.readTree(saved.body());
+            assertEquals("DEPLOYMENT", result.get("setupStep").asString());
+            assertEquals("SUCCEEDED", result.path("providerChecks").path("discord.botToken").asString());
+            assertEquals(1, result.path("providerChecks").size());
             assertFalse(saved.body().contains(BOT_TOKEN));
         }
 
@@ -140,8 +151,26 @@ class LocalAdminHttpTest {
                     "callbackUrl", "https://bot.example/twitch/callback",
                     "clientSecret", Map.of("action", "REPLACE", "value", "test-twitch-secret")));
             assertEquals(200, enabled.statusCode(), enabled::body);
-            assertEquals("CONFIGURED", JSON.readTree(enabled.body()).path("twitch").path("status").path("state").asString());
+            var saved = JSON.readTree(enabled.body());
+            assertEquals("CONFIGURED", saved.path("twitch").path("status").path("state").asString());
+            assertEquals("SUCCEEDED", saved.path("providerChecks").path("twitch.clientSecret").asString());
             assertFalse(enabled.body().contains("test-twitch-secret"), enabled::body);
+
+            var changedTwitch = Map.of("enabled", true, "clientId", "changed-twitch-client",
+                    "callbackUrl", "https://bot.example/twitch/callback", "clientSecret", keep());
+            providers.status("/twitch/oauth2/token", 401);
+            var rejected = browser.post("configuration/twitch", changedTwitch);
+            assertEquals(422, rejected.statusCode(), rejected::body);
+            assertEquals("FAILED", JSON.readTree(rejected.body()).path("providerChecks").path("twitch.clientSecret").asString());
+
+            providers.status("/twitch/oauth2/token", 503);
+            var unavailable = browser.post("configuration/twitch", changedTwitch);
+            assertEquals(503, unavailable.statusCode(), unavailable::body);
+            assertEquals("UNAVAILABLE", JSON.readTree(unavailable.body()).path("providerChecks")
+                    .path("twitch.clientSecret").asString());
+            var stillSaved = JSON.readTree(browser.get("configuration").body());
+            assertEquals("twitch-client", stillSaved.path("twitch").path("clientId").asString());
+            assertEquals(saved.path("twitch").path("oauthRevision"), stillSaved.path("twitch").path("oauthRevision"));
         }
     }
 
@@ -226,8 +255,9 @@ class LocalAdminHttpTest {
         assertEquals(401, browser.get("configuration").statusCode());
     }
 
-    private static ConfigurableApplicationContext startApplication() {
+    private ConfigurableApplicationContext startApplication() {
         var application = new SpringApplication(DiscordBotApplication.class);
+        application.addInitializers(context -> providers.register((GenericApplicationContext) context));
         application.addInitializers(context -> ((GenericApplicationContext) context).registerBean(
                 "testGatewayFactory", DiscordGatewayFactory.class, () -> (token, _) -> {
                     throw new IllegalArgumentException("Provider unavailable: " + token);
