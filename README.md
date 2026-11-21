@@ -205,13 +205,13 @@ thread's interrupt status. A timeout or interruption is logged.
 
 Use a dedicated test bot, two test guilds and a disposable PostgreSQL database.
 Invite the bot with the `bot` and `applications.commands` OAuth scopes. Supply
-the database variables above. Until #86 supplies the private console, a trusted
-in-process harness must call `InstallationConfigurationService.updateDiscord` with
-the test token and bot enablement. Do not use production credentials or data.
+the database variables above. Do not use production credentials or data.
 
 1. Build with `./mvnw -B -ntp verify` and start the packaged application with
    `java -jar target/DiscordBot-6.0.0-SNAPSHOT.jar`. Flyway creates the schema.
-   Save the test bot configuration through the trusted harness.
+   Open the [private console](#private-administrator-console), create and sign in
+   to the local administrator account, then enable the Discord bot and enter its
+   test token in the setup wizard. Save the provider settings and finish setup.
 2. Add the two test guild IDs through your database client, then restart:
 
    ```sql
