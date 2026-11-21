@@ -50,8 +50,10 @@ public class InstallationConfigurationService {
         }
         String token = secrets.botToken().value();
         String clientSecret = secrets.oauthSecret().value();
-        if (!Objects.equals(saved.discordClientId, update.clientId())
-                || !Objects.equals(saved.discordClientSecret, clientSecret)) {
+        if (saved.discordOauthEnabled != update.oauthEnabled()
+                || !Objects.equals(saved.discordClientId, update.clientId())
+                || !Objects.equals(saved.discordClientSecret, clientSecret)
+                || !Objects.equals(saved.discordCallbackUrl, update.callbackUrl())) {
             saved.discordOauthRevision++;
         }
         if (saved.discordBotEnabled != update.botEnabled() || !Objects.equals(saved.discordBotToken, token)) {
@@ -140,6 +142,21 @@ public class InstallationConfigurationService {
     public DiscordConnectionSettings discordConnectionSettings() {
         var saved = configurations.findById(1).orElseThrow();
         return new DiscordConnectionSettings(saved.discordBotEnabled, saved.discordBotToken, saved.discordBotRevision);
+    }
+
+    @Transactional(readOnly = true)
+    public DiscordOAuthSettings discordOAuthSettings() {
+        var saved = configurations.findById(1).orElseThrow();
+        return new DiscordOAuthSettings(saved.discordOauthEnabled, saved.discordClientId, saved.discordClientSecret,
+                saved.discordCallbackUrl, saved.discordOauthRevision);
+    }
+
+    public record DiscordOAuthSettings(boolean enabled, String clientId, @JsonIgnore String clientSecret,
+                                       String callbackUrl, long revision) {
+        @Override
+        public String toString() {
+            return "DiscordOAuthSettings[enabled=" + enabled + ", revision=" + revision + "]";
+        }
     }
 
     public void reportDiscordState(long revision, State state) {

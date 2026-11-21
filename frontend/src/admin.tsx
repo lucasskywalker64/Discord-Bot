@@ -17,8 +17,9 @@ const steps = [
   { step: "STORAGE", label: "Storage" },
 ] as const;
 const discordGuide = <>Find the bot token in the <a href="https://discord.com/developers/applications"
-  target="_blank" rel="noreferrer">Discord Developer Portal</a>. For public sign-in, register the OAuth callback URL
-  under Redirects and enter the application ID and client secret.</>;
+  target="_blank" rel="noreferrer">Discord Developer Portal</a>. For public sign-in, register your public
+  HTTPS origin followed by <code>/dashboard/oauth/discord/callback</code> under Redirects and enter the
+  application ID and client secret.</>;
 const twitchGuide = <>Register an application in the <a href="https://dev.twitch.tv/console/apps"
   target="_blank" rel="noreferrer">Twitch Developer Console</a>. Add the OAuth callback URL there and copy its
   client ID and secret here.</>;
@@ -146,15 +147,85 @@ function Wizard({ configuration, save }: {
   </>;
 }
 
-function Settings({ configuration, save }: {
+type AuthorizationTest = {
+  status: "IDLE" | "PENDING" | "SUCCEEDED" | "REJECTED" | "EXPIRED";
+  launchUrl: string | null;
+};
+
+const authorizationMessages = {
+  IDLE: "",
+  PENDING: "Waiting for Discord authorization.",
+  SUCCEEDED: "Discord returned an authorization code and the application exchanged it successfully.",
+  REJECTED: "Discord authorization did not complete. Check the saved settings and try again.",
+  EXPIRED: "The test expired. Start a new test.",
+};
+const authorizationTestPath = "discord-authorization-test";
+
+function DiscordAuthorizationTest({ csrf }: { csrf: string }) {
+  const [test, setTest] = useState<AuthorizationTest>();
+  const [launchUrl, setLaunchUrl] = useState<string>();
+  const [error, setError] = useState("");
+  const [starting, setStarting] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    let timer: number | undefined;
+    async function refresh() {
+      try {
+        const next = await adminRequest<AuthorizationTest>(authorizationTestPath);
+        if (!active) return;
+        setTest(next);
+        if (next.status === "PENDING") timer = window.setTimeout(() => void refresh(), 1500);
+        else setLaunchUrl(undefined);
+      } catch {
+        if (active) setError("The authorization test status could not be loaded.");
+      }
+    }
+    if (!starting) void refresh();
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [starting]);
+
+  async function start() {
+    setStarting(true);
+    setError("");
+    try {
+      const next = await adminRequest<AuthorizationTest>(authorizationTestPath, undefined, csrf);
+      setTest(next);
+      setLaunchUrl(next.launchUrl ?? undefined);
+    } catch (failure) {
+      setError(failure instanceof ApiError && failure.status === 409
+        ? "Save enabled Discord OAuth settings with the dashboard callback URL before testing."
+        : "The authorization test could not be started.");
+    } finally {
+      setStarting(false);
+    }
+  }
+
+  return <>
+    <div className="form-actions">
+      <button type="button" disabled={starting} onClick={() => void start()}>Test authorization</button>
+      {launchUrl && <a href={launchUrl} target="_blank" rel="noreferrer"
+        onClick={() => setLaunchUrl(undefined)}>Continue to Discord</a>}
+    </div>
+    <p className="muted" role="status">{test && authorizationMessages[test.status]}</p>
+    {error && <p className="form-error" role="alert">{error}</p>}
+  </>;
+}
+
+function Settings({ configuration, save, csrf }: {
   configuration: Configuration;
   save: (route: string, body: object) => Promise<boolean>;
+  csrf: string;
 }) {
   return <>
     <Panel title="Discord" description={discordGuide}>
       <SaveForm label="Save Discord settings" showSaved submit={form => save("configuration/discord", discordUpdate(form))}>
         {errors => <DiscordFields value={configuration.discord} errors={errors} />}
       </SaveForm>
+      {configuration.discord.oauthEnabled && <DiscordAuthorizationTest csrf={csrf} />}
     </Panel>
     <Panel title="Twitch" description={twitchGuide}>
       <SaveForm label="Save Twitch settings" showSaved submit={form => save("configuration/twitch", twitchUpdate(form))}>
@@ -291,7 +362,7 @@ function AdminConsole() {
       <div className="status-overview"><IntegrationStatus configuration={configuration} busy={busy}
         retry={() => void perform(() => save("configuration/discord/retry", {}))} /></div>
       <div className="settings-column">{setup ? <Wizard configuration={configuration} save={save} />
-        : <Settings configuration={configuration} save={save} />}</div>
+        : <Settings configuration={configuration} save={save} csrf={session.csrfToken} />}</div>
     </div>}
   </DashboardShell>;
 }

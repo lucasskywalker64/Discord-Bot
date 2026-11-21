@@ -21,17 +21,22 @@ import tools.jackson.databind.JsonNode;
 import java.net.CookieManager;
 import java.net.CookiePolicy;
 import java.net.URI;
+import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.sql.DriverManager;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -51,6 +56,247 @@ class LocalAdminHttpTest {
     @Container
     static final PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:17-alpine");
     private ProviderTestServer providers;
+    private final TestClock clock = new TestClock();
+
+    @Test
+    void administratorTestsTheSavedCallbackWithoutCreatingDashboardSessions() throws Exception {
+        try (var application = startApplication(); var admin = new Browser(adminPort(webServer(application)));
+             var otherAdmin = new Browser(admin.port); var publicBrowser = new Browser(webServer(application).getPort());
+             var otherBrowser = new Browser(publicBrowser.port)) {
+            saveDiscordOAuth(admin, publicBrowser.port);
+            otherAdmin.login(CREDENTIALS);
+            assertEquals(404, publicBrowser.getPath("/admin/api/discord-authorization-test").statusCode());
+            assertEquals(403, admin.send("discord-authorization-test", Map.of(), null).get().statusCode());
+
+            var launch = admin.beginAuthorizationTest();
+            assertEquals("PENDING", admin.authorizationTestStatus());
+            assertEquals("IDLE", otherAdmin.authorizationTestStatus());
+            var authorization = location(publicBrowser.getPath(launch));
+            assertEquals(uri(publicBrowser.port, "/dashboard/oauth/discord/callback").toString(),
+                    parameter(authorization, "redirect_uri"));
+            providers.expectDiscordChallenge("test-success", parameter(authorization, "code_challenge"));
+            var callback = discordCallback(authorization, "test-success");
+            assertEquals(410, otherBrowser.getPath(callback).statusCode());
+            assertEquals("PENDING", admin.authorizationTestStatus());
+            assertEquals(200, publicBrowser.getPath(callback).statusCode());
+            assertEquals("SUCCEEDED", admin.authorizationTestStatus());
+            assertEquals(410, publicBrowser.getPath(callback).statusCode());
+            assertEquals(401, publicBrowser.getPath("/dashboard/api/account").statusCode());
+
+            var signIn = publicBrowser.beginDiscord("sign-in");
+            providers.expectDiscordChallenge("101", parameter(signIn, "code_challenge"));
+            var rejected = location(publicBrowser.getPath(admin.beginAuthorizationTest()));
+            assertEquals(200, publicBrowser.getPath(discordCallback(rejected, "101")).statusCode());
+            assertEquals("REJECTED", admin.authorizationTestStatus());
+            assertEquals(401, publicBrowser.getPath("/dashboard/api/account").statusCode());
+            assertEquals("/dashboard/", location(publicBrowser.getPath(discordCallback(signIn, "101"))));
+            var account = publicBrowser.dashboardAccount();
+
+            var providerRejected = location(publicBrowser.getPath(admin.beginAuthorizationTest()));
+            assertEquals(200, publicBrowser.getPath(discordCallback(providerRejected, "rejected")).statusCode());
+            assertEquals("REJECTED", admin.authorizationTestStatus());
+
+            var expired = location(publicBrowser.getPath(admin.beginAuthorizationTest()));
+            clock.advance(Duration.ofMinutes(6));
+            assertEquals(410, publicBrowser.getPath(discordCallback(expired, "test-success")).statusCode());
+            assertEquals("EXPIRED", admin.authorizationTestStatus());
+
+            assertEquals(200, admin.post("setup/deployment", Map.of("publicUrl", "")).statusCode());
+            assertEquals(200, admin.post("setup/storage", storageDisabled()).statusCode());
+            var beforeSettingsChange = location(publicBrowser.getPath(admin.beginAuthorizationTest()));
+            assertEquals(200, admin.post("configuration/discord", discordOAuth(publicBrowser.port,
+                    "replacement-secret")).statusCode());
+            assertEquals(410, publicBrowser.getPath(discordCallback(beforeSettingsChange, "test-success")).statusCode());
+            assertEquals("EXPIRED", admin.authorizationTestStatus());
+
+            var invalidated = location(publicBrowser.getPath(admin.beginAuthorizationTest()));
+            assertEquals(204, admin.send("logout", Map.of(), admin.csrf()).get().statusCode());
+            assertEquals(410, publicBrowser.getPath(discordCallback(invalidated, "test-success")).statusCode());
+            assertEquals("IDLE", otherAdmin.authorizationTestStatus());
+            assertEquals(account, publicBrowser.dashboardAccount());
+        }
+    }
+
+    @Test
+    void discordReplacementRequiresRecentProofAndPreservesTheAccountAcrossConflictsAndSuccess() throws Exception {
+        try (var application = startApplication(); var admin = new Browser(adminPort(webServer(application)));
+             var first = new Browser(webServer(application).getPort()); var oldSession = new Browser(first.port);
+             var other = new Browser(first.port); var newSession = new Browser(first.port)) {
+            saveDiscordOAuth(admin, first.port);
+            var original = first.signInAs("101");
+            var accountId = UUID.fromString(original.path("id").asString());
+            seedAccountLinks(accountId);
+            oldSession.signInAs("101");
+            other.signInAs("202");
+            clock.advance(Duration.ofMinutes(11));
+            assertEquals("/dashboard/?oauth=reauthenticate",
+                    location(first.dashboardPost("replace-discord", first.dashboardCsrf())));
+            var wrongIdentity = first.beginDiscord("reauthenticate");
+            assertEquals("/dashboard/?oauth=rejected", location(first.getPath(discordCallback(wrongIdentity, "303"))));
+            assertEquals("101", first.dashboardAccount().path("discordId").asString());
+            var reauthentication = first.beginDiscord("reauthenticate");
+            assertEquals("/dashboard/", location(first.getPath(discordCallback(reauthentication, "101"))));
+
+            var conflict = first.proveReplacement("202");
+            assertEquals(409, first.confirmReplacement(conflict).statusCode());
+            assertEquals("101", first.dashboardAccount().path("discordId").asString());
+            assertEquals("202", other.dashboardAccount().path("discordId").asString());
+            assertEquals(410, first.confirmReplacement(conflict).statusCode());
+
+            var pending = first.proveReplacement("303");
+            var oldReauthentication = oldSession.beginDiscord("reauthenticate");
+            assertEquals("/dashboard/", location(oldSession.getPath(discordCallback(oldReauthentication, "101"))));
+            var stale = oldSession.proveReplacement("404");
+            var reviewed = JSON.readTree(first.getPath("/dashboard/api/replacement").body());
+            assertEquals("101", reviewed.path("current").path("id").asString());
+            assertEquals("303", reviewed.path("proposed").path("id").asString());
+            assertEquals(410, other.confirmReplacement(pending).statusCode());
+            assertEquals(204, first.confirmReplacement(pending).statusCode());
+            assertEquals("303", first.dashboardAccount().path("discordId").asString());
+            assertEquals(original.path("id"), newSession.signInAs("303").path("id"));
+            assertAccountLinksPreserved(accountId);
+            assertEquals(401, oldSession.getPath("/dashboard/api/account").statusCode());
+            assertEquals(401, oldSession.confirmReplacement(stale).statusCode());
+        }
+    }
+
+    @Test
+    void competingSignupAndReplacementRespectTheUniqueDiscordBinding() throws Exception {
+        try (var application = startApplication(); var admin = new Browser(adminPort(webServer(application)));
+             var first = new Browser(webServer(application).getPort()); var second = new Browser(first.port);
+             var third = new Browser(first.port); var fourth = new Browser(first.port)) {
+            saveDiscordOAuth(admin, first.port);
+            first.signInAs("101");
+            second.signInAs("202");
+            var firstProof = first.proveReplacement("303");
+            var secondProof = second.proveReplacement("303");
+            var firstConfirm = first.sendDashboard("confirm-replacement", firstProof, first.dashboardCsrf());
+            var secondConfirm = second.sendDashboard("confirm-replacement", secondProof, second.dashboardCsrf());
+            var statuses = List.of(firstConfirm.get(10, TimeUnit.SECONDS).statusCode(),
+                    secondConfirm.get(10, TimeUnit.SECONDS).statusCode()).stream().sorted().toList();
+            assertEquals(List.of(204, 409), statuses);
+            assertEquals(1, List.of(first.dashboardAccount(), second.dashboardAccount()).stream()
+                    .filter(account -> account.path("discordId").asString().equals("303")).count());
+
+            var thirdAuthorization = third.beginDiscord("sign-in");
+            var fourthAuthorization = fourth.beginDiscord("sign-in");
+            var thirdCallback = third.getPathAsync(discordCallback(thirdAuthorization, "404"));
+            var fourthCallback = fourth.getPathAsync(discordCallback(fourthAuthorization, "404"));
+            assertEquals("/dashboard/", location(thirdCallback.get(10, TimeUnit.SECONDS)));
+            assertEquals("/dashboard/", location(fourthCallback.get(10, TimeUnit.SECONDS)));
+            assertEquals(third.dashboardAccount().path("id"), fourth.dashboardAccount().path("id"));
+        }
+    }
+
+    @Test
+    void expiringOrSameIdentityProofKeepsTheWorkingDiscordLogin() throws Exception {
+        try (var application = startApplication(); var admin = new Browser(adminPort(webServer(application)));
+             var first = new Browser(webServer(application).getPort()); var otherSession = new Browser(first.port)) {
+            saveDiscordOAuth(admin, first.port);
+            var original = first.signInAs("101");
+            otherSession.signInAs("101");
+            var noChange = first.proveReplacement("101");
+            assertEquals(204, first.confirmReplacement(noChange).statusCode());
+            assertEquals(original.path("id"), otherSession.dashboardAccount().path("id"));
+            var pending = first.proveReplacement("202");
+            clock.advance(Duration.ofMinutes(6));
+            assertEquals(410, first.confirmReplacement(pending).statusCode());
+            assertEquals("101", first.dashboardAccount().path("discordId").asString());
+        }
+    }
+
+    @Test
+    void discordSignInResolvesOneAccountAndLogoutRevokesTheSession() throws Exception {
+        try (var application = startApplication(); var admin = new Browser(adminPort(webServer(application)));
+             var first = new Browser(webServer(application).getPort()); var second = new Browser(first.port)) {
+            saveDiscordOAuth(admin, first.port);
+            assertEquals(200, first.getPath("/dashboard/").statusCode());
+            assertEquals(404, admin.getPath("/dashboard/").statusCode());
+            assertEquals(401, first.getPath("/dashboard/api/account").statusCode());
+
+            var authorization = first.beginDiscord("sign-in");
+            assertEquals("identify", parameter(authorization, "scope"));
+            assertEquals("S256", parameter(authorization, "code_challenge_method"));
+            providers.expectDiscordChallenge("101", parameter(authorization, "code_challenge"));
+            assertEquals(uri(first.port, "/dashboard/oauth/discord/callback").toString(),
+                    parameter(authorization, "redirect_uri"));
+            var callback = discordCallback(authorization, "101");
+            assertEquals("/dashboard/?oauth=expired", location(second.getPath(callback)));
+            assertEquals("/dashboard/", location(first.getPath(callback)));
+            var account = first.dashboardAccount();
+            assertEquals("101", account.path("discordId").asString());
+            assertEquals("/dashboard/?oauth=expired", location(first.getPath(callback)));
+            var secondAuthorization = second.beginDiscord("sign-in");
+            providers.expectDiscordChallenge("101", parameter(secondAuthorization, "code_challenge"));
+            assertEquals("/dashboard/", location(second.getPath(discordCallback(secondAuthorization, "101"))));
+            assertEquals(account.path("id"), second.dashboardAccount().path("id"));
+
+            assertEquals(403, first.dashboardPost("logout", null).statusCode());
+            var oldCookie = first.cookies.getCookieStore().getCookies().stream()
+                    .filter(cookie -> cookie.getName().equals("DISCORD_BOT_DASHBOARD")).findFirst().orElseThrow();
+            assertEquals(204, first.dashboardPost("logout", first.dashboardCsrf()).statusCode());
+            first.cookies.getCookieStore().add(uri(first.port, "/dashboard/"), oldCookie);
+            assertEquals(401, first.getPath("/dashboard/api/account").statusCode());
+            assertEquals(account.path("id"), second.dashboardAccount().path("id"));
+        }
+    }
+
+    private static void saveDiscordOAuth(Browser admin, int publicPort) throws Exception {
+        admin.claimAndLogin();
+        var saved = admin.post("setup/providers", Map.of("discord", discordOAuth(publicPort, "test-discord-secret"),
+                "twitch", Map.of("enabled", false, "clientSecret", keep())));
+        assertEquals(200, saved.statusCode(), saved::body);
+    }
+
+    private static Map<String, Object> discordOAuth(int publicPort, String secret) {
+        return Map.of("botEnabled", true, "botToken", Map.of("action", "REPLACE", "value", BOT_TOKEN),
+                "oauthEnabled", true, "clientId", "test-client", "clientSecret",
+                Map.of("action", "REPLACE", "value", secret), "callbackUrl",
+                uri(publicPort, "/dashboard/oauth/discord/callback").toString());
+    }
+
+    private static void seedAccountLinks(UUID accountId) throws Exception {
+        try (var connection = DriverManager.getConnection(
+                postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+             var update = connection.prepareStatement("""
+                     UPDATE dashboard_account SET primary_twitch_id = '720', managed_guild_id = '820' WHERE id = ?
+                     """)) {
+            update.setObject(1, accountId);
+            assertEquals(1, update.executeUpdate());
+        }
+    }
+
+    private static void assertAccountLinksPreserved(UUID accountId) throws Exception {
+        try (var connection = DriverManager.getConnection(
+                postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+             var select = connection.prepareStatement("""
+                     SELECT primary_twitch_id, managed_guild_id FROM dashboard_account WHERE id = ?
+                     """)) {
+            select.setObject(1, accountId);
+            try (var links = select.executeQuery()) {
+                assertTrue(links.next());
+                assertEquals("720", links.getString("primary_twitch_id"));
+                assertEquals("820", links.getString("managed_guild_id"));
+            }
+        }
+    }
+
+    private static String location(HttpResponse<String> response) {
+        assertTrue(response.statusCode() == 302 || response.statusCode() == 303,
+                () -> response.statusCode() + " " + response.body());
+        return response.headers().firstValue("Location").orElseThrow();
+    }
+
+    private static String parameter(String target, String name) {
+        return Arrays.stream(URI.create(target).getRawQuery().split("&"))
+                .filter(part -> part.startsWith(name + "=")).findFirst()
+                .map(part -> URLDecoder.decode(part.substring(name.length() + 1), StandardCharsets.UTF_8))
+                .orElseThrow();
+    }
+
+    private static String discordCallback(String authorization, String code) {
+        return "/dashboard/oauth/discord/callback?state=" + parameter(authorization, "state") + "&code=" + code;
+    }
 
     @BeforeEach
     void resetDatabase() throws Exception {
@@ -305,14 +551,17 @@ class LocalAdminHttpTest {
         var application = new SpringApplication(DiscordBotApplication.class);
         application.addInitializers(context -> providers.register((GenericApplicationContext) context));
         application.addInitializers(context -> ((GenericApplicationContext) context).registerBean(
+                "testClock", Clock.class, () -> clock, bean -> bean.setPrimary(true)));
+        application.addInitializers(context -> ((GenericApplicationContext) context).registerBean(
                 "testGatewayFactory", DiscordGatewayFactory.class, () -> (token, _) -> {
                     throw new IllegalArgumentException("Provider unavailable: " + token);
                 }));
         return application.run(databaseArguments());
     }
 
-    private static String[] databaseArguments() {
+    private String[] databaseArguments() {
         return new String[]{"--server.port=0", "--installation.admin.port=0",
+                "--dashboard.discord.api-base=" + providers.endpoint() + "/discord",
                 "--spring.datasource.url=" + postgres.getJdbcUrl(),
                 "--spring.datasource.username=" + postgres.getUsername(),
                 "--spring.datasource.password=" + postgres.getPassword(),
@@ -348,7 +597,61 @@ class LocalAdminHttpTest {
         }
 
         HttpResponse<String> get(String endpoint) throws Exception {
-            return LocalAdminHttpTest.get(http, port, "/admin/api/" + endpoint);
+            return getPath("/admin/api/" + endpoint);
+        }
+
+        HttpResponse<String> getPath(String path) throws Exception {
+            return LocalAdminHttpTest.get(http, port, path);
+        }
+
+        CompletableFuture<HttpResponse<String>> getPathAsync(String path) {
+            return http.sendAsync(HttpRequest.newBuilder(uri(port, path)).timeout(Duration.ofSeconds(8))
+                    .GET().build(), HttpResponse.BodyHandlers.ofString());
+        }
+
+        JsonNode signInAs(String id) throws Exception {
+            assertEquals("/dashboard/", location(getPath(discordCallback(beginDiscord("sign-in"), id))));
+            return dashboardAccount();
+        }
+
+        String proveReplacement(String id) throws Exception {
+            assertEquals("/dashboard/?oauth=confirm", location(getPath(discordCallback(beginDiscord("replace-discord"), id))));
+            return JSON.readTree(getPath("/dashboard/api/replacement").body()).path("confirmation").asString();
+        }
+
+        HttpResponse<String> confirmReplacement(String proof) throws Exception {
+            return sendDashboard("confirm-replacement", proof, dashboardCsrf()).get(10, TimeUnit.SECONDS);
+        }
+
+        String dashboardCsrf() throws Exception {
+            return JSON.readTree(getPath("/dashboard/api/session").body()).path("csrfToken").asString();
+        }
+
+        String beginDiscord(String operation) throws Exception {
+            String body = "_csrf=" + URLEncoder.encode(dashboardCsrf(), StandardCharsets.UTF_8);
+            var request = HttpRequest.newBuilder(uri(port, "/dashboard/api/" + operation))
+                    .header("Content-Type", "application/x-www-form-urlencoded").timeout(Duration.ofSeconds(8))
+                    .POST(HttpRequest.BodyPublishers.ofString(body));
+            return location(http.send(request.build(), HttpResponse.BodyHandlers.ofString()));
+        }
+
+        JsonNode dashboardAccount() throws Exception {
+            var account = getPath("/dashboard/api/account");
+            assertEquals(200, account.statusCode(), account::body);
+            return JSON.readTree(account.body());
+        }
+
+        HttpResponse<String> dashboardPost(String endpoint, String csrf) throws Exception {
+            return sendDashboard(endpoint, null, csrf).get(10, TimeUnit.SECONDS);
+        }
+
+        CompletableFuture<HttpResponse<String>> sendDashboard(String endpoint, String proof, String csrf) {
+            var request = HttpRequest.newBuilder(uri(port, "/dashboard/api/" + endpoint))
+                    .timeout(Duration.ofSeconds(8)).POST(proof == null ? HttpRequest.BodyPublishers.noBody()
+                            : HttpRequest.BodyPublishers.ofString("confirmation=" + proof));
+            if (csrf != null) request.header("X-CSRF-TOKEN", csrf);
+            if (proof != null) request.header("Content-Type", "application/x-www-form-urlencoded");
+            return http.sendAsync(request.build(), HttpResponse.BodyHandlers.ofString());
         }
 
         String csrf() throws Exception {
@@ -369,6 +672,17 @@ class LocalAdminHttpTest {
 
         HttpResponse<String> post(String endpoint, Object body) throws Exception {
             return send(endpoint, JSON.writeValueAsString(body), "application/json", csrf()).get();
+        }
+
+        String beginAuthorizationTest() throws Exception {
+            var response = post("discord-authorization-test", Map.of());
+            assertEquals(200, response.statusCode(), response::body);
+            var url = URI.create(JSON.readTree(response.body()).path("launchUrl").asString());
+            return url.getRawPath() + "?" + url.getRawQuery();
+        }
+
+        String authorizationTestStatus() throws Exception {
+            return JSON.readTree(get("discord-authorization-test").body()).path("status").asString();
         }
 
         void claimAndLogin() throws Exception {
@@ -393,6 +707,29 @@ class LocalAdminHttpTest {
         @Override
         public void close() {
             http.close();
+        }
+    }
+
+    private static final class TestClock extends Clock {
+        private volatile Instant now = Instant.parse("2026-11-21T12:00:00Z");
+
+        void advance(Duration duration) {
+            now = now.plus(duration);
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(ZoneId zone) {
+            return Clock.fixed(now, zone);
+        }
+
+        @Override
+        public Instant instant() {
+            return now;
         }
     }
 }

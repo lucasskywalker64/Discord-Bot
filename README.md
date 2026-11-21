@@ -36,8 +36,9 @@ the associated feature when clearing a credential it requires.
 
 Saving enabled integrations checks Discord bot and OAuth credentials, Twitch
 application credentials, or the configured S3 bucket. A rejection or provider
-outage preserves previously saved settings. Test OAuth callback routing with a
-real sign-in. The storage check uploads, reads and deletes a temporary object
+outage preserves previously saved settings. To check the saved Discord redirect,
+choose **Test authorization** in Discord settings, open **Continue to Discord**
+and return to the console for the result. The storage check uploads, reads and deletes a temporary object
 under `discord-bot/validation/`. Its credentials need permission for those
 operations, including reading and deleting the test object's version when the
 bucket uses versioning.
@@ -54,6 +55,21 @@ tunnel to its loopback port.
 The console uses its own `DISCORD_BOT_LOCAL_ADMIN` cookie and local administrator
 authority. Password changes sign out all local administrator sessions. After
 eight password checks within one minute, try again after the window expires.
+
+### Public Discord dashboard
+
+Serve `/dashboard/` on the public HTTPS origin. Register that origin followed
+by `/dashboard/oauth/discord/callback` as a Discord OAuth redirect and save the
+same full URL in Discord settings. For local testing the callback can use
+loopback HTTP.
+
+The first Discord sign-in creates a dashboard account. To change its login,
+verify your current login if prompted, authorize the proposed Discord identity
+and confirm the two identities shown in the dashboard. Changing the identity
+signs out other dashboard sessions for that account. If you lose access to the
+current Discord identity, contact the installation administrator for reviewed
+recovery with verified identity proof. Signing in with a different Discord
+identity starts a separate account.
 
 ### Reset the local administrator password
 
@@ -105,10 +121,10 @@ secrets. Twitch and storage report `CONFIGURED`, not connected: their consuming
 features own live connectivity checks and workers.
 
 Discord and Twitch OAuth application credential changes advance separate durable
-`oauthRevision` values. Grant consumers must bind grants to the application
+`oauthRevision` values. Discord callback and enablement changes also advance
+the Discord OAuth revision. Grant consumers must bind grants to the application
 revision and require revalidation/reauthorization on a mismatch before use.
 Configuration changes never delete personal grants or change their identities.
-Those grant consumers arrive with their owning OAuth feature tickets.
 
 ### Configuration backup and access
 
