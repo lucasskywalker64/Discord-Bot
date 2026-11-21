@@ -23,6 +23,53 @@ migrations; do not edit applied migrations.
 member-count voice-channel ID. Discord IDs use decimal strings to preserve the
 full unsigned snowflake range. An unset channel is stored as SQL `NULL`.
 
+## Private administrator console
+
+Open `http://127.0.0.1:8081/admin/` on the application host. The first
+administrator creates a local account with a passphrase of 12 to 256 characters.
+Sign in to finish setup. The wizard saves your progress in PostgreSQL. Enter a
+Discord bot token to finish. Public Discord sign-in, Twitch and attachment
+storage can be configured later. Settings remain available during provider
+outages. The integration status panel updates automatically. To update a saved
+credential, type over its mask. To clear it, delete the mask and save. Disable
+the associated feature when clearing a credential it requires.
+
+Saving enabled integrations checks Discord bot and OAuth credentials, Twitch
+application credentials, or the configured S3 bucket. A rejection or provider
+outage preserves previously saved settings. Test OAuth callback routing with a
+real sign-in. The storage check uploads, reads and deletes a temporary object
+under `discord-bot/validation/`. Its credentials need permission for those
+operations, including reading and deleting the test object's version when the
+bucket uses versioning.
+
+The normal HTTP listener serves public routes and readiness. The private
+listener defaults to `127.0.0.1:8081`. Set `INSTALLATION_ADMIN_PORT` and
+`INSTALLATION_ADMIN_ADDRESS` as bootstrap settings if needed. For a container,
+listen on the container interface and publish the admin port to host loopback,
+for example `-p 127.0.0.1:8081:8081` with
+`INSTALLATION_ADMIN_ADDRESS=0.0.0.0`. Attach the container to trusted networks
+and direct public ingress to the public port. For a remote host, use an SSH
+tunnel to its loopback port.
+
+The console uses its own `DISCORD_BOT_LOCAL_ADMIN` cookie and local administrator
+authority. Password changes sign out all local administrator sessions. After
+eight password checks within one minute, try again after the window expires.
+
+### Reset the local administrator password
+
+Run this on the host from an interactive terminal with the same database
+configuration as the application:
+
+```sh
+java -jar target/DiscordBot-6.0.0-SNAPSHOT.jar reset-local-admin
+```
+
+For a container, run the same Java command in that container with `docker exec
+-it`, using the path to its application JAR. Enter and confirm the replacement
+password at the prompt. The reset opens a database connection, preserves the
+username, setup progress, integrations and guild/account data, and invalidates
+all existing local administrator sessions. The running application can stay up.
+
 ## Discord configuration
 
 Discord is disabled by default. Provider settings now live in PostgreSQL;
@@ -30,8 +77,7 @@ Discord is disabled by default. Provider settings now live in PostgreSQL;
 server-side `InstallationConfigurationService` provides typed reads and updates for
 Discord bot/OAuth settings, Twitch application settings, public and callback URLs,
 S3-compatible attachment storage, capability enablement and resumable setup
-progress. The authenticated private console that calls these operations belongs
-to #86. This slice adds no HTTP configuration endpoints.
+progress. The authenticated private console uses these operations.
 
 Updates validate required fields for enabled capabilities and return errors keyed
 by field. Secret updates explicitly choose `KEEP`, `REPLACE` or `CLEAR`. Reads
@@ -159,13 +205,13 @@ thread's interrupt status. A timeout or interruption is logged.
 
 Use a dedicated test bot, two test guilds and a disposable PostgreSQL database.
 Invite the bot with the `bot` and `applications.commands` OAuth scopes. Supply
-the database variables above. Until #86 supplies the private console, a trusted
-in-process harness must call `InstallationConfigurationService.updateDiscord` with
-the test token and bot enablement. Do not use production credentials or data.
+the database variables above. Do not use production credentials or data.
 
 1. Build with `./mvnw -B -ntp verify` and start the packaged application with
    `java -jar target/DiscordBot-6.0.0-SNAPSHOT.jar`. Flyway creates the schema.
-   Save the test bot configuration through the trusted harness.
+   Open the [private console](#private-administrator-console), create and sign in
+   to the local administrator account, then enable the Discord bot and enter its
+   test token in the setup wizard. Save the provider settings and finish setup.
 2. Add the two test guild IDs through your database client, then restart:
 
    ```sql
@@ -194,6 +240,10 @@ the guild command in DMs. Real gateway delivery requires this opt-in check and
 is not exercised by the automated suite.
 
 ## Verification
+
+Maven installs a pinned Node runtime, checks TypeScript and builds the React
+console into the executable JAR. To check frontend types with a local Node
+installation, run `npm ci` and `npm run check` in `frontend/`.
 
 Run `./mvnw -B -ntp verify`, or `.\mvnw.cmd -B -ntp verify` on Windows, with a
 Docker-compatible runtime running. The startup tests create a disposable

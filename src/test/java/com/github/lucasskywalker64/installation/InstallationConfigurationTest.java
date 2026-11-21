@@ -21,6 +21,7 @@ import com.github.lucasskywalker64.installation.InstallationConfiguration.Twitch
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @Testcontainers
@@ -60,7 +61,7 @@ class InstallationConfigurationTest {
             assertTrue(settings.updateTwitch(new TwitchUpdate(true, "twitch-client", SecretUpdate.replace("twitch-secret"),
                     "https://bot.example/twitch/callback")).errors().isEmpty());
             assertTrue(settings.updateStorage(new StorageUpdate(true, "https://s3.example", "attachments", "region",
-                    SecretUpdate.replace("storage-access"), SecretUpdate.replace("storage-secret"))).errors().isEmpty());
+                    SecretUpdate.replace("storage-access"), SecretUpdate.replace("storage-secret")), null).errors().isEmpty());
             assertTrue(settings.updateSetupStep(SetupStep.STORAGE).errors().isEmpty());
         }
 
@@ -83,6 +84,8 @@ class InstallationConfigurationTest {
             assertEquals("region", saved.storage().region());
             assertTrue(saved.storage().accessKeyConfigured());
             assertTrue(saved.storage().secretKeyConfigured());
+            assertEquals(State.CONFIGURED, saved.storage().status().state());
+            assertNull(saved.storage().verifiedAt());
             String response = new JsonMapper().writeValueAsString(saved);
             for (String secret : java.util.List.of("bot-secret", "oauth-secret", "twitch-secret", "storage-access", "storage-secret")) {
                 assertFalse(response.contains(secret));
@@ -116,7 +119,7 @@ class InstallationConfigurationTest {
             assertFalse(settings.updatePublicUrl("https://password@bot.example").errors().isEmpty());
 
             var storage = settings.updateStorage(new StorageUpdate(true, "file:///tmp/files", "", "",
-                    SecretUpdate.keep(), SecretUpdate.keep()));
+                    SecretUpdate.keep(), SecretUpdate.keep()), null);
             assertEquals(java.util.Set.of("storage.endpoint", "storage.bucket", "storage.region",
                     "storage.accessKey", "storage.secretKey"), storage.errors().keySet());
             assertFalse(settings.read().storage().enabled());

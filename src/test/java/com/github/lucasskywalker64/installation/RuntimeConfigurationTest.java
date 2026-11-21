@@ -335,7 +335,7 @@ class RuntimeConfigurationTest {
                     when(builder.build()).thenReturn(discord);
                     return builder;
                 }));
-        return application.run("--server.port=0",
+        return application.run("--server.port=0", "--installation.admin.port=0",
                 "--spring.datasource.url=" + postgres.getJdbcUrl(),
                 "--spring.datasource.username=" + postgres.getUsername(),
                 "--spring.datasource.password=" + postgres.getPassword(),

@@ -7,6 +7,8 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
+import java.time.Instant;
+
 import static com.github.lucasskywalker64.installation.InstallationConfiguration.SetupStep;
 import static com.github.lucasskywalker64.installation.InstallationConfiguration.State;
 
@@ -52,6 +54,7 @@ class InstallationConfigurationEntity {
     String storageAccessKey;
     @Column(columnDefinition = "text")
     String storageSecretKey;
+    Instant storageVerifiedAt;
     @Column(columnDefinition = "text")
     String publicUrl;
     @Enumerated(EnumType.STRING)
