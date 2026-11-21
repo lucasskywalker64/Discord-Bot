@@ -6,6 +6,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import org.hibernate.annotations.DynamicUpdate;
 
+import java.time.Instant;
 import java.util.UUID;
 
 @Entity
@@ -20,7 +21,23 @@ class DashboardAccount {
     long loginVersion;
     String primaryTwitchId;
     String managedGuildId;
+    String recoveryCodeHash;
+    String recoveryLinkHash;
+    Instant recoveryLinkExpiresAt;
 
     protected DashboardAccount() {
+    }
+
+    void changeDiscord(DiscordOAuthClient.Identity identity) {
+        discordId = identity.id();
+        discordUsername = identity.username();
+        loginVersion++;
+        recoveryCodeHash = null;
+        clearRecoveryLink();
+    }
+
+    void clearRecoveryLink() {
+        recoveryLinkHash = null;
+        recoveryLinkExpiresAt = null;
     }
 }

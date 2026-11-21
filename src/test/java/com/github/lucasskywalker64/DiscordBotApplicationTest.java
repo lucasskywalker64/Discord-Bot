@@ -64,7 +64,7 @@ class DiscordBotApplicationTest {
             assertThrows(DuplicateKeyException.class, () -> jdbc.update(
                     "INSERT INTO guild_configuration (guild_id) VALUES (?)", "100000000000000001"));
             migrations = appliedMigrations(jdbc);
-            assertEquals(5, migrations.size());
+            assertEquals(6, migrations.size());
         }
 
         try (var application = startApplication()) {

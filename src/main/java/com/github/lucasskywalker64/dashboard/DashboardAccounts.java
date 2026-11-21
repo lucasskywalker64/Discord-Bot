@@ -51,12 +51,22 @@ class DashboardAccounts {
         }
         var account = lockCurrentAccount(principal, now);
         if (!account.discordId.equals(identity.id())) {
-            account.discordId = identity.id();
-            account.loginVersion++;
+            account.changeDiscord(identity);
+        } else {
+            account.discordUsername = identity.username();
         }
-        account.discordUsername = identity.username();
         accounts.flush();
         return createSession(account, principal, now);
+    }
+
+    String generateRecoveryCode(Principal principal) {
+        if (!recent(principal)) {
+            throw new ReauthenticationRequired();
+        }
+        var account = lockCurrentAccount(principal, clock.instant());
+        String code = DashboardRecovery.CredentialKind.SAVED_CODE.newToken();
+        account.recoveryCodeHash = DashboardTokens.hash(code);
+        return code;
     }
 
     boolean recent(Principal principal) {
@@ -70,7 +80,8 @@ class DashboardAccounts {
         }
         return sessions.findCurrent(DashboardTokens.hash(token), clock.instant()).map(session ->
                 new Principal(session.id, session.account.id, session.loginVersion, session.authenticatedAt,
-                        new DiscordOAuthClient.Identity(session.account.discordId, session.account.discordUsername)));
+                        new DiscordOAuthClient.Identity(session.account.discordId, session.account.discordUsername),
+                        session.account.recoveryCodeHash != null));
     }
 
     void logout(Principal principal) {
@@ -96,7 +107,7 @@ class DashboardAccounts {
     }
 
     record Principal(String sessionId, UUID accountId, long loginVersion, Instant authenticatedAt,
-                     DiscordOAuthClient.Identity discord) {
+                     DiscordOAuthClient.Identity discord, boolean hasRecoveryCode) {
     }
 
     static final class StaleSession extends RuntimeException {

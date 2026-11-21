@@ -66,10 +66,25 @@ loopback HTTP.
 The first Discord sign-in creates a dashboard account. To change its login,
 verify your current login if prompted, authorize the proposed Discord identity
 and confirm the two identities shown in the dashboard. Changing the identity
-signs out other dashboard sessions for that account. If you lose access to the
-current Discord identity, contact the installation administrator for reviewed
-recovery with verified identity proof. Signing in with a different Discord
-identity starts a separate account.
+signs out other dashboard sessions for that account.
+
+Generate a recovery code in the dashboard while you can still sign in. Save
+it somewhere safe. If you lose access to Discord, start at **Use a recovery
+code**, authorize the new Discord identity, and confirm the change. If you
+also lost the code, contact the installation administrator.
+
+In the private console, **Accounts** lists registered accounts and their linked
+Discord, Twitch and guild IDs. After verifying the user's ownership, choose
+**Issue recovery link**, record how you verified ownership, and enter your
+administrator password. Send the link privately. Anyone holding it can choose
+the new Discord identity. The link expires after 30 minutes. Issuing another
+link or choosing **Revoke recovery link** invalidates the previous link.
+
+Successful recovery keeps the same account and its links, signs out its old
+dashboard sessions, and invalidates outstanding recovery credentials. Sign in
+with the new Discord identity to generate a new code. The database records
+recovery link issuance, revocation and completed recovery without recording
+the codes or links.
 
 ### Reset the local administrator password
 

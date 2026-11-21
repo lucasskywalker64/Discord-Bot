@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { adminRequest, ApiError } from "./api";
+import { DashboardAccounts } from "./accounts";
 import type { Configuration, Session } from "./api";
 import { DashboardShell, Field, Panel } from "./dashboard";
 import type { FieldErrors } from "./dashboard";
@@ -248,7 +249,7 @@ function Settings({ configuration, save, csrf }: {
 function AdminConsole() {
   const [session, setSession] = useState<Session>();
   const [configuration, setConfiguration] = useState<Configuration>();
-  const [active, setActive] = useState<"installation" | "password">("installation");
+  const [active, setActive] = useState<"installation" | "accounts" | "password">("installation");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const operations = useRef(Promise.resolve());
@@ -332,11 +333,15 @@ function AdminConsole() {
   }
 
   const setup = configuration.setupStep !== "COMPLETE";
-  const title = active === "password" ? "Change password" : setup ? "Installation setup" : "Installation settings";
+  const installationTitle = setup ? "Installation setup" : "Installation settings";
+  const title = active === "accounts" ? "Dashboard accounts"
+    : active === "password" ? "Change password" : installationTitle;
   return <DashboardShell context="Private console"
     navigation={<>
       <button aria-current={active === "installation" ? "page" : undefined}
         onClick={() => setActive("installation")}>{setup ? "Setup" : "Settings"}</button>
+      <button aria-current={active === "accounts" ? "page" : undefined}
+        onClick={() => setActive("accounts")}>Accounts</button>
       <button aria-current={active === "password" ? "page" : undefined}
         onClick={() => setActive("password")}>Password</button>
     </>}
@@ -344,7 +349,7 @@ function AdminConsole() {
       <button onClick={() => void perform(() => endSession("logout"))} disabled={busy}>Sign out</button></>}>
     <header className="heading"><h1>{title}</h1></header>
     {error && <p role="alert" className="form-error">{error}</p>}
-    {active === "password" ? <Panel title="Local administrator"
+    {active === "accounts" ? <DashboardAccounts csrf={session.csrfToken} /> : active === "password" ? <Panel title="Local administrator"
       description="Changing your password signs out all local administrator sessions.">
       <SaveForm label="Change password" submit={form => {
         const body = new URLSearchParams();

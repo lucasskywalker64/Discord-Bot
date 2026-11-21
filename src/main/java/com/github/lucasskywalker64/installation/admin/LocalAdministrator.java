@@ -1,5 +1,6 @@
 package com.github.lucasskywalker64.installation.admin;
 
+import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.LockedException;
@@ -67,13 +68,17 @@ class LocalAdministrator {
     }
 
     boolean changePassword(AdminPrincipal principal, String currentPassword, String newPassword) {
-        takeAttempt();
-        verify(currentPassword, readCredential(principal.username())
-                .filter(credential -> credential.version() == principal.version()));
+        verifyCurrentPassword(principal, currentPassword);
         return jdbc.sql("""
                 UPDATE local_administrator SET password_hash = :hash, credential_version = credential_version + 1
                 WHERE id = 1 AND credential_version = :version
                 """).param("hash", passwords.encode(newPassword)).param("version", principal.version()).update() == 1;
+    }
+
+    void verifyCurrentPassword(AdminPrincipal principal, @Nullable String password) {
+        takeAttempt();
+        verify(password, readCredential(principal.username())
+                .filter(credential -> credential.version() == principal.version()));
     }
 
     boolean resetPassword(String password) {
@@ -98,7 +103,7 @@ class LocalAdministrator {
                 .query((row, _) -> new Credential(row.getString(1), row.getLong(2))).optional();
     }
 
-    private void verify(String password, Optional<Credential> credential) {
+    private void verify(@Nullable String password, Optional<Credential> credential) {
         if (password == null || !validPassword(password)
                 || credential.isEmpty() || !passwords.matches(password, credential.orElseThrow().hash())) {
             throw new BadCredentialsException("Invalid local administrator credentials.");

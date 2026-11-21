@@ -10,6 +10,7 @@ import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
@@ -25,8 +26,10 @@ import org.springframework.web.util.WebUtils;
 import org.springframework.web.servlet.config.annotation.ViewControllerRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
+import java.net.URI;
 import java.time.Duration;
 import java.util.List;
+import java.util.Locale;
 
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
@@ -71,8 +74,9 @@ class DashboardWeb implements WebMvcConfigurer {
                 .authorizeHttpRequests(requests -> requests
                         .requestMatchers(HttpMethod.GET, "/dashboard", "/dashboard/", "/dashboard/index.html",
                                 "/dashboard/assets/**", "/dashboard/api/session",
-                                DiscordDashboardOAuth.CALLBACK).permitAll()
-                        .requestMatchers(HttpMethod.POST, "/dashboard/api/sign-in").permitAll()
+                                "/dashboard/api/recovery", DiscordDashboardOAuth.CALLBACK).permitAll()
+                        .requestMatchers(HttpMethod.POST, "/dashboard/api/sign-in", "/dashboard/api/recover",
+                                "/dashboard/api/confirm-recovery", "/dashboard/api/discard-recovery").permitAll()
                         .anyRequest().hasAuthority(DashboardAccounts.AUTHORITY))
                 .build();
     }
@@ -82,8 +86,33 @@ class DashboardWeb implements WebMvcConfigurer {
         return cookie == null ? null : cookie.getValue();
     }
 
+    static String oauthBrowser(HttpServletRequest request, HttpServletResponse response, String callback) {
+        String browser = cookie(request, OAUTH_COOKIE);
+        if (browser == null || !DashboardTokens.valid(browser)) {
+            browser = DashboardTokens.create();
+        }
+        setCookie(response, OAUTH_COOKIE, browser, DiscordDashboardOAuth.ATTEMPT_LIFETIME,
+                "https".equals(URI.create(callback).getScheme()));
+        return browser;
+    }
+
     static void setCookie(HttpServletResponse response, String name, String value, Duration age, boolean secure) {
         response.addHeader("Set-Cookie", ResponseCookie.from(name, value).path("/dashboard").httpOnly(true)
                 .sameSite("Lax").secure(secure).maxAge(age).build().toString());
     }
+
+    static ResponseEntity<Void> dashboard() {
+        return redirect(URI.create("/dashboard/"));
+    }
+
+    static ResponseEntity<Void> dashboard(Outcome outcome) {
+        return redirect(URI.create("/dashboard/?oauth=" + outcome.name().toLowerCase(Locale.ROOT)));
+    }
+
+    static ResponseEntity<Void> redirect(URI location) {
+        return ResponseEntity.status(HttpStatus.SEE_OTHER).location(location).build();
+    }
+
+    enum Outcome { CONFIRM, EXPIRED, REAUTHENTICATE, RECOVERY_CONFIRM, RECOVERY_INVALID, RECOVERY_SIGNED_IN, REJECTED,
+        UNAVAILABLE }
 }

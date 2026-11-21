@@ -59,6 +59,145 @@ class LocalAdminHttpTest {
     private final TestClock clock = new TestClock();
 
     @Test
+    void savedRecoveryCodeChangesTheSameAccountWithoutAnAdministrator() throws Exception {
+        try (var application = startApplication(); var admin = new Browser(adminPort(webServer(application)));
+             var owner = new Browser(webServer(application).getPort()); var claimant = new Browser(owner.port);
+             var unrelated = new Browser(owner.port)) {
+            saveDiscordOAuth(admin, owner.port);
+            var original = owner.signInAs("101");
+            var accountId = UUID.fromString(original.path("id").asString());
+            seedAccountLinks(accountId);
+            String code = owner.recoveryCode();
+            var authorization = claimant.beginRecovery(code);
+            var callback = discordCallback(authorization, "202");
+            assertEquals("/dashboard/?oauth=expired", location(unrelated.getPath(callback)));
+            assertEquals("/dashboard/?oauth=recovery_confirm", location(claimant.getPath(callback)));
+            var proof = claimant.recoveryProof();
+            assertEquals("101", proof.path("current").path("id").asString());
+            assertEquals("202", proof.path("proposed").path("id").asString());
+            assertEquals("101", owner.dashboardAccount().path("discordId").asString());
+            assertEquals(204, claimant.confirmRecovery(proof).statusCode());
+            assertEquals(410, claimant.confirmRecovery(proof).statusCode());
+            assertEquals(401, owner.getPath("/dashboard/api/account").statusCode());
+            assertEquals(401, claimant.getPath("/dashboard/api/account").statusCode());
+            assertEquals("/dashboard/?oauth=recovery_invalid", location(unrelated.recoveryRequest(code)));
+            assertEquals(original.path("id"), claimant.signInAs("202").path("id"));
+            assertAccountLinksPreserved(accountId);
+        }
+    }
+
+    @Test
+    void recoveryCodeRotationInvalidatesStagedProofAndOnlyOneConcurrentResetCommits() throws Exception {
+        try (var application = startApplication(); var admin = new Browser(adminPort(webServer(application)));
+             var owner = new Browser(webServer(application).getPort()); var first = new Browser(owner.port);
+             var second = new Browser(owner.port); var signedOut = new Browser(owner.port)) {
+            saveDiscordOAuth(admin, owner.port);
+            var original = owner.signInAs("101");
+            var oldCode = owner.recoveryCode();
+            var oldProof = first.proveRecovery(oldCode, "303");
+            var code = owner.recoveryCode();
+            assertEquals(410, first.confirmRecovery(oldProof).statusCode());
+            assertEquals(401, signedOut.dashboardPost("recovery-code", signedOut.dashboardCsrf()).statusCode());
+            clock.advance(Duration.ofMinutes(11));
+            assertEquals(428, owner.dashboardPost("recovery-code", owner.dashboardCsrf()).statusCode());
+
+            var firstProof = first.proveRecovery(code, "303").path("confirmation").asString();
+            var secondProof = second.proveRecovery(code, "404").path("confirmation").asString();
+            var firstConfirm = first.sendDashboard("confirm-recovery", firstProof, first.dashboardCsrf());
+            var secondConfirm = second.sendDashboard("confirm-recovery", secondProof, second.dashboardCsrf());
+            int firstStatus = firstConfirm.get(10, TimeUnit.SECONDS).statusCode();
+            int secondStatus = secondConfirm.get(10, TimeUnit.SECONDS).statusCode();
+            assertEquals(List.of(204, 410), List.of(firstStatus, secondStatus).stream().sorted().toList());
+            assertEquals(original.path("id"), signedOut.signInAs(firstStatus == 204 ? "303" : "404").path("id"));
+        }
+    }
+
+    @Test
+    void privateAdministratorCanIssueAndRevokeAnAuditedRecoveryLink() throws Exception {
+        try (var application = startApplication(); var admin = new Browser(adminPort(webServer(application)));
+             var owner = new Browser(webServer(application).getPort()); var claimant = new Browser(owner.port);
+             var otherAccount = new Browser(owner.port)) {
+            saveDiscordOAuth(admin, owner.port);
+            var original = owner.signInAs("101");
+            var accountId = original.path("id").asString();
+            var savedCode = owner.recoveryCode();
+            otherAccount.signInAs("202");
+            assertEquals(404, owner.getPath("/admin/api/accounts").statusCode());
+            var list = admin.get("accounts?query=PERSON-101");
+            assertEquals(200, list.statusCode(), list::body);
+            var items = JSON.readTree(list.body()).path("accounts");
+            assertEquals(1, items.size());
+            assertEquals(accountId, items.get(0).path("id").asString());
+            assertFalse(list.body().contains(savedCode));
+
+            String path = "accounts/" + accountId + "/";
+            long version = items.get(0).path("loginVersion").asLong();
+            assertEquals(400, admin.post(path + "recovery-link",
+                    Map.of("password", PASSWORD, "reason", "", "loginVersion", version)).statusCode());
+            assertEquals(401, admin.post(path + "recovery-link",
+                    Map.of("password", "incorrect test passphrase", "reason", "Reviewed prior ownership",
+                            "loginVersion", version)).statusCode());
+
+            var revoked = admin.recoveryLink(path, version);
+            var revokedProof = claimant.proveRecovery(revoked, "303");
+            assertEquals(204, admin.post(path + "revoke-recovery-link", Map.of()).statusCode());
+            assertEquals(410, claimant.confirmRecovery(revokedProof).statusCode());
+            assertEquals("101", owner.dashboardAccount().path("discordId").asString());
+
+            var expired = admin.recoveryLink(path, version);
+            clock.advance(Duration.ofMinutes(31));
+            assertEquals("/dashboard/?oauth=recovery_invalid", location(claimant.recoveryRequest(expired)));
+            var replacedLink = admin.recoveryLink(path, version);
+            var activeLink = admin.recoveryLink(path, version);
+            assertEquals("/dashboard/?oauth=recovery_invalid", location(claimant.recoveryRequest(replacedLink)));
+            assertEquals(409, claimant.confirmRecovery(claimant.proveRecovery(activeLink, "202")).statusCode());
+            assertEquals("101", owner.dashboardAccount().path("discordId").asString());
+            assertEquals("202", otherAccount.dashboardAccount().path("discordId").asString());
+            assertEquals(204, claimant.confirmRecovery(claimant.proveRecovery(activeLink, "303")).statusCode());
+            assertEquals(401, owner.getPath("/dashboard/api/account").statusCode());
+            assertEquals("/dashboard/?oauth=recovery_invalid", location(claimant.recoveryRequest(savedCode)));
+            assertEquals(original.path("id"), claimant.signInAs("303").path("id"));
+            assertEquals(412, admin.post(path + "recovery-link", Map.of("password", PASSWORD,
+                    "reason", "Previously verified account", "loginVersion", version)).statusCode());
+            assertRecoveryAudit(UUID.fromString(accountId));
+        }
+    }
+
+    private static void assertRecoveryAudit(UUID accountId) throws Exception {
+        try (var connection = DriverManager.getConnection(
+                postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+             var select = connection.prepareStatement("""
+                     SELECT action, actor, reason, previous_discord_id, new_discord_id
+                     FROM dashboard_recovery_audit WHERE account_id = ? ORDER BY id
+                     """)) {
+            select.setObject(1, accountId);
+            try (var events = select.executeQuery()) {
+                assertTrue(events.next());
+                assertEquals("LINK_ISSUED", events.getString("action"));
+                assertEquals("local-admin", events.getString("actor"));
+                assertEquals("Reviewed prior ownership", events.getString("reason"));
+                assertTrue(events.next());
+                assertEquals("LINK_REVOKED", events.getString("action"));
+                int revocations = 1;
+                while (events.next()) {
+                    String action = events.getString("action");
+                    if ("LINK_REVOKED".equals(action)) {
+                        revocations++;
+                    }
+                    if ("ISSUED_LINK_USED".equals(action)) {
+                        assertEquals(2, revocations);
+                        assertEquals("101", events.getString("previous_discord_id"));
+                        assertEquals("303", events.getString("new_discord_id"));
+                        assertFalse(events.next());
+                        return;
+                    }
+                }
+                throw new AssertionError("No completed recovery event");
+            }
+        }
+    }
+
+    @Test
     void administratorTestsTheSavedCallbackWithoutCreatingDashboardSessions() throws Exception {
         try (var application = startApplication(); var admin = new Browser(adminPort(webServer(application)));
              var otherAdmin = new Browser(admin.port); var publicBrowser = new Browser(webServer(application).getPort());
@@ -617,6 +756,52 @@ class LocalAdminHttpTest {
         String proveReplacement(String id) throws Exception {
             assertEquals("/dashboard/?oauth=confirm", location(getPath(discordCallback(beginDiscord("replace-discord"), id))));
             return JSON.readTree(getPath("/dashboard/api/replacement").body()).path("confirmation").asString();
+        }
+
+        String recoveryCode() throws Exception {
+            var response = dashboardPost("recovery-code", dashboardCsrf());
+            assertEquals(200, response.statusCode(), response::body);
+            return JSON.readTree(response.body()).path("code").asString();
+        }
+
+        HttpResponse<String> recoveryRequest(String credential) throws Exception {
+            String body = "credential=" + URLEncoder.encode(credential, StandardCharsets.UTF_8)
+                    + "&_csrf=" + URLEncoder.encode(dashboardCsrf(), StandardCharsets.UTF_8);
+            var request = HttpRequest.newBuilder(uri(port, "/dashboard/api/recover"))
+                    .header("Content-Type", "application/x-www-form-urlencoded").timeout(Duration.ofSeconds(8))
+                    .POST(HttpRequest.BodyPublishers.ofString(body));
+            return http.send(request.build(), HttpResponse.BodyHandlers.ofString());
+        }
+
+        String beginRecovery(String credential) throws Exception {
+            return location(recoveryRequest(credential));
+        }
+
+        String recoveryLink(String accountPath, long loginVersion) throws Exception {
+            var response = post(accountPath + "recovery-link",
+                    Map.of("password", PASSWORD, "reason", "Reviewed prior ownership", "loginVersion", loginVersion));
+            assertEquals(200, response.statusCode(), response::body);
+            var link = URI.create(JSON.readTree(response.body()).path("url").asString());
+            assertEquals("/dashboard/", link.getPath());
+            assertTrue(link.getFragment().startsWith("recovery="));
+            return link.getFragment().substring("recovery=".length());
+        }
+
+        JsonNode proveRecovery(String credential, String id) throws Exception {
+            var authorization = beginRecovery(credential);
+            assertEquals("/dashboard/?oauth=recovery_confirm", location(getPath(discordCallback(authorization, id))));
+            return recoveryProof();
+        }
+
+        JsonNode recoveryProof() throws Exception {
+            var proof = getPath("/dashboard/api/recovery");
+            assertEquals(200, proof.statusCode(), proof::body);
+            return JSON.readTree(proof.body());
+        }
+
+        HttpResponse<String> confirmRecovery(JsonNode proof) throws Exception {
+            return sendDashboard("confirm-recovery", proof.path("confirmation").asString(), dashboardCsrf())
+                    .get(10, TimeUnit.SECONDS);
         }
 
         HttpResponse<String> confirmReplacement(String proof) throws Exception {

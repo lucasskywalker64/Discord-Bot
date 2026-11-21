@@ -1,6 +1,7 @@
 package com.github.lucasskywalker64.dashboard;
 
 import com.github.lucasskywalker64.dashboard.DashboardAccounts.Principal;
+import com.github.lucasskywalker64.dashboard.DashboardWeb.Outcome;
 import com.github.lucasskywalker64.dashboard.DiscordDashboardOAuth.Attempt;
 import com.github.lucasskywalker64.dashboard.DiscordDashboardOAuth.Purpose;
 import jakarta.servlet.http.HttpServletRequest;
@@ -21,20 +22,25 @@ import org.springframework.web.client.RestClientException;
 
 import java.net.URI;
 import java.time.Duration;
-import java.util.Locale;
 import java.util.Objects;
 import java.util.UUID;
+
+import static com.github.lucasskywalker64.dashboard.DashboardWeb.dashboard;
+import static com.github.lucasskywalker64.dashboard.DashboardWeb.redirect;
 
 @RestController
 class DashboardController {
     private final DiscordDashboardOAuth oauth;
     private final DiscordOAuthClient discord;
     private final DashboardAccounts accounts;
+    private final DashboardRecovery recovery;
 
-    DashboardController(DiscordDashboardOAuth oauth, DiscordOAuthClient discord, DashboardAccounts accounts) {
+    DashboardController(DiscordDashboardOAuth oauth, DiscordOAuthClient discord, DashboardAccounts accounts,
+                        DashboardRecovery recovery) {
         this.oauth = oauth;
         this.discord = discord;
         this.accounts = accounts;
+        this.recovery = recovery;
     }
 
     @GetMapping("/dashboard/api/session")
@@ -45,7 +51,13 @@ class DashboardController {
 
     @GetMapping("/dashboard/api/account")
     AccountView account(@AuthenticationPrincipal Principal principal) {
-        return new AccountView(principal.accountId(), principal.discord().id(), principal.discord().username());
+        return new AccountView(principal.accountId(), principal.discord().id(), principal.discord().username(),
+                principal.hasRecoveryCode());
+    }
+
+    @PostMapping("/dashboard/api/recovery-code")
+    RecoveryCode generateRecoveryCode(@AuthenticationPrincipal Principal principal) {
+        return new RecoveryCode(accounts.generateRecoveryCode(principal));
     }
 
     @PostMapping("/dashboard/api/sign-in")
@@ -92,10 +104,10 @@ class DashboardController {
             return testCallback(state, authorizationCode, request, response);
         }
         var attempt = oauth.take(state, DashboardWeb.cookie(request, DashboardWeb.OAUTH_COOKIE));
-        if (attempt == null || !Objects.equals(attempt.sessionId(), sessionId(principal))) {
+        if (attempt == null || !Objects.equals(attempt.intent().sessionId(), sessionId(principal))) {
             return dashboard(Outcome.EXPIRED);
         }
-        return accountCallback(attempt, principal, authorizationCode, response);
+        return accountCallback(attempt, principal, authorizationCode, request, response);
     }
 
     @GetMapping("/dashboard/api/replacement")
@@ -159,17 +171,12 @@ class DashboardController {
         if (settings == null) {
             return dashboard(Outcome.UNAVAILABLE);
         }
-        String browser = DashboardWeb.cookie(request, DashboardWeb.OAUTH_COOKIE);
-        if (browser == null || !DashboardTokens.valid(browser)) {
-            browser = DashboardTokens.create();
-        }
-        DashboardWeb.setCookie(response, DashboardWeb.OAUTH_COOKIE, browser, DiscordDashboardOAuth.ATTEMPT_LIFETIME,
-                secureCallback(settings.callbackUrl()));
+        var browser = DashboardWeb.oauthBrowser(request, response, settings.callbackUrl());
         return redirect(oauth.begin(settings, browser, purpose, sessionId(principal)));
     }
 
     private ResponseEntity<Void> accountCallback(Attempt attempt, @Nullable Principal principal, @Nullable String code,
-                                                 HttpServletResponse response) {
+                                                 HttpServletRequest request, HttpServletResponse response) {
         var settings = oauth.settings(attempt);
         if (settings == null) {
             return dashboard(Outcome.EXPIRED);
@@ -186,7 +193,16 @@ class DashboardController {
         if (oauth.settings(attempt) == null) {
             return dashboard(Outcome.EXPIRED);
         }
-        if (attempt.purpose() == Purpose.SIGN_IN) {
+        var claim = attempt.intent().recovery();
+        if (claim != null) {
+            if (!recovery.current(claim)) {
+                return dashboard(Outcome.RECOVERY_INVALID);
+            }
+            DashboardWeb.oauthBrowser(request, response, settings.callbackUrl());
+            oauth.stage(attempt, claim.current(), identity);
+            return dashboard(Outcome.RECOVERY_CONFIRM);
+        }
+        if (attempt.intent().purpose() == Purpose.SIGN_IN) {
             setSessionCookie(response, accounts.signIn(identity), settings.callbackUrl());
             return dashboard();
         }
@@ -199,7 +215,7 @@ class DashboardController {
     private ResponseEntity<Void> completeManagementAuthorization(Attempt attempt, Principal principal,
                                                                  DiscordOAuthClient.Identity identity, String callback,
                                                                  HttpServletResponse response) {
-        return switch (attempt.purpose()) {
+        return switch (attempt.intent().purpose()) {
             case REAUTHENTICATE -> {
                 var token = accounts.reauthenticate(principal, identity);
                 if (token.isEmpty()) {
@@ -252,27 +268,21 @@ class DashboardController {
         return principal == null ? null : principal.sessionId();
     }
 
-    private static ResponseEntity<Void> dashboard() {
-        return redirect(URI.create("/dashboard/"));
-    }
-
-    private static ResponseEntity<Void> dashboard(Outcome outcome) {
-        return redirect(URI.create("/dashboard/?oauth=" + outcome.name().toLowerCase(Locale.ROOT)));
-    }
-
-    private static ResponseEntity<Void> redirect(URI location) {
-        return ResponseEntity.status(HttpStatus.SEE_OTHER).location(location).build();
-    }
-
     record SessionView(boolean authenticated, boolean discordAvailable, boolean recent, String csrfToken) {
     }
 
-    record AccountView(UUID id, String discordId, String discordUsername) {
+    record AccountView(UUID id, String discordId, String discordUsername, boolean hasRecoveryCode) {
+    }
+
+    record RecoveryCode(String code) {
+        @Override
+        public String toString() {
+            return "RecoveryCode[redacted]";
+        }
     }
 
     record ReplacementView(String confirmation, DiscordOAuthClient.Identity current,
                            DiscordOAuthClient.Identity proposed) {
     }
 
-    private enum Outcome { CONFIRM, EXPIRED, REAUTHENTICATE, REJECTED, UNAVAILABLE }
 }

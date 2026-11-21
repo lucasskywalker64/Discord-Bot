@@ -1,5 +1,6 @@
 package com.github.lucasskywalker64.dashboard;
 
+import com.github.lucasskywalker64.dashboard.DashboardRecovery.Claim;
 import com.github.lucasskywalker64.installation.InstallationConfigurationService;
 import com.github.lucasskywalker64.installation.InstallationConfigurationService.DiscordOAuthSettings;
 import org.jspecify.annotations.Nullable;
@@ -49,7 +50,11 @@ public class DiscordDashboardOAuth {
     }
 
     URI begin(DiscordOAuthSettings settings, String browser, Purpose purpose, @Nullable String sessionId) {
-        return registerAttempt(settings, browser, purpose, sessionId, null, clock.instant().plus(ATTEMPT_LIFETIME));
+        return registerAttempt(settings, browser, new Intent(purpose, sessionId), clock.instant().plus(ATTEMPT_LIFETIME));
+    }
+
+    URI beginRecovery(DiscordOAuthSettings settings, String browser, Claim claim) {
+        return registerAttempt(settings, browser, new Intent(claim), clock.instant().plus(ATTEMPT_LIFETIME));
     }
 
     synchronized @Nullable Attempt take(@Nullable String state, @Nullable String browser) {
@@ -101,8 +106,7 @@ public class DiscordDashboardOAuth {
         if (settings == null) {
             return null;
         }
-        return new TestLaunch(registerAttempt(settings, browser, Purpose.ADMIN_TEST, null, test, test.expiresAt),
-                settings.callbackUrl());
+        return new TestLaunch(registerAttempt(settings, browser, new Intent(test), test.expiresAt), settings.callbackUrl());
     }
 
     public TestStatus testStatus(@Nullable AdminTest test) {
@@ -118,7 +122,7 @@ public class DiscordDashboardOAuth {
 
     @Nullable String finishTest(String state, @Nullable String browser, @Nullable String code) {
         var attempt = take(state, browser);
-        var test = attempt == null ? null : attempt.test();
+        var test = attempt == null ? null : attempt.intent().test();
         if (test == null || !test.active(clock.instant())) {
             return null;
         }
@@ -144,53 +148,68 @@ public class DiscordDashboardOAuth {
 
     synchronized void stage(Attempt attempt, DiscordOAuthClient.Identity current, DiscordOAuthClient.Identity proposed) {
         var now = clock.instant();
+        var recovery = attempt.intent().recovery();
+        var key = recovery != null ? attempt.browser() : Objects.requireNonNull(attempt.intent().sessionId());
         proofs.values().removeIf(proof -> !now.isBefore(proof.expiresAt()));
-        if (proofs.size() >= MAX_ATTEMPTS && !proofs.containsKey(attempt.sessionId())) {
+        if (proofs.size() >= MAX_ATTEMPTS && !proofs.containsKey(key)) {
             throw new AttemptsFull();
         }
-        proofs.put(attempt.sessionId(), new Proof(DashboardTokens.create(), attempt.revision(), current,
-                proposed, now.plus(ATTEMPT_LIFETIME)));
+        proofs.put(key, new Proof(DashboardTokens.create(), attempt.revision(), current,
+                proposed, now.plus(ATTEMPT_LIFETIME), recovery));
     }
 
-    synchronized @Nullable Proof proof(String sessionId) {
-        var proof = proofs.get(sessionId);
+    synchronized @Nullable Proof proof(@Nullable String key) {
+        var proof = proofs.get(key);
         if (proof != null && !clock.instant().isBefore(proof.expiresAt())) {
-            proofs.remove(sessionId);
+            proofs.remove(key);
             return null;
         }
         return proof;
     }
 
-    synchronized @Nullable Proof confirm(String sessionId, String confirmation) {
-        var proof = proof(sessionId);
+    synchronized @Nullable Proof confirm(@Nullable String key, String confirmation) {
+        var proof = proof(key);
         if (proof == null || !proof.confirmation().equals(confirmation)) {
             return null;
         }
-        proofs.remove(sessionId);
+        proofs.remove(key);
         return proof;
     }
 
-    private synchronized URI registerAttempt(DiscordOAuthSettings settings, String browser, Purpose purpose,
-                                             @Nullable String sessionId, @Nullable AdminTest test, Instant expiresAt) {
+    private synchronized URI registerAttempt(DiscordOAuthSettings settings, String browser, Intent intent,
+                                             Instant expiresAt) {
         var now = clock.instant();
         attempts.values().removeIf(attempt -> !now.isBefore(attempt.expiresAt()));
         if (attempts.size() >= MAX_ATTEMPTS) {
             throw new AttemptsFull();
         }
-        var state = (purpose == Purpose.ADMIN_TEST ? TEST_STATE_PREFIX : "") + DashboardTokens.create();
+        var state = (intent.purpose() == Purpose.ADMIN_TEST ? TEST_STATE_PREFIX : "") + DashboardTokens.create();
         var verifier = DashboardTokens.create();
-        attempts.put(state, new Attempt(browser, settings.revision(), purpose, sessionId, verifier, expiresAt, test));
+        attempts.put(state, new Attempt(browser, settings.revision(), intent, verifier, expiresAt));
         return discord.authorization(settings, state, verifier);
     }
 
-    enum Purpose { SIGN_IN, REAUTHENTICATE, REPLACE, ADMIN_TEST }
+    enum Purpose { SIGN_IN, REAUTHENTICATE, REPLACE, RECOVER, ADMIN_TEST }
 
-    record Attempt(String browser, long revision, Purpose purpose, @Nullable String sessionId, String verifier,
-                   Instant expiresAt, @Nullable AdminTest test) {
+    record Intent(Purpose purpose, @Nullable String sessionId, @Nullable AdminTest test, @Nullable Claim recovery) {
+        private Intent(Purpose purpose, @Nullable String sessionId) {
+            this(purpose, sessionId, null, null);
+        }
+
+        private Intent(AdminTest test) {
+            this(Purpose.ADMIN_TEST, null, test, null);
+        }
+
+        private Intent(Claim recovery) {
+            this(Purpose.RECOVER, null, null, recovery);
+        }
+    }
+
+    record Attempt(String browser, long revision, Intent intent, String verifier, Instant expiresAt) {
     }
 
     record Proof(String confirmation, long revision, DiscordOAuthClient.Identity current,
-                 DiscordOAuthClient.Identity proposed, Instant expiresAt) {
+                 DiscordOAuthClient.Identity proposed, Instant expiresAt, @Nullable Claim recovery) {
     }
 
     record TestLaunch(URI authorization, String callbackUrl) {
