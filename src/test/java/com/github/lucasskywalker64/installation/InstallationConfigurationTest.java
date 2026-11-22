@@ -49,7 +49,8 @@ class InstallationConfigurationTest {
             assertFalse(settings.read().discord().botTokenConfigured());
 
             var result = settings.updateDiscord(new DiscordUpdate(false, SecretUpdate.replace("bot-secret"),
-                    true, "123456789", SecretUpdate.replace("oauth-secret"), "https://bot.example/discord/callback"));
+                    true, "123456789", SecretUpdate.replace("oauth-secret"),
+                    "https://bot.example/dashboard/oauth/discord/callback"));
             assertTrue(result.errors().isEmpty());
             assertTrue(result.configuration().discord().botTokenConfigured());
             assertTrue(result.configuration().discord().clientSecretConfigured());

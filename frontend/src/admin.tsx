@@ -17,10 +17,12 @@ const steps = [
   { step: "DEPLOYMENT", label: "Deployment" },
   { step: "STORAGE", label: "Storage" },
 ] as const;
-const discordGuide = <>Find the bot token in the <a href="https://discord.com/developers/applications"
-  target="_blank" rel="noreferrer">Discord Developer Portal</a>. For public sign-in, register your public
-  HTTPS origin followed by <code>/dashboard/oauth/discord/callback</code> under Redirects and enter the
-  application ID and client secret.</>;
+function discordGuide(callbackUrl: string) {
+  return <>Find the bot token in the <a href="https://discord.com/developers/applications"
+    target="_blank" rel="noreferrer">Discord Developer Portal</a>. For public sign-in, enter your application ID
+    and client secret. Add the callback URL under Redirects and enter the same URL below.
+    Suggested callback URL <code>{callbackUrl}</code>.</>;
+}
 const twitchGuide = <>Register an application in the <a href="https://dev.twitch.tv/console/apps"
   target="_blank" rel="noreferrer">Twitch Developer Console</a>. Add the OAuth callback URL there and copy its
   client ID and secret here.</>;
@@ -126,7 +128,7 @@ function Wizard({ configuration, save }: {
     {configuration.setupStep === "PROVIDERS" && <SaveForm label="Save and continue"
       submit={form => save("setup/providers", { discord: discordUpdate(form, true), twitch: twitchUpdate(form) })}>
       {errors => <>
-        <Panel title="Discord" description={discordGuide}>
+        <Panel title="Discord" description={discordGuide(configuration.discord.suggestedCallbackUrl)}>
           <DiscordFields value={configuration.discord} errors={errors} setup />
         </Panel>
         <Panel title="Twitch (optional)" description={twitchGuide}>
@@ -222,7 +224,7 @@ function Settings({ configuration, save, csrf }: {
   csrf: string;
 }) {
   return <>
-    <Panel title="Discord" description={discordGuide}>
+    <Panel title="Discord" description={discordGuide(configuration.discord.suggestedCallbackUrl)}>
       <SaveForm label="Save Discord settings" showSaved submit={form => save("configuration/discord", discordUpdate(form))}>
         {errors => <DiscordFields value={configuration.discord} errors={errors} />}
       </SaveForm>

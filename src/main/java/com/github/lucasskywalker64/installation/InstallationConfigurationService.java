@@ -186,7 +186,8 @@ public class InstallationConfigurationService {
         }, saved.discordFailure);
         return new Snapshot(new DiscordView(saved.discordBotEnabled, present(saved.discordBotToken),
                 saved.discordOauthEnabled, saved.discordClientId, present(saved.discordClientSecret),
-                saved.discordCallbackUrl, saved.discordOauthRevision, status),
+                saved.discordCallbackUrl, DiscordCallbackUrl.suggested(saved.publicUrl, saved.discordCallbackUrl),
+                saved.discordOauthRevision, status),
                 new TwitchView(saved.twitchEnabled, saved.twitchClientId, present(saved.twitchClientSecret),
                         saved.twitchCallbackUrl, saved.twitchOauthRevision, configuredStatus(saved.twitchEnabled)),
                 new StorageView(saved.storageEnabled, saved.storageEndpoint, saved.storageBucket, saved.storageRegion,
@@ -227,7 +228,10 @@ public class InstallationConfigurationService {
         if (update.oauthEnabled()) {
             required("discord.clientId", update.clientId(), errors);
             required("discord.clientSecret", clientSecret, errors);
-            url("discord.callbackUrl", update.callbackUrl(), true, errors);
+            if (!DiscordCallbackUrl.isValid(update.callbackUrl())) {
+                errors.put("discord.callbackUrl", "Use an HTTPS URL with the path " + DiscordCallbackUrl.PATH
+                        + " and no credentials, query or fragment. HTTP is allowed on loopback for local testing.");
+            }
         }
         return new DiscordSecrets(SecretUpdate.replace(token), SecretUpdate.replace(clientSecret));
     }

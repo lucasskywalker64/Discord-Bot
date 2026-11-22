@@ -34,6 +34,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -377,6 +378,47 @@ class LocalAdminHttpTest {
             first.cookies.getCookieStore().add(uri(first.port, "/dashboard/"), oldCookie);
             assertEquals(401, first.getPath("/dashboard/api/account").statusCode());
             assertEquals(account.path("id"), second.dashboardAccount().path("id"));
+        }
+    }
+
+    @Test
+    void showsTheSuggestedDiscordCallbackAndRejectsInvalidUrlsOnSave() throws Exception {
+        try (var application = startApplication(); var admin = new Browser(adminPort(webServer(application)))) {
+            admin.claimAndLogin();
+            var initial = JSON.readTree(admin.get("configuration").body()).path("discord");
+            assertEquals("https://<your-public-host>/dashboard/oauth/discord/callback",
+                    initial.path("suggestedCallbackUrl").asString());
+
+            int publicPort = webServer(application).getPort();
+            var discord = new HashMap<>(discordOAuth(publicPort, "test-discord-secret"));
+            var twitch = Map.of("enabled", false, "clientSecret", keep());
+            var callback = (String) discord.get("callbackUrl");
+            discord.put("callbackUrl", uri(publicPort, "/api/auth/discord/callback").toString());
+            var rejectedSetup = admin.post("setup/providers", Map.of("discord", discord, "twitch", twitch));
+            assertEquals(400, rejectedSetup.statusCode(), rejectedSetup::body);
+            assertTrue(JSON.readTree(rejectedSetup.body()).path("errors").path("discord.callbackUrl").asString()
+                    .contains("/dashboard/oauth/discord/callback"));
+
+            discord.put("callbackUrl", callback);
+            var saved = admin.post("setup/providers", Map.of("discord", discord, "twitch", twitch));
+            assertEquals(200, saved.statusCode(), saved::body);
+            assertEquals(callback, JSON.readTree(saved.body()).path("discord").path("suggestedCallbackUrl").asString());
+            var deployment = admin.post("setup/deployment", Map.of("publicUrl", "https://bot.example:8443/dashboard/"));
+            assertEquals(200, deployment.statusCode(), deployment::body);
+            assertEquals("https://bot.example:8443/dashboard/oauth/discord/callback",
+                    JSON.readTree(deployment.body()).path("discord").path("suggestedCallbackUrl").asString());
+            assertEquals(200, admin.post("setup/storage", storageDisabled()).statusCode());
+
+            for (String invalid : List.of(callback + "?extra=true", callback + "#fragment",
+                    "http://bot.example/dashboard/oauth/discord/callback")) {
+                discord.put("callbackUrl", invalid);
+                var rejected = admin.post("configuration/discord", discord);
+                assertEquals(400, rejected.statusCode(), rejected::body);
+                assertTrue(JSON.readTree(rejected.body()).path("errors").has("discord.callbackUrl"));
+            }
+            var persisted = JSON.readTree(admin.get("configuration").body()).path("discord");
+            assertEquals(callback, persisted.path("callbackUrl").asString());
+            assertEquals(1, persisted.path("oauthRevision").asInt());
         }
     }
 

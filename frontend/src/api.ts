@@ -22,6 +22,7 @@ export type Configuration = {
     clientId: string | null;
     clientSecretConfigured: boolean;
     callbackUrl: string | null;
+    suggestedCallbackUrl: string;
     status: Status;
   };
   twitch: {

@@ -1,6 +1,7 @@
 package com.github.lucasskywalker64.dashboard;
 
 import com.github.lucasskywalker64.dashboard.DashboardRecovery.Claim;
+import com.github.lucasskywalker64.installation.DiscordCallbackUrl;
 import com.github.lucasskywalker64.installation.InstallationConfigurationService;
 import com.github.lucasskywalker64.installation.InstallationConfigurationService.DiscordOAuthSettings;
 import org.jspecify.annotations.Nullable;
@@ -18,7 +19,6 @@ import java.util.function.Predicate;
 
 @Service
 public class DiscordDashboardOAuth {
-    public static final String CALLBACK = "/dashboard/oauth/discord/callback";
     static final String TEST_STATE_PREFIX = "admin.";
     static final Duration ATTEMPT_LIFETIME = Duration.ofMinutes(5);
     private static final int MAX_ATTEMPTS = 10_000;
@@ -38,15 +38,7 @@ public class DiscordDashboardOAuth {
 
     @Nullable DiscordOAuthSettings settings() {
         var settings = installation.discordOAuthSettings();
-        if (!settings.enabled() || settings.callbackUrl() == null) {
-            return null;
-        }
-        var callback = URI.create(settings.callbackUrl());
-        boolean allowedTransport = "https".equals(callback.getScheme())
-                || "localhost".equalsIgnoreCase(callback.getHost()) || "127.0.0.1".equals(callback.getHost())
-                || "[::1]".equals(callback.getHost());
-        return allowedTransport && CALLBACK.equals(callback.getRawPath()) && callback.getRawQuery() == null
-                ? settings : null;
+        return settings.enabled() && DiscordCallbackUrl.isValid(settings.callbackUrl()) ? settings : null;
     }
 
     URI begin(DiscordOAuthSettings settings, String browser, Purpose purpose, @Nullable String sessionId) {

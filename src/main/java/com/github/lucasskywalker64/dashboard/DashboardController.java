@@ -4,6 +4,7 @@ import com.github.lucasskywalker64.dashboard.DashboardAccounts.Principal;
 import com.github.lucasskywalker64.dashboard.DashboardWeb.Outcome;
 import com.github.lucasskywalker64.dashboard.DiscordDashboardOAuth.Attempt;
 import com.github.lucasskywalker64.dashboard.DiscordDashboardOAuth.Purpose;
+import com.github.lucasskywalker64.installation.DiscordCallbackUrl;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.jspecify.annotations.Nullable;
@@ -81,7 +82,7 @@ class DashboardController {
         return begin(Purpose.REPLACE, principal, request, response);
     }
 
-    @GetMapping(path = DiscordDashboardOAuth.CALLBACK, params = "test")
+    @GetMapping(path = DiscordCallbackUrl.PATH, params = "test")
     ResponseEntity<?> launchTest(@RequestParam String test, HttpServletResponse response) {
         String browser = DashboardTokens.create();
         var launch = oauth.launchTest(test, browser);
@@ -93,7 +94,7 @@ class DashboardController {
         return redirect(launch.authorization());
     }
 
-    @GetMapping(path = DiscordDashboardOAuth.CALLBACK, params = "!test")
+    @GetMapping(path = DiscordCallbackUrl.PATH, params = "!test")
     ResponseEntity<?> callback(@RequestParam(required = false) @Nullable String state,
                                @RequestParam(required = false) @Nullable String code,
                                @RequestParam(required = false) @Nullable String iss,
