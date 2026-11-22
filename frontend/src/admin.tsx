@@ -20,8 +20,9 @@ const steps = [
 function discordGuide(callbackUrl: string) {
   return <>Find the bot token in the <a href="https://discord.com/developers/applications"
     target="_blank" rel="noreferrer">Discord Developer Portal</a>. For public sign-in, enter your application ID
-    and client secret. Add the callback URL under Redirects and enter the same URL below.
-    Suggested callback URL <code>{callbackUrl}</code>.</>;
+    and client secret. The callback URL must use your dashboard's public origin and the fixed path shown here.
+    <br /><code>{callbackUrl}</code><br />
+    Register the full URL under Redirects and enter that exact URL below.</>;
 }
 const twitchGuide = <>Register an application in the <a href="https://dev.twitch.tv/console/apps"
   target="_blank" rel="noreferrer">Twitch Developer Console</a>. Add the OAuth callback URL there and copy its
