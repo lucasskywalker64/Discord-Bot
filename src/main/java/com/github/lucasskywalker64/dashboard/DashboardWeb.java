@@ -15,12 +15,12 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
-import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.AnonymousAuthenticationFilter;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
+import org.springframework.security.web.context.RequestAttributeSecurityContextRepository;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter.ReferrerPolicy;
 import org.springframework.web.util.WebUtils;
@@ -46,14 +46,21 @@ class DashboardWeb implements WebMvcConfigurer {
     }
 
     @Bean
-    @Order(2)
-    SecurityFilterChain dashboard(HttpSecurity http, DashboardAccounts accounts) {
+    CookieCsrfTokenRepository dashboardCsrfTokens() {
         var csrf = new CookieCsrfTokenRepository();
         csrf.setCookieName("DISCORD_BOT_DASHBOARD_CSRF");
         csrf.setHeaderName("X-CSRF-TOKEN");
         csrf.setCookieCustomizer(cookie -> cookie.path("/dashboard").sameSite("Strict"));
+        return csrf;
+    }
+
+    @Bean
+    @Order(2)
+    SecurityFilterChain dashboard(HttpSecurity http, DashboardAccounts accounts, CookieCsrfTokenRepository csrf) {
         return http.securityMatcher("/dashboard", "/dashboard/**")
-                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                // Restoring a dashboard session from its cookie is ordinary request authentication.
+                .sessionManagement(AbstractHttpConfigurer::disable)
+                .securityContext(context -> context.securityContextRepository(new RequestAttributeSecurityContextRepository()))
                 .requestCache(AbstractHttpConfigurer::disable)
                 .logout(AbstractHttpConfigurer::disable)
                 .csrf(config -> config.csrfTokenRepository(csrf))

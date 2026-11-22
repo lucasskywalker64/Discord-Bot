@@ -8,11 +8,13 @@ import com.github.lucasskywalker64.installation.DiscordCallbackUrl;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.jspecify.annotations.Nullable;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfToken;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -30,18 +32,21 @@ import static com.github.lucasskywalker64.dashboard.DashboardWeb.dashboard;
 import static com.github.lucasskywalker64.dashboard.DashboardWeb.redirect;
 
 @RestController
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 class DashboardController {
     private final DiscordDashboardOAuth oauth;
     private final DiscordOAuthClient discord;
     private final DashboardAccounts accounts;
     private final DashboardRecovery recovery;
+    private final CookieCsrfTokenRepository csrfTokens;
 
     DashboardController(DiscordDashboardOAuth oauth, DiscordOAuthClient discord, DashboardAccounts accounts,
-                        DashboardRecovery recovery) {
+                        DashboardRecovery recovery, CookieCsrfTokenRepository csrfTokens) {
         this.oauth = oauth;
         this.discord = discord;
         this.accounts = accounts;
         this.recovery = recovery;
+        this.csrfTokens = csrfTokens;
     }
 
     @GetMapping("/dashboard/api/session")
@@ -122,14 +127,15 @@ class DashboardController {
 
     @PostMapping("/dashboard/api/confirm-replacement")
     ResponseEntity<Void> confirmReplacement(@AuthenticationPrincipal Principal principal,
-                                            @RequestParam String confirmation, HttpServletResponse response) {
+                                            @RequestParam String confirmation, HttpServletRequest request,
+                                            HttpServletResponse response) {
         var proof = oauth.confirm(principal.sessionId(), confirmation);
         var settings = proof == null ? null : oauth.settings(proof.revision());
         if (settings == null) {
             return ResponseEntity.status(HttpStatus.GONE).build();
         }
         try {
-            setSessionCookie(response, accounts.replaceDiscord(principal, proof.proposed()), settings.callbackUrl());
+            setSessionCookie(request, response, accounts.replaceDiscord(principal, proof.proposed()), settings.callbackUrl());
             return ResponseEntity.noContent().build();
         } catch (DataIntegrityViolationException _) {
             return ResponseEntity.status(HttpStatus.CONFLICT).build();
@@ -141,6 +147,7 @@ class DashboardController {
                                 HttpServletResponse response) {
         accounts.logout(principal);
         DashboardWeb.setCookie(response, DashboardWeb.SESSION_COOKIE, "", Duration.ZERO, request.isSecure());
+        csrfTokens.saveToken(null, request, response);
         return ResponseEntity.noContent().build();
     }
 
@@ -204,25 +211,25 @@ class DashboardController {
             return dashboard(Outcome.RECOVERY_CONFIRM);
         }
         if (attempt.intent().purpose() == Purpose.SIGN_IN) {
-            setSessionCookie(response, accounts.signIn(identity), settings.callbackUrl());
+            setSessionCookie(request, response, accounts.signIn(identity), settings.callbackUrl());
             return dashboard();
         }
         if (principal == null) {
             return dashboard(Outcome.EXPIRED);
         }
-        return completeManagementAuthorization(attempt, principal, identity, settings.callbackUrl(), response);
+        return completeManagementAuthorization(attempt, principal, identity, settings.callbackUrl(), request, response);
     }
 
     private ResponseEntity<Void> completeManagementAuthorization(Attempt attempt, Principal principal,
                                                                  DiscordOAuthClient.Identity identity, String callback,
-                                                                 HttpServletResponse response) {
+                                                                 HttpServletRequest request, HttpServletResponse response) {
         return switch (attempt.intent().purpose()) {
             case REAUTHENTICATE -> {
                 var token = accounts.reauthenticate(principal, identity);
                 if (token.isEmpty()) {
                     yield dashboard(Outcome.REJECTED);
                 }
-                setSessionCookie(response, token.orElseThrow(), callback);
+                setSessionCookie(request, response, token.orElseThrow(), callback);
                 yield dashboard();
             }
             case REPLACE -> {
@@ -260,9 +267,10 @@ class DashboardController {
         return code != null && !code.isBlank() && (issuer == null || "https://discord.com".equals(issuer));
     }
 
-    private static void setSessionCookie(HttpServletResponse response, String token, String callback) {
+    private void setSessionCookie(HttpServletRequest request, HttpServletResponse response, String token, String callback) {
         DashboardWeb.setCookie(response, DashboardWeb.SESSION_COOKIE, token, DashboardAccounts.SESSION_LIFETIME,
                 secureCallback(callback));
+        csrfTokens.saveToken(null, request, response);
     }
 
     private static @Nullable String sessionId(@Nullable Principal principal) {

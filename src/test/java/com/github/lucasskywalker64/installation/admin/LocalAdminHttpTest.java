@@ -422,6 +422,24 @@ class LocalAdminHttpTest {
         }
     }
 
+    @Test
+    void dashboardAccountLoadKeepsTheCsrfTokenForReplacement() throws Exception {
+        try (var application = startApplication(); var admin = new Browser(adminPort(webServer(application)));
+             var browser = new Browser(webServer(application).getPort())) {
+            saveDiscordOAuth(admin, browser.port);
+            String beforeSignIn = browser.dashboardCsrf();
+            var signIn = location(browser.submitDiscord("sign-in", beforeSignIn));
+            assertEquals("/dashboard/", location(browser.getPath(discordCallback(signIn, "101"))));
+            assertEquals(403, browser.submitDiscord("replace-discord", beforeSignIn).statusCode());
+
+            String csrf = browser.dashboardCsrf();
+            assertEquals("101", browser.dashboardAccount().path("discordId").asString());
+            var replacement = browser.submitDiscord("replace-discord", csrf);
+            assertEquals(303, replacement.statusCode());
+            assertEquals("discord.com", URI.create(location(replacement)).getHost());
+        }
+    }
+
     private static void saveDiscordOAuth(Browser admin, int publicPort) throws Exception {
         admin.claimAndLogin();
         var saved = admin.post("setup/providers", Map.of("discord", discordOAuth(publicPort, "test-discord-secret"),
@@ -855,11 +873,15 @@ class LocalAdminHttpTest {
         }
 
         String beginDiscord(String operation) throws Exception {
-            String body = "_csrf=" + URLEncoder.encode(dashboardCsrf(), StandardCharsets.UTF_8);
+            return location(submitDiscord(operation, dashboardCsrf()));
+        }
+
+        HttpResponse<String> submitDiscord(String operation, String csrf) throws Exception {
+            String body = "_csrf=" + URLEncoder.encode(csrf, StandardCharsets.UTF_8);
             var request = HttpRequest.newBuilder(uri(port, "/dashboard/api/" + operation))
                     .header("Content-Type", "application/x-www-form-urlencoded").timeout(Duration.ofSeconds(8))
                     .POST(HttpRequest.BodyPublishers.ofString(body));
-            return location(http.send(request.build(), HttpResponse.BodyHandlers.ofString()));
+            return http.send(request.build(), HttpResponse.BodyHandlers.ofString());
         }
 
         JsonNode dashboardAccount() throws Exception {
