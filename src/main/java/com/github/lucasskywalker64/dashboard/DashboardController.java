@@ -102,10 +102,12 @@ class DashboardController {
     @GetMapping(path = DiscordCallbackUrl.PATH, params = "!test")
     ResponseEntity<?> callback(@RequestParam(required = false) @Nullable String state,
                                @RequestParam(required = false) @Nullable String code,
+                               @RequestParam(required = false) @Nullable String error,
                                @RequestParam(required = false) @Nullable String iss,
                                @AuthenticationPrincipal @Nullable Principal principal, HttpServletRequest request,
                                HttpServletResponse response) {
-        String authorizationCode = validResponse(code, iss) ? code : null;
+        boolean validIssuer = iss == null || "https://discord.com".equals(iss);
+        String authorizationCode = validIssuer && error == null && code != null && !code.isBlank() ? code : null;
         if (state != null && state.startsWith(DiscordDashboardOAuth.TEST_STATE_PREFIX)) {
             return testCallback(state, authorizationCode, request, response);
         }
@@ -113,7 +115,8 @@ class DashboardController {
         if (attempt == null || !Objects.equals(attempt.intent().sessionId(), sessionId(principal))) {
             return dashboard(Outcome.EXPIRED);
         }
-        return accountCallback(attempt, principal, authorizationCode, request, response);
+        return accountCallback(attempt, principal, authorizationCode, validIssuer && code == null ? error : null,
+                request, response);
     }
 
     @GetMapping("/dashboard/api/replacement")
@@ -184,12 +187,17 @@ class DashboardController {
     }
 
     private ResponseEntity<Void> accountCallback(Attempt attempt, @Nullable Principal principal, @Nullable String code,
-                                                 HttpServletRequest request, HttpServletResponse response) {
+                                                 @Nullable String error, HttpServletRequest request,
+                                                 HttpServletResponse response) {
         var settings = oauth.settings(attempt);
         if (settings == null) {
             return dashboard(Outcome.EXPIRED);
         }
         if (code == null) {
+            if (attempt.intent().purpose() == Purpose.SIGN_IN && requiresInteraction(error)) {
+                var browser = DashboardWeb.oauthBrowser(request, response, settings.callbackUrl());
+                return redirect(oauth.begin(settings, browser, Purpose.SIGN_IN_WITH_CONSENT, null));
+            }
             return dashboard(Outcome.REJECTED);
         }
         DiscordOAuthClient.Identity identity;
@@ -210,7 +218,7 @@ class DashboardController {
             oauth.stage(attempt, claim.current(), identity);
             return dashboard(Outcome.RECOVERY_CONFIRM);
         }
-        if (attempt.intent().purpose() == Purpose.SIGN_IN) {
+        if (attempt.intent().purpose() == Purpose.SIGN_IN || attempt.intent().purpose() == Purpose.SIGN_IN_WITH_CONSENT) {
             setSessionCookie(request, response, accounts.signIn(identity), settings.callbackUrl());
             return dashboard();
         }
@@ -263,8 +271,12 @@ class DashboardController {
         return "https".equals(URI.create(callback).getScheme());
     }
 
-    private static boolean validResponse(@Nullable String code, @Nullable String issuer) {
-        return code != null && !code.isBlank() && (issuer == null || "https://discord.com".equals(issuer));
+    private static boolean requiresInteraction(@Nullable String error) {
+        return switch (error) {
+            case "access_denied", "interaction_required", "login_required", "consent_required",
+                 "account_selection_required" -> true;
+            case null, default -> false;
+        };
     }
 
     private void setSessionCookie(HttpServletRequest request, HttpServletResponse response, String token, String callback) {

@@ -29,11 +29,11 @@ class DiscordOAuthClient {
         api = RestClient.builder().baseUrl(apiBase).requestFactory(transport).build();
     }
 
-    URI authorization(DiscordOAuthSettings settings, String state, String verifier) {
+    URI authorization(DiscordOAuthSettings settings, String state, String verifier, boolean promptForConsent) {
         return UriComponentsBuilder.fromUriString("https://discord.com/oauth2/authorize")
                 .queryParam("response_type", "code")
                 .queryParam("scope", "identify")
-                .queryParam("prompt", "consent")
+                .queryParam("prompt", promptForConsent ? "consent" : "none")
                 .queryParam("client_id", "{client}")
                 .queryParam("redirect_uri", "{callback}")
                 .queryParam("state", "{state}")

@@ -178,10 +178,10 @@ public class DiscordDashboardOAuth {
         var state = (intent.purpose() == Purpose.ADMIN_TEST ? TEST_STATE_PREFIX : "") + DashboardTokens.create();
         var verifier = DashboardTokens.create();
         attempts.put(state, new Attempt(browser, settings.revision(), intent, verifier, expiresAt));
-        return discord.authorization(settings, state, verifier);
+        return discord.authorization(settings, state, verifier, intent.purpose() != Purpose.SIGN_IN);
     }
 
-    enum Purpose { SIGN_IN, REAUTHENTICATE, REPLACE, RECOVER, ADMIN_TEST }
+    enum Purpose { SIGN_IN, SIGN_IN_WITH_CONSENT, REAUTHENTICATE, REPLACE, RECOVER, ADMIN_TEST }
 
     record Intent(Purpose purpose, @Nullable String sessionId, @Nullable AdminTest test, @Nullable Claim recovery) {
         private Intent(Purpose purpose, @Nullable String sessionId) {

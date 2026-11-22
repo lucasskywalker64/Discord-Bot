@@ -70,6 +70,7 @@ class LocalAdminHttpTest {
             seedAccountLinks(accountId);
             String code = owner.recoveryCode();
             var authorization = claimant.beginRecovery(code);
+            assertEquals("consent", parameter(authorization, "prompt"));
             var callback = discordCallback(authorization, "202");
             assertEquals("/dashboard/?oauth=expired", location(unrelated.getPath(callback)));
             assertEquals("/dashboard/?oauth=recovery_confirm", location(claimant.getPath(callback)));
@@ -212,6 +213,7 @@ class LocalAdminHttpTest {
             assertEquals("PENDING", admin.authorizationTestStatus());
             assertEquals("IDLE", otherAdmin.authorizationTestStatus());
             var authorization = location(publicBrowser.getPath(launch));
+            assertEquals("consent", parameter(authorization, "prompt"));
             assertEquals(uri(publicBrowser.port, "/dashboard/oauth/discord/callback").toString(),
                     parameter(authorization, "redirect_uri"));
             providers.expectDiscordChallenge("test-success", parameter(authorization, "code_challenge"));
@@ -275,6 +277,7 @@ class LocalAdminHttpTest {
             assertEquals("/dashboard/?oauth=rejected", location(first.getPath(discordCallback(wrongIdentity, "303"))));
             assertEquals("101", first.dashboardAccount().path("discordId").asString());
             var reauthentication = first.beginDiscord("reauthenticate");
+            assertEquals("consent", parameter(reauthentication, "prompt"));
             assertEquals("/dashboard/", location(first.getPath(discordCallback(reauthentication, "101"))));
 
             var conflict = first.proveReplacement("202");
@@ -355,6 +358,7 @@ class LocalAdminHttpTest {
             assertEquals(401, first.getPath("/dashboard/api/account").statusCode());
 
             var authorization = first.beginDiscord("sign-in");
+            assertEquals("none", parameter(authorization, "prompt"));
             assertEquals("identify", parameter(authorization, "scope"));
             assertEquals("S256", parameter(authorization, "code_challenge_method"));
             providers.expectDiscordChallenge("101", parameter(authorization, "code_challenge"));
@@ -367,6 +371,7 @@ class LocalAdminHttpTest {
             assertEquals("101", account.path("discordId").asString());
             assertEquals("/dashboard/?oauth=expired", location(first.getPath(callback)));
             var secondAuthorization = second.beginDiscord("sign-in");
+            assertEquals("none", parameter(secondAuthorization, "prompt"));
             providers.expectDiscordChallenge("101", parameter(secondAuthorization, "code_challenge"));
             assertEquals("/dashboard/", location(second.getPath(discordCallback(secondAuthorization, "101"))));
             assertEquals(account.path("id"), second.dashboardAccount().path("id"));
@@ -378,6 +383,31 @@ class LocalAdminHttpTest {
             first.cookies.getCookieStore().add(uri(first.port, "/dashboard/"), oldCookie);
             assertEquals(401, first.getPath("/dashboard/api/account").statusCode());
             assertEquals(account.path("id"), second.dashboardAccount().path("id"));
+        }
+    }
+
+    @Test
+    void discordSignInRetriesWithConsentOnlyOnceWhenInteractionIsRequired() throws Exception {
+        try (var application = startApplication(); var admin = new Browser(adminPort(webServer(application)));
+             var first = new Browser(webServer(application).getPort()); var second = new Browser(first.port)) {
+            saveDiscordOAuth(admin, first.port);
+
+            var silent = first.beginDiscord("sign-in");
+            var interactionRequired = discordError(silent, "interaction_required");
+            assertEquals("/dashboard/?oauth=expired", location(second.getPath(interactionRequired)));
+            var interactive = location(first.getPath(interactionRequired));
+            assertEquals("consent", parameter(interactive, "prompt"));
+            assertNotEquals(parameter(silent, "state"), parameter(interactive, "state"));
+            assertNotEquals(parameter(silent, "code_challenge"), parameter(interactive, "code_challenge"));
+            assertEquals("/dashboard/?oauth=expired", location(first.getPath(interactionRequired)));
+            assertEquals("/dashboard/?oauth=rejected", location(first.getPath(discordError(interactive, "access_denied"))));
+            assertEquals(401, first.getPath("/dashboard/api/account").statusCode());
+
+            var firstTimeConsent = location(second.getPath(discordError(second.beginDiscord("sign-in"), "access_denied")));
+            assertEquals("consent", parameter(firstTimeConsent, "prompt"));
+            providers.expectDiscordChallenge("101", parameter(firstTimeConsent, "code_challenge"));
+            assertEquals("/dashboard/", location(second.getPath(discordCallback(firstTimeConsent, "101"))));
+            assertEquals("101", second.dashboardAccount().path("discordId").asString());
         }
     }
 
@@ -495,6 +525,10 @@ class LocalAdminHttpTest {
 
     private static String discordCallback(String authorization, String code) {
         return "/dashboard/oauth/discord/callback?state=" + parameter(authorization, "state") + "&code=" + code;
+    }
+
+    private static String discordError(String authorization, String error) {
+        return "/dashboard/oauth/discord/callback?state=" + parameter(authorization, "state") + "&error=" + error;
     }
 
     @BeforeEach
@@ -814,7 +848,9 @@ class LocalAdminHttpTest {
         }
 
         String proveReplacement(String id) throws Exception {
-            assertEquals("/dashboard/?oauth=confirm", location(getPath(discordCallback(beginDiscord("replace-discord"), id))));
+            var authorization = beginDiscord("replace-discord");
+            assertEquals("consent", parameter(authorization, "prompt"));
+            assertEquals("/dashboard/?oauth=confirm", location(getPath(discordCallback(authorization, id))));
             return JSON.readTree(getPath("/dashboard/api/replacement").body()).path("confirmation").asString();
         }
 
