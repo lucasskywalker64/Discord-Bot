@@ -105,7 +105,7 @@ const labels: Record<Status["state"], string> = {
   CONNECTED: "Connected", UNAVAILABLE: "Unavailable",
 };
 
-const storageCheckTime = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
+const verificationTime = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
 
 export function IntegrationStatus({ configuration, busy, retry }: {
   configuration: Configuration;
@@ -142,15 +142,17 @@ export function IntegrationStatus({ configuration, busy, retry }: {
 
   const currentPoll = poll?.source === configuration ? poll : undefined;
   const overview = currentPoll?.latest ?? configuration;
-  const integrations: { title: string; status: Status; verifiedAt?: string | null }[] = [
+  const integrations: { title: string; status: Status; verification?: { at: string; message: string } }[] = [
     { title: "Discord bot", status: overview.discord.status },
     { title: "Discord OAuth", status: {
       state: overview.discord.oauthEnabled ? "CONFIGURED" : "DISABLED",
       message: "Application credentials saved.",
       lastFailure: null,
-    } },
+    }, verification: overview.discord.oauthVerifiedAt
+      ? { at: overview.discord.oauthVerifiedAt, message: "Authorization test passed on" } : undefined },
     { title: "Twitch", status: overview.twitch.status },
-    { title: "Attachment storage", status: overview.storage.status, verifiedAt: overview.storage.verifiedAt },
+    { title: "Attachment storage", status: overview.storage.status, verification: overview.storage.verifiedAt
+      ? { at: overview.storage.verifiedAt, message: "Upload, download, and cleanup passed on" } : undefined },
   ];
   return <Panel title="Integration status">
     <button className="secondary status-details-toggle" type="button" aria-expanded={expanded}
@@ -158,13 +160,12 @@ export function IntegrationStatus({ configuration, busy, retry }: {
       {expanded ? "Hide details" : "Show details"}
     </button>
     <dl className="integrations" id="integration-details" data-expanded={expanded}>
-      {integrations.map(({ title, status, verifiedAt }) => <div key={title}>
-        <dt>{title}<span className={`status ${verifiedAt ? "verified" : status.state.toLowerCase()}`}>
-          {verifiedAt ? "Verified" : labels[status.state]}
+      {integrations.map(({ title, status, verification }) => <div key={title}>
+        <dt>{title}<span className={`status ${verification ? "verified" : status.state.toLowerCase()}`}>
+          {verification ? "Verified" : labels[status.state]}
         </span></dt>
-        {status.state !== "DISABLED" && <dd>{verifiedAt ? <>
-          Upload, download, and cleanup passed on{" "}
-          <time dateTime={verifiedAt}>{storageCheckTime.format(new Date(verifiedAt))}</time>.
+        {status.state !== "DISABLED" && <dd>{verification ? <>
+          {verification.message} <time dateTime={verification.at}>{verificationTime.format(new Date(verification.at))}</time>.
         </> : status.message}</dd>}
         {title === "Discord bot" && status.state === "UNAVAILABLE" &&
           <dd><button className="secondary" type="button" onClick={retry} disabled={busy}>Retry connection</button></dd>}

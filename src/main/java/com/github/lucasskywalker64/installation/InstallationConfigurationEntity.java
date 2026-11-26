@@ -28,6 +28,7 @@ class InstallationConfigurationEntity {
     @Column(columnDefinition = "text")
     String discordClientSecret;
     long discordOauthRevision;
+    Instant discordOauthVerifiedAt;
     long discordBotRevision;
     @Enumerated(EnumType.STRING)
     State discordState;

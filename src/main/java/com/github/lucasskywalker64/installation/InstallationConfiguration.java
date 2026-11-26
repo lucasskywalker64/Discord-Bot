@@ -57,7 +57,7 @@ public final class InstallationConfiguration {
 
     public record DiscordView(boolean botEnabled, boolean botTokenConfigured, boolean oauthEnabled,
                               String clientId, boolean clientSecretConfigured, String callbackUrl,
-                              long oauthRevision, Status status) {
+                              long oauthRevision, Instant oauthVerifiedAt, Status status) {
     }
 
     public record TwitchView(boolean enabled, String clientId, boolean clientSecretConfigured, String callbackUrl,

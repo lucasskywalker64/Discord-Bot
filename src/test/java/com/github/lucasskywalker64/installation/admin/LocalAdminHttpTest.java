@@ -211,6 +211,7 @@ class LocalAdminHttpTest {
             var launch = admin.beginAuthorizationTest();
             assertEquals("PENDING", admin.authorizationTestStatus());
             assertEquals("IDLE", otherAdmin.authorizationTestStatus());
+            assertTrue(discordOAuthVerification(otherAdmin).isNull());
             var authorization = location(publicBrowser.getPath(launch));
             assertEquals("consent", parameter(authorization, "prompt"));
             assertEquals(uri(publicBrowser.port, "/dashboard/oauth/discord/callback").toString(),
@@ -221,6 +222,8 @@ class LocalAdminHttpTest {
             assertEquals("PENDING", admin.authorizationTestStatus());
             assertEquals(200, publicBrowser.getPath(callback).statusCode());
             assertEquals("SUCCEEDED", admin.authorizationTestStatus());
+            var verifiedAt = discordOAuthVerification(otherAdmin);
+            assertEquals(clock.instant(), Instant.parse(verifiedAt.asString()));
             assertEquals(410, publicBrowser.getPath(callback).statusCode());
             assertEquals(401, publicBrowser.getPath("/dashboard/api/account").statusCode());
 
@@ -236,6 +239,7 @@ class LocalAdminHttpTest {
             var providerRejected = location(publicBrowser.getPath(admin.beginAuthorizationTest()));
             assertEquals(200, publicBrowser.getPath(discordCallback(providerRejected, "rejected")).statusCode());
             assertEquals("REJECTED", admin.authorizationTestStatus());
+            assertEquals(verifiedAt, discordOAuthVerification(otherAdmin));
 
             var expired = location(publicBrowser.getPath(admin.beginAuthorizationTest()));
             clock.advance(Duration.ofMinutes(6));
@@ -247,12 +251,35 @@ class LocalAdminHttpTest {
             assertEquals(200, admin.post("configuration/discord", discordOAuth("replacement-secret")).statusCode());
             assertEquals(410, publicBrowser.getPath(discordCallback(beforeSettingsChange, "test-success")).statusCode());
             assertEquals("EXPIRED", admin.authorizationTestStatus());
+            assertTrue(discordOAuthVerification(otherAdmin).isNull());
 
             var invalidated = location(publicBrowser.getPath(admin.beginAuthorizationTest()));
             assertEquals(204, admin.send("logout", Map.of(), admin.csrf()).get().statusCode());
             assertEquals(410, publicBrowser.getPath(discordCallback(invalidated, "test-success")).statusCode());
             assertEquals("IDLE", otherAdmin.authorizationTestStatus());
             assertEquals(account, publicBrowser.dashboardAccount());
+        }
+    }
+
+    @Test
+    void discordOAuthVerificationPersistsUntilTheCallbackUrlChanges() throws Exception {
+        try (var application = startApplication(); var admin = new Browser(adminPort(webServer(application)));
+             var publicBrowser = new Browser(webServer(application).getPort())) {
+            saveDiscordOAuth(admin, publicBrowser.port);
+            assertEquals(200, admin.post("setup/storage", storageDisabled()).statusCode());
+            var authorization = location(publicBrowser.getPath(admin.beginAuthorizationTest()));
+            providers.expectDiscordChallenge("test-success", parameter(authorization, "code_challenge"));
+            assertEquals(200, publicBrowser.getPath(discordCallback(authorization, "test-success")).statusCode());
+        }
+
+        try (var application = startApplication(); var admin = new Browser(adminPort(webServer(application)))) {
+            admin.login(CREDENTIALS);
+            assertEquals(clock.instant(), Instant.parse(discordOAuthVerification(admin).asString()));
+            assertEquals(200, admin.post("configuration/discord", discordOAuth("test-discord-secret")).statusCode());
+            assertEquals(clock.instant(), Instant.parse(discordOAuthVerification(admin).asString()));
+            var changed = admin.post("configuration/deployment", Map.of("publicUrl", "https://new.example"));
+            assertEquals(200, changed.statusCode(), changed::body);
+            assertTrue(discordOAuthVerification(admin).isNull());
         }
     }
 
@@ -478,6 +505,12 @@ class LocalAdminHttpTest {
         var saved = admin.post("setup/providers", Map.of("discord", discordOAuth("test-discord-secret"),
                 "twitch", Map.of("enabled", false, "clientSecret", keep())));
         assertEquals(200, saved.statusCode(), saved::body);
+    }
+
+    private static JsonNode discordOAuthVerification(Browser admin) throws Exception {
+        var configuration = admin.get("configuration");
+        assertEquals(200, configuration.statusCode(), configuration::body);
+        return JSON.readTree(configuration.body()).path("discord").path("oauthVerifiedAt");
     }
 
     private static Map<String, Object> discordOAuth(String secret) {

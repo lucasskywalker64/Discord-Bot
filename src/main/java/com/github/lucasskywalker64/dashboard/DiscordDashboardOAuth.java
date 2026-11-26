@@ -130,7 +130,14 @@ public class DiscordDashboardOAuth {
                 // Record only the test outcome.
             }
         }
-        if (!test.active(clock.instant()) || settings(test.revision) == null) {
+        var completedAt = clock.instant();
+        if (!test.active(completedAt)) {
+            return null;
+        }
+        boolean currentSettings = result == TestStatus.SUCCEEDED
+                ? installation.recordDiscordOAuthVerification(test.revision, completedAt)
+                : settings(test.revision) != null;
+        if (!currentSettings) {
             return null;
         }
         test.result = result;

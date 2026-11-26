@@ -54,6 +54,7 @@ public class InstallationConfigurationService {
                 || !Objects.equals(saved.discordClientId, update.clientId())
                 || !Objects.equals(saved.discordClientSecret, clientSecret)) {
             saved.discordOauthRevision++;
+            saved.discordOauthVerifiedAt = null;
         }
         if (saved.discordBotEnabled != update.botEnabled() || !Objects.equals(saved.discordBotToken, token)) {
             saved.discordBotRevision++;
@@ -80,6 +81,7 @@ public class InstallationConfigurationService {
         } else if (!Objects.equals(saved.publicUrl, origin)) {
             saved.publicUrl = origin;
             saved.discordOauthRevision++;
+            saved.discordOauthVerifiedAt = null;
             saved.twitchOauthRevision++;
             events.publishEvent(new Changed(saved.discordBotRevision));
         }
@@ -156,6 +158,15 @@ public class InstallationConfigurationService {
                 saved.discordOauthRevision);
     }
 
+    public boolean recordDiscordOAuthVerification(long revision, Instant verifiedAt) {
+        var saved = configurations.lock();
+        if (!saved.discordOauthEnabled || saved.discordOauthRevision != revision) {
+            return false;
+        }
+        saved.discordOauthVerifiedAt = verifiedAt;
+        return true;
+    }
+
     public record DiscordOAuthSettings(boolean enabled, String clientId, @JsonIgnore String clientSecret,
                                        String callbackUrl, long revision) {
         @Override
@@ -192,7 +203,7 @@ public class InstallationConfigurationService {
         return new Snapshot(new DiscordView(saved.discordBotEnabled, present(saved.discordBotToken),
                 saved.discordOauthEnabled, saved.discordClientId, present(saved.discordClientSecret),
                 OAuthCallbackUrls.callback(saved.publicUrl, OAuthCallbackUrls.DISCORD_PATH),
-                saved.discordOauthRevision, status),
+                saved.discordOauthRevision, saved.discordOauthVerifiedAt, status),
                 new TwitchView(saved.twitchEnabled, saved.twitchClientId, present(saved.twitchClientSecret),
                         OAuthCallbackUrls.callback(saved.publicUrl, OAuthCallbackUrls.TWITCH_PATH),
                         saved.twitchOauthRevision, configuredStatus(saved.twitchEnabled)),
