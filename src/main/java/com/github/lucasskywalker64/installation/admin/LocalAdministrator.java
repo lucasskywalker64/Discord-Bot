@@ -42,13 +42,14 @@ class LocalAdministrator {
         return !jdbc.sql("SELECT EXISTS (SELECT 1 FROM local_administrator)").query(Boolean.class).single();
     }
 
-    boolean claim(String username, String password) {
+    Optional<Authentication> claim(String username, String password) {
         return jdbc.sql("""
                 INSERT INTO local_administrator (id, username, password_hash)
                 VALUES (1, :username, :hash) ON CONFLICT (id) DO NOTHING
+                RETURNING credential_version
                 """)
                 .param("username", username).param("hash", passwords.encode(password))
-                .update() == 1;
+                .query(Long.class).optional().map(version -> authenticated(username, version));
     }
 
     Authentication authenticate(Authentication attempt) {
@@ -56,9 +57,7 @@ class LocalAdministrator {
         var supplied = (String) attempt.getCredentials();
         var credential = readCredential(attempt.getName());
         verify(supplied, credential);
-        var principal = new AdminPrincipal(attempt.getName(), credential.orElseThrow().version());
-        return UsernamePasswordAuthenticationToken.authenticated(principal, null,
-                List.of(new SimpleGrantedAuthority(AUTHORITY)));
+        return authenticated(attempt.getName(), credential.orElseThrow().version());
     }
 
     boolean isCurrent(AdminPrincipal principal) {
@@ -94,6 +93,11 @@ class LocalAdministrator {
 
     static boolean validPassword(String password) {
         return password.length() >= 12 && password.length() <= 256 && !password.isBlank();
+    }
+
+    private static Authentication authenticated(String username, long version) {
+        return UsernamePasswordAuthenticationToken.authenticated(new AdminPrincipal(username, version), null,
+                List.of(new SimpleGrantedAuthority(AUTHORITY)));
     }
 
     private Optional<Credential> readCredential(String username) {

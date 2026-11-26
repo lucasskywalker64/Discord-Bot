@@ -414,7 +414,7 @@ class LocalAdminHttpTest {
     @Test
     void showsTheSuggestedDiscordCallbackAndRejectsInvalidUrlsOnSave() throws Exception {
         try (var application = startApplication(); var admin = new Browser(adminPort(webServer(application)))) {
-            admin.claimAndLogin();
+            admin.claim();
             var initial = JSON.readTree(admin.get("configuration").body()).path("discord");
             assertEquals("https://<your-public-host>/dashboard/oauth/discord/callback",
                     initial.path("suggestedCallbackUrl").asString());
@@ -471,7 +471,7 @@ class LocalAdminHttpTest {
     }
 
     private static void saveDiscordOAuth(Browser admin, int publicPort) throws Exception {
-        admin.claimAndLogin();
+        admin.claim();
         var saved = admin.post("setup/providers", Map.of("discord", discordOAuth(publicPort, "test-discord-secret"),
                 "twitch", Map.of("enabled", false, "clientSecret", keep())));
         assertEquals(200, saved.statusCode(), saved::body);
@@ -565,27 +565,39 @@ class LocalAdminHttpTest {
              var second = new Browser(first.port)) {
             assertEquals(401, first.get("configuration").statusCode());
             assertEquals(403, first.send("claim", CREDENTIALS, null).get().statusCode());
-            var firstClaim = first.send("claim", CREDENTIALS, first.csrf());
-            var secondClaim = second.send("claim",
-                    Map.of("username", "other-admin", "password", PASSWORD), second.csrf());
+            String firstCsrf = first.csrf();
+            String secondCsrf = second.csrf();
+            String firstSession = first.sessionId();
+            String secondSession = second.sessionId();
+            var otherCredentials = Map.of("username", "other-admin", "password", PASSWORD);
+            var firstClaim = first.send("claim", CREDENTIALS, firstCsrf);
+            var secondClaim = second.send("claim", otherCredentials, secondCsrf);
             var statuses = List.of(firstClaim.get(10, TimeUnit.SECONDS).statusCode(),
                     secondClaim.get(10, TimeUnit.SECONDS).statusCode()).stream().sorted().toList();
             assertEquals(List.of(204, 409), statuses);
-            assertFalse(JSON.readTree(first.get("session").body()).get("claimAvailable").asBoolean());
+            boolean firstWon = firstClaim.get().statusCode() == 204;
+            var winner = firstWon ? first : second;
+            var loser = firstWon ? second : first;
+            var winningCredentials = firstWon ? CREDENTIALS : otherCredentials;
+            var configuration = winner.get("configuration");
+            assertEquals(200, configuration.statusCode());
+            assertEquals("PROVIDERS", JSON.readTree(configuration.body()).path("setupStep").asString());
+            var session = JSON.readTree(winner.get("session").body());
+            assertFalse(session.path("claimAvailable").asBoolean());
+            assertTrue(session.path("authenticated").asBoolean());
+            assertEquals(winningCredentials.get("username"), session.path("username").asString());
+            assertNotEquals(firstWon ? firstSession : secondSession, winner.sessionId());
+            assertEquals(403, winner.send("logout", Map.of(), firstWon ? firstCsrf : secondCsrf).get().statusCode());
+            assertEquals(401, loser.get("configuration").statusCode());
 
-            if (firstClaim.get().statusCode() == 204) {
-                assertLocalLogin(first, CREDENTIALS, webServer(application).getPort());
-            } else {
-                assertLocalLogin(second, Map.of("username", "other-admin", "password", PASSWORD),
-                        webServer(application).getPort());
-            }
+            assertLocalLogin(loser, winningCredentials, webServer(application).getPort());
         }
     }
 
     @Test
     void discordOnlySetupResumesAfterRestartAndCanFinishDuringAProviderOutage() throws Exception {
         try (var application = startApplication(); var browser = new Browser(adminPort(webServer(application)))) {
-            browser.claimAndLogin();
+            browser.claim();
             assertEquals(409, browser.post("setup/storage", storageDisabled()).statusCode());
             var discord = Map.of("botEnabled", true, "botToken", Map.of("action", "REPLACE", "value", BOT_TOKEN),
                     "oauthEnabled", false, "clientSecret", keep());
@@ -703,7 +715,7 @@ class LocalAdminHttpTest {
     void passwordChangeAndHostResetInvalidateOtherBrowserSessions() throws Exception {
         try (var application = startApplication(); var first = new Browser(adminPort(webServer(application)));
              var second = new Browser(first.port)) {
-            first.claimAndLogin();
+            first.claim();
             second.login(CREDENTIALS);
             var providerSave = first.post("setup/providers", Map.of("discord", Map.of("botEnabled", true,
                             "botToken", Map.of("action", "REPLACE", "value", BOT_TOKEN),
@@ -732,8 +744,9 @@ class LocalAdminHttpTest {
 
     @Test
     void loginAttemptsAreBoundedAcrossUsernames() throws Exception {
-        try (var application = startApplication(); var browser = new Browser(adminPort(webServer(application)))) {
-            assertEquals(204, browser.send("claim", CREDENTIALS, browser.csrf()).get().statusCode());
+        try (var application = startApplication(); var owner = new Browser(adminPort(webServer(application)));
+             var browser = new Browser(owner.port)) {
+            owner.claim();
             for (int attempt = 0; attempt < 8; attempt++) {
                 assertEquals(401, browser.send("login", Map.of("username", "other-" + attempt, "password", PASSWORD),
                         browser.csrf()).get().statusCode());
@@ -970,9 +983,8 @@ class LocalAdminHttpTest {
             return JSON.readTree(get("discord-authorization-test").body()).path("status").asString();
         }
 
-        void claimAndLogin() throws Exception {
+        void claim() throws Exception {
             assertEquals(204, send("claim", CREDENTIALS, csrf()).get().statusCode());
-            login(CREDENTIALS);
         }
 
         void login(Map<String, String> credentials) throws Exception {

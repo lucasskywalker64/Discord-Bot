@@ -2,6 +2,7 @@ package com.github.lucasskywalker64.installation.admin;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -9,7 +10,9 @@ import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.LockedException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.authentication.logout.SecurityContextLogoutHandler;
+import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 import org.springframework.security.web.csrf.CsrfToken;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -20,11 +23,15 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.Map;
 
 @RestController
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @RequestMapping("/admin/api")
 class LocalAdminController {
     private final LocalAdministrator administrator;
-    LocalAdminController(LocalAdministrator administrator) {
+    private final HttpSessionSecurityContextRepository contexts;
+
+    LocalAdminController(LocalAdministrator administrator, HttpSessionSecurityContextRepository contexts) {
         this.administrator = administrator;
+        this.contexts = contexts;
     }
 
     @GetMapping("/session")
@@ -34,7 +41,8 @@ class LocalAdminController {
     }
 
     @PostMapping(path = "/claim", consumes = MediaType.APPLICATION_FORM_URLENCODED_VALUE)
-    ResponseEntity<?> claim(@RequestParam String username, @RequestParam String password) {
+    ResponseEntity<?> claim(@RequestParam String username, @RequestParam String password,
+                            HttpServletRequest request, HttpServletResponse response) {
         if (!administrator.claimAvailable()) {
             return ResponseEntity.status(HttpStatus.CONFLICT).build();
         }
@@ -44,8 +52,20 @@ class LocalAdminController {
         if (!LocalAdministrator.validPassword(password)) {
             return invalid("password", LocalAdministrator.PASSWORD_LENGTH_MESSAGE);
         }
-        return administrator.claim(username, password) ? ResponseEntity.noContent().build()
-                : ResponseEntity.status(HttpStatus.CONFLICT).build();
+        var authentication = administrator.claim(username, password);
+        if (authentication.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).build();
+        }
+        // Discard the pre-claim session and its CSRF token before granting administrator access.
+        var anonymousSession = request.getSession(false);
+        if (anonymousSession != null) {
+            anonymousSession.invalidate();
+        }
+        var context = SecurityContextHolder.createEmptyContext();
+        context.setAuthentication(authentication.orElseThrow());
+        SecurityContextHolder.setContext(context);
+        contexts.saveContext(context, request, response);
+        return ResponseEntity.noContent().build();
     }
 
     @PostMapping(path = "/password", consumes = MediaType.APPLICATION_FORM_URLENCODED_VALUE)
