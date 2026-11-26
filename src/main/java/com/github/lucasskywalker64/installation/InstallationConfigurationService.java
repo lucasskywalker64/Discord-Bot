@@ -50,9 +50,11 @@ public class InstallationConfigurationService {
         }
         String token = secrets.botToken().value();
         String clientSecret = secrets.oauthSecret().value();
-        if (!Objects.equals(saved.discordClientId, update.clientId())
+        if (saved.discordOauthEnabled != update.oauthEnabled()
+                || !Objects.equals(saved.discordClientId, update.clientId())
                 || !Objects.equals(saved.discordClientSecret, clientSecret)) {
             saved.discordOauthRevision++;
+            saved.discordOauthVerifiedAt = null;
         }
         if (saved.discordBotEnabled != update.botEnabled() || !Objects.equals(saved.discordBotToken, token)) {
             saved.discordBotRevision++;
@@ -63,7 +65,6 @@ public class InstallationConfigurationService {
         saved.discordOauthEnabled = update.oauthEnabled();
         saved.discordClientId = update.clientId();
         saved.discordClientSecret = clientSecret;
-        saved.discordCallbackUrl = update.callbackUrl();
         events.publishEvent(new Changed(saved.discordBotRevision));
         return new UpdateResult(snapshot(saved), Map.of());
     }
@@ -71,9 +72,17 @@ public class InstallationConfigurationService {
     public UpdateResult updatePublicUrl(String publicUrl) {
         var saved = configurations.lock();
         var errors = new LinkedHashMap<String, String>();
-        url("publicUrl", publicUrl, false, errors);
-        if (errors.isEmpty()) {
-            saved.publicUrl = publicUrl;
+        String origin = OAuthCallbackUrls.origin(publicUrl);
+        if (origin == null && present(publicUrl)) {
+            errors.put("publicUrl", "Enter an HTTPS origin without a path, query, fragment or credentials. "
+                    + "HTTP is allowed on loopback for local testing.");
+        } else if (origin == null && (saved.discordOauthEnabled || saved.twitchEnabled)) {
+            errors.put("publicUrl", "Disable Discord sign-in and Twitch before clearing the public base URL.");
+        } else if (!Objects.equals(saved.publicUrl, origin)) {
+            saved.publicUrl = origin;
+            saved.discordOauthRevision++;
+            saved.discordOauthVerifiedAt = null;
+            saved.twitchOauthRevision++;
             events.publishEvent(new Changed(saved.discordBotRevision));
         }
         return new UpdateResult(snapshot(saved), errors);
@@ -93,7 +102,6 @@ public class InstallationConfigurationService {
         saved.twitchEnabled = update.enabled();
         saved.twitchClientId = update.clientId();
         saved.twitchClientSecret = clientSecret;
-        saved.twitchCallbackUrl = update.callbackUrl();
         events.publishEvent(new Changed(saved.discordBotRevision));
         return new UpdateResult(snapshot(saved), Map.of());
     }
@@ -142,6 +150,31 @@ public class InstallationConfigurationService {
         return new DiscordConnectionSettings(saved.discordBotEnabled, saved.discordBotToken, saved.discordBotRevision);
     }
 
+    @Transactional(readOnly = true)
+    public DiscordOAuthSettings discordOAuthSettings() {
+        var saved = configurations.findById(1).orElseThrow();
+        return new DiscordOAuthSettings(saved.discordOauthEnabled, saved.discordClientId, saved.discordClientSecret,
+                OAuthCallbackUrls.callback(saved.publicUrl, OAuthCallbackUrls.DISCORD_PATH),
+                saved.discordOauthRevision);
+    }
+
+    public boolean recordDiscordOAuthVerification(long revision, Instant verifiedAt) {
+        var saved = configurations.lock();
+        if (!saved.discordOauthEnabled || saved.discordOauthRevision != revision) {
+            return false;
+        }
+        saved.discordOauthVerifiedAt = verifiedAt;
+        return true;
+    }
+
+    public record DiscordOAuthSettings(boolean enabled, String clientId, @JsonIgnore String clientSecret,
+                                       String callbackUrl, long revision) {
+        @Override
+        public String toString() {
+            return "DiscordOAuthSettings[enabled=" + enabled + ", revision=" + revision + "]";
+        }
+    }
+
     public void reportDiscordState(long revision, State state) {
         var saved = configurations.lock();
         if (saved.discordBotRevision == revision && saved.discordBotEnabled) {
@@ -169,9 +202,11 @@ public class InstallationConfigurationService {
         }, saved.discordFailure);
         return new Snapshot(new DiscordView(saved.discordBotEnabled, present(saved.discordBotToken),
                 saved.discordOauthEnabled, saved.discordClientId, present(saved.discordClientSecret),
-                saved.discordCallbackUrl, saved.discordOauthRevision, status),
+                OAuthCallbackUrls.callback(saved.publicUrl, OAuthCallbackUrls.DISCORD_PATH),
+                saved.discordOauthRevision, saved.discordOauthVerifiedAt, status),
                 new TwitchView(saved.twitchEnabled, saved.twitchClientId, present(saved.twitchClientSecret),
-                        saved.twitchCallbackUrl, saved.twitchOauthRevision, configuredStatus(saved.twitchEnabled)),
+                        OAuthCallbackUrls.callback(saved.publicUrl, OAuthCallbackUrls.TWITCH_PATH),
+                        saved.twitchOauthRevision, configuredStatus(saved.twitchEnabled)),
                 new StorageView(saved.storageEnabled, saved.storageEndpoint, saved.storageBucket, saved.storageRegion,
                         present(saved.storageAccessKey), present(saved.storageSecretKey), saved.storageEnabled
                                 ? new Status(State.CONFIGURED, "Storage settings are saved.", null)
@@ -210,7 +245,7 @@ public class InstallationConfigurationService {
         if (update.oauthEnabled()) {
             required("discord.clientId", update.clientId(), errors);
             required("discord.clientSecret", clientSecret, errors);
-            url("discord.callbackUrl", update.callbackUrl(), true, errors);
+            requirePublicUrl("discord.callbackUrl", saved.publicUrl, errors);
         }
         return new DiscordSecrets(SecretUpdate.replace(token), SecretUpdate.replace(clientSecret));
     }
@@ -221,7 +256,7 @@ public class InstallationConfigurationService {
         if (update.enabled()) {
             required("twitch.clientId", update.clientId(), errors);
             required("twitch.clientSecret", clientSecret, errors);
-            url("twitch.callbackUrl", update.callbackUrl(), true, errors);
+            requirePublicUrl("twitch.callbackUrl", saved.publicUrl, errors);
         }
         return SecretUpdate.replace(clientSecret);
     }
@@ -231,9 +266,8 @@ public class InstallationConfigurationService {
         String accessKey = secret("storage.accessKey", update.accessKey(), saved.storageAccessKey, errors);
         String secretKey = secret("storage.secretKey", update.secretKey(), saved.storageSecretKey, errors);
         if (update.enabled()) {
-            url("storage.endpoint", update.endpoint(), true, errors);
+            url("storage.endpoint", update.endpoint(), errors);
             required("storage.bucket", update.bucket(), errors);
-            required("storage.region", update.region(), errors);
             required("storage.accessKey", accessKey, errors);
             required("storage.secretKey", secretKey, errors);
         }
@@ -246,16 +280,19 @@ public class InstallationConfigurationService {
     record StorageSecrets(SecretUpdate accessKey, SecretUpdate secretKey) {
     }
 
+    private static void requirePublicUrl(String field, String publicUrl, Map<String, String> errors) {
+        if (publicUrl == null) {
+            errors.put(field, "Set the public base URL in Server settings first.");
+        }
+    }
+
     private static void required(String field, String value, Map<String, String> errors) {
         if (!present(value)) {
             errors.put(field, "This field is required when the capability is enabled.");
         }
     }
 
-    private static void url(String field, String value, boolean required, Map<String, String> errors) {
-        if (!present(value) && !required) {
-            return;
-        }
+    private static void url(String field, String value, Map<String, String> errors) {
         try {
             var uri = URI.create(value == null ? "" : value);
             if (!("https".equals(uri.getScheme()) || "http".equals(uri.getScheme()))

@@ -1,5 +1,6 @@
 package com.github.lucasskywalker64.installation.admin;
 
+import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.LockedException;
@@ -41,13 +42,14 @@ class LocalAdministrator {
         return !jdbc.sql("SELECT EXISTS (SELECT 1 FROM local_administrator)").query(Boolean.class).single();
     }
 
-    boolean claim(String username, String password) {
+    Optional<Authentication> claim(String username, String password) {
         return jdbc.sql("""
                 INSERT INTO local_administrator (id, username, password_hash)
                 VALUES (1, :username, :hash) ON CONFLICT (id) DO NOTHING
+                RETURNING credential_version
                 """)
                 .param("username", username).param("hash", passwords.encode(password))
-                .update() == 1;
+                .query(Long.class).optional().map(version -> authenticated(username, version));
     }
 
     Authentication authenticate(Authentication attempt) {
@@ -55,9 +57,7 @@ class LocalAdministrator {
         var supplied = (String) attempt.getCredentials();
         var credential = readCredential(attempt.getName());
         verify(supplied, credential);
-        var principal = new AdminPrincipal(attempt.getName(), credential.orElseThrow().version());
-        return UsernamePasswordAuthenticationToken.authenticated(principal, null,
-                List.of(new SimpleGrantedAuthority(AUTHORITY)));
+        return authenticated(attempt.getName(), credential.orElseThrow().version());
     }
 
     boolean isCurrent(AdminPrincipal principal) {
@@ -67,13 +67,17 @@ class LocalAdministrator {
     }
 
     boolean changePassword(AdminPrincipal principal, String currentPassword, String newPassword) {
-        takeAttempt();
-        verify(currentPassword, readCredential(principal.username())
-                .filter(credential -> credential.version() == principal.version()));
+        verifyCurrentPassword(principal, currentPassword);
         return jdbc.sql("""
                 UPDATE local_administrator SET password_hash = :hash, credential_version = credential_version + 1
                 WHERE id = 1 AND credential_version = :version
                 """).param("hash", passwords.encode(newPassword)).param("version", principal.version()).update() == 1;
+    }
+
+    void verifyCurrentPassword(AdminPrincipal principal, @Nullable String password) {
+        takeAttempt();
+        verify(password, readCredential(principal.username())
+                .filter(credential -> credential.version() == principal.version()));
     }
 
     boolean resetPassword(String password) {
@@ -91,6 +95,11 @@ class LocalAdministrator {
         return password.length() >= 12 && password.length() <= 256 && !password.isBlank();
     }
 
+    private static Authentication authenticated(String username, long version) {
+        return UsernamePasswordAuthenticationToken.authenticated(new AdminPrincipal(username, version), null,
+                List.of(new SimpleGrantedAuthority(AUTHORITY)));
+    }
+
     private Optional<Credential> readCredential(String username) {
         return jdbc.sql("""
                 SELECT password_hash, credential_version FROM local_administrator WHERE id = 1 AND username = :username
@@ -98,7 +107,7 @@ class LocalAdministrator {
                 .query((row, _) -> new Credential(row.getString(1), row.getLong(2))).optional();
     }
 
-    private void verify(String password, Optional<Credential> credential) {
+    private void verify(@Nullable String password, Optional<Credential> credential) {
         if (password == null || !validPassword(password)
                 || credential.isEmpty() || !passwords.matches(password, credential.orElseThrow().hash())) {
             throw new BadCredentialsException("Invalid local administrator credentials.");

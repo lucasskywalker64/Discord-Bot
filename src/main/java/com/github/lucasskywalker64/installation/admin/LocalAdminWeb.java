@@ -83,11 +83,17 @@ class LocalAdminWeb implements WebMvcConfigurer {
     }
 
     @Bean
-    @Order(1)
-    SecurityFilterChain localAdmin(HttpSecurity http, LocalAdministrator administrator,
-                                   AuthenticationManager localAuthenticationManager) {
+    HttpSessionSecurityContextRepository localAdminSecurityContexts() {
         var contexts = new HttpSessionSecurityContextRepository();
         contexts.setSpringSecurityContextKey("LOCAL_ADMIN_SECURITY_CONTEXT");
+        return contexts;
+    }
+
+    @Bean
+    @Order(1)
+    SecurityFilterChain localAdmin(HttpSecurity http, LocalAdministrator administrator,
+                                   AuthenticationManager localAuthenticationManager,
+                                   HttpSessionSecurityContextRepository contexts) {
         return http.securityMatcher(request -> onPrivateListener(request) || ADMIN_PATH.matches(request))
                 .addFilterBefore(LocalAdminWeb::requirePrivateRoute, SecurityContextHolderFilter.class)
                 .addFilterAfter(credentialVersionFilter(administrator), AnonymousAuthenticationFilter.class)

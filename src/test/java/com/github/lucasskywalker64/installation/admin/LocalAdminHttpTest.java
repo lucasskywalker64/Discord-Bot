@@ -21,17 +21,22 @@ import tools.jackson.databind.JsonNode;
 import java.net.CookieManager;
 import java.net.CookiePolicy;
 import java.net.URI;
+import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.sql.DriverManager;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -51,6 +56,515 @@ class LocalAdminHttpTest {
     @Container
     static final PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:17-alpine");
     private ProviderTestServer providers;
+    private final TestClock clock = new TestClock();
+
+    @Test
+    void savedRecoveryCodeChangesTheSameAccountWithoutAnAdministrator() throws Exception {
+        try (var application = startApplication(); var admin = new Browser(adminPort(webServer(application)));
+             var owner = new Browser(webServer(application).getPort()); var claimant = new Browser(owner.port);
+             var unrelated = new Browser(owner.port)) {
+            saveDiscordOAuth(admin, owner.port);
+            var original = owner.signInAs("101");
+            var accountId = UUID.fromString(original.path("id").asString());
+            seedAccountLinks(accountId);
+            String code = owner.recoveryCode();
+            var authorization = claimant.beginRecovery(code);
+            assertEquals("consent", parameter(authorization, "prompt"));
+            var callback = discordCallback(authorization, "202");
+            assertEquals("/dashboard/?oauth=expired", location(unrelated.getPath(callback)));
+            assertEquals("/dashboard/?oauth=recovery_confirm", location(claimant.getPath(callback)));
+            var proof = claimant.recoveryProof();
+            assertEquals("101", proof.path("current").path("id").asString());
+            assertEquals("202", proof.path("proposed").path("id").asString());
+            assertEquals("101", owner.dashboardAccount().path("discordId").asString());
+            assertEquals(204, claimant.confirmRecovery(proof).statusCode());
+            assertEquals(410, claimant.confirmRecovery(proof).statusCode());
+            assertEquals(401, owner.getPath("/dashboard/api/account").statusCode());
+            assertEquals(401, claimant.getPath("/dashboard/api/account").statusCode());
+            assertEquals("/dashboard/?oauth=recovery_invalid", location(unrelated.recoveryRequest(code)));
+            assertEquals(original.path("id"), claimant.signInAs("202").path("id"));
+            assertAccountLinksPreserved(accountId);
+        }
+    }
+
+    @Test
+    void recoveryCodeRotationInvalidatesStagedProofAndOnlyOneConcurrentResetCommits() throws Exception {
+        try (var application = startApplication(); var admin = new Browser(adminPort(webServer(application)));
+             var owner = new Browser(webServer(application).getPort()); var first = new Browser(owner.port);
+             var second = new Browser(owner.port); var signedOut = new Browser(owner.port)) {
+            saveDiscordOAuth(admin, owner.port);
+            var original = owner.signInAs("101");
+            var oldCode = owner.recoveryCode();
+            var oldProof = first.proveRecovery(oldCode, "303");
+            var code = owner.recoveryCode();
+            assertEquals(410, first.confirmRecovery(oldProof).statusCode());
+            assertEquals(401, signedOut.dashboardPost("recovery-code", signedOut.dashboardCsrf()).statusCode());
+            clock.advance(Duration.ofMinutes(11));
+            assertEquals(428, owner.dashboardPost("recovery-code", owner.dashboardCsrf()).statusCode());
+
+            var firstProof = first.proveRecovery(code, "303").path("confirmation").asString();
+            var secondProof = second.proveRecovery(code, "404").path("confirmation").asString();
+            var firstConfirm = first.sendDashboard("confirm-recovery", firstProof, first.dashboardCsrf());
+            var secondConfirm = second.sendDashboard("confirm-recovery", secondProof, second.dashboardCsrf());
+            int firstStatus = firstConfirm.get(10, TimeUnit.SECONDS).statusCode();
+            int secondStatus = secondConfirm.get(10, TimeUnit.SECONDS).statusCode();
+            assertEquals(List.of(204, 410), List.of(firstStatus, secondStatus).stream().sorted().toList());
+            assertEquals(original.path("id"), signedOut.signInAs(firstStatus == 204 ? "303" : "404").path("id"));
+        }
+    }
+
+    @Test
+    void privateAdministratorCanIssueAndRevokeAnAuditedRecoveryLink() throws Exception {
+        try (var application = startApplication(); var admin = new Browser(adminPort(webServer(application)));
+             var owner = new Browser(webServer(application).getPort()); var claimant = new Browser(owner.port);
+             var otherAccount = new Browser(owner.port)) {
+            saveDiscordOAuth(admin, owner.port);
+            var original = owner.signInAs("101");
+            var accountId = original.path("id").asString();
+            var savedCode = owner.recoveryCode();
+            otherAccount.signInAs("202");
+            assertEquals(404, owner.getPath("/admin/api/accounts").statusCode());
+            var list = admin.get("accounts?query=PERSON-101");
+            assertEquals(200, list.statusCode(), list::body);
+            var items = JSON.readTree(list.body()).path("accounts");
+            assertEquals(1, items.size());
+            assertEquals(accountId, items.get(0).path("id").asString());
+            assertFalse(list.body().contains(savedCode));
+
+            String path = "accounts/" + accountId + "/";
+            long version = items.get(0).path("loginVersion").asLong();
+            assertEquals(400, admin.post(path + "recovery-link",
+                    Map.of("password", PASSWORD, "reason", "", "loginVersion", version)).statusCode());
+            assertEquals(401, admin.post(path + "recovery-link",
+                    Map.of("password", "incorrect test passphrase", "reason", "Reviewed prior ownership",
+                            "loginVersion", version)).statusCode());
+
+            var revoked = admin.recoveryLink(path, version);
+            var revokedProof = claimant.proveRecovery(revoked, "303");
+            assertEquals(204, admin.post(path + "revoke-recovery-link", Map.of()).statusCode());
+            assertEquals(410, claimant.confirmRecovery(revokedProof).statusCode());
+            assertEquals("101", owner.dashboardAccount().path("discordId").asString());
+
+            var expired = admin.recoveryLink(path, version);
+            clock.advance(Duration.ofMinutes(31));
+            assertEquals("/dashboard/?oauth=recovery_invalid", location(claimant.recoveryRequest(expired)));
+            var replacedLink = admin.recoveryLink(path, version);
+            var activeLink = admin.recoveryLink(path, version);
+            assertEquals("/dashboard/?oauth=recovery_invalid", location(claimant.recoveryRequest(replacedLink)));
+            assertEquals(409, claimant.confirmRecovery(claimant.proveRecovery(activeLink, "202")).statusCode());
+            assertEquals("101", owner.dashboardAccount().path("discordId").asString());
+            assertEquals("202", otherAccount.dashboardAccount().path("discordId").asString());
+            assertEquals(204, claimant.confirmRecovery(claimant.proveRecovery(activeLink, "303")).statusCode());
+            assertEquals(401, owner.getPath("/dashboard/api/account").statusCode());
+            assertEquals("/dashboard/?oauth=recovery_invalid", location(claimant.recoveryRequest(savedCode)));
+            assertEquals(original.path("id"), claimant.signInAs("303").path("id"));
+            assertEquals(412, admin.post(path + "recovery-link", Map.of("password", PASSWORD,
+                    "reason", "Previously verified account", "loginVersion", version)).statusCode());
+            assertRecoveryAudit(UUID.fromString(accountId));
+        }
+    }
+
+    private static void assertRecoveryAudit(UUID accountId) throws Exception {
+        try (var connection = DriverManager.getConnection(
+                postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+             var select = connection.prepareStatement("""
+                     SELECT action, actor, reason, previous_discord_id, new_discord_id
+                     FROM dashboard_recovery_audit WHERE account_id = ? ORDER BY id
+                     """)) {
+            select.setObject(1, accountId);
+            try (var events = select.executeQuery()) {
+                assertTrue(events.next());
+                assertEquals("LINK_ISSUED", events.getString("action"));
+                assertEquals("local-admin", events.getString("actor"));
+                assertEquals("Reviewed prior ownership", events.getString("reason"));
+                assertTrue(events.next());
+                assertEquals("LINK_REVOKED", events.getString("action"));
+                int revocations = 1;
+                while (events.next()) {
+                    String action = events.getString("action");
+                    if ("LINK_REVOKED".equals(action)) {
+                        revocations++;
+                    }
+                    if ("ISSUED_LINK_USED".equals(action)) {
+                        assertEquals(2, revocations);
+                        assertEquals("101", events.getString("previous_discord_id"));
+                        assertEquals("303", events.getString("new_discord_id"));
+                        assertFalse(events.next());
+                        return;
+                    }
+                }
+                throw new AssertionError("No completed recovery event");
+            }
+        }
+    }
+
+    @Test
+    void administratorTestsTheSavedCallbackWithoutCreatingDashboardSessions() throws Exception {
+        try (var application = startApplication(); var admin = new Browser(adminPort(webServer(application)));
+             var otherAdmin = new Browser(admin.port); var publicBrowser = new Browser(webServer(application).getPort());
+             var otherBrowser = new Browser(publicBrowser.port)) {
+            saveDiscordOAuth(admin, publicBrowser.port);
+            otherAdmin.login(CREDENTIALS);
+            assertEquals(404, publicBrowser.getPath("/admin/api/discord-authorization-test").statusCode());
+            assertEquals(403, admin.send("discord-authorization-test", Map.of(), null).get().statusCode());
+
+            var launch = admin.beginAuthorizationTest();
+            assertEquals("PENDING", admin.authorizationTestStatus());
+            assertEquals("IDLE", otherAdmin.authorizationTestStatus());
+            assertTrue(discordOAuthVerification(otherAdmin).isNull());
+            var authorization = location(publicBrowser.getPath(launch));
+            assertEquals("consent", parameter(authorization, "prompt"));
+            assertEquals(uri(publicBrowser.port, "/dashboard/oauth/discord/callback").toString(),
+                    parameter(authorization, "redirect_uri"));
+            providers.expectDiscordChallenge("test-success", parameter(authorization, "code_challenge"));
+            var callback = discordCallback(authorization, "test-success");
+            assertEquals(410, otherBrowser.getPath(callback).statusCode());
+            assertEquals("PENDING", admin.authorizationTestStatus());
+            assertEquals(200, publicBrowser.getPath(callback).statusCode());
+            assertEquals("SUCCEEDED", admin.authorizationTestStatus());
+            var verifiedAt = discordOAuthVerification(otherAdmin);
+            assertEquals(clock.instant(), Instant.parse(verifiedAt.asString()));
+            assertEquals(410, publicBrowser.getPath(callback).statusCode());
+            assertEquals(401, publicBrowser.getPath("/dashboard/api/account").statusCode());
+
+            var signIn = publicBrowser.beginDiscord("sign-in");
+            providers.expectDiscordChallenge("101", parameter(signIn, "code_challenge"));
+            var rejected = location(publicBrowser.getPath(admin.beginAuthorizationTest()));
+            assertEquals(200, publicBrowser.getPath(discordCallback(rejected, "101")).statusCode());
+            assertEquals("REJECTED", admin.authorizationTestStatus());
+            assertEquals(401, publicBrowser.getPath("/dashboard/api/account").statusCode());
+            assertEquals("/dashboard/", location(publicBrowser.getPath(discordCallback(signIn, "101"))));
+            var account = publicBrowser.dashboardAccount();
+
+            var providerRejected = location(publicBrowser.getPath(admin.beginAuthorizationTest()));
+            assertEquals(200, publicBrowser.getPath(discordCallback(providerRejected, "rejected")).statusCode());
+            assertEquals("REJECTED", admin.authorizationTestStatus());
+            assertEquals(verifiedAt, discordOAuthVerification(otherAdmin));
+
+            var expired = location(publicBrowser.getPath(admin.beginAuthorizationTest()));
+            clock.advance(Duration.ofMinutes(6));
+            assertEquals(410, publicBrowser.getPath(discordCallback(expired, "test-success")).statusCode());
+            assertEquals("EXPIRED", admin.authorizationTestStatus());
+
+            assertEquals(200, admin.post("setup/storage", storageDisabled()).statusCode());
+            var beforeSettingsChange = location(publicBrowser.getPath(admin.beginAuthorizationTest()));
+            assertEquals(200, admin.post("configuration/discord", discordOAuth("replacement-secret")).statusCode());
+            assertEquals(410, publicBrowser.getPath(discordCallback(beforeSettingsChange, "test-success")).statusCode());
+            assertEquals("EXPIRED", admin.authorizationTestStatus());
+            assertTrue(discordOAuthVerification(otherAdmin).isNull());
+
+            var invalidated = location(publicBrowser.getPath(admin.beginAuthorizationTest()));
+            assertEquals(204, admin.send("logout", Map.of(), admin.csrf()).get().statusCode());
+            assertEquals(410, publicBrowser.getPath(discordCallback(invalidated, "test-success")).statusCode());
+            assertEquals("IDLE", otherAdmin.authorizationTestStatus());
+            assertEquals(account, publicBrowser.dashboardAccount());
+        }
+    }
+
+    @Test
+    void discordOAuthVerificationPersistsUntilTheCallbackUrlChanges() throws Exception {
+        try (var application = startApplication(); var admin = new Browser(adminPort(webServer(application)));
+             var publicBrowser = new Browser(webServer(application).getPort())) {
+            saveDiscordOAuth(admin, publicBrowser.port);
+            assertEquals(200, admin.post("setup/storage", storageDisabled()).statusCode());
+            var authorization = location(publicBrowser.getPath(admin.beginAuthorizationTest()));
+            providers.expectDiscordChallenge("test-success", parameter(authorization, "code_challenge"));
+            assertEquals(200, publicBrowser.getPath(discordCallback(authorization, "test-success")).statusCode());
+        }
+
+        try (var application = startApplication(); var admin = new Browser(adminPort(webServer(application)))) {
+            admin.login(CREDENTIALS);
+            assertEquals(clock.instant(), Instant.parse(discordOAuthVerification(admin).asString()));
+            assertEquals(200, admin.post("configuration/discord", discordOAuth("test-discord-secret")).statusCode());
+            assertEquals(clock.instant(), Instant.parse(discordOAuthVerification(admin).asString()));
+            var changed = admin.post("configuration/deployment", Map.of("publicUrl", "https://new.example"));
+            assertEquals(200, changed.statusCode(), changed::body);
+            assertTrue(discordOAuthVerification(admin).isNull());
+        }
+    }
+
+    @Test
+    void discordReplacementRequiresRecentProofAndPreservesTheAccountAcrossConflictsAndSuccess() throws Exception {
+        try (var application = startApplication(); var admin = new Browser(adminPort(webServer(application)));
+             var first = new Browser(webServer(application).getPort()); var oldSession = new Browser(first.port);
+             var other = new Browser(first.port); var newSession = new Browser(first.port)) {
+            saveDiscordOAuth(admin, first.port);
+            var original = first.signInAs("101");
+            var accountId = UUID.fromString(original.path("id").asString());
+            seedAccountLinks(accountId);
+            oldSession.signInAs("101");
+            other.signInAs("202");
+            clock.advance(Duration.ofMinutes(11));
+            assertEquals("/dashboard/?oauth=reauthenticate",
+                    location(first.dashboardPost("replace-discord", first.dashboardCsrf())));
+            var wrongIdentity = first.beginDiscord("reauthenticate");
+            assertEquals("/dashboard/?oauth=rejected", location(first.getPath(discordCallback(wrongIdentity, "303"))));
+            assertEquals("101", first.dashboardAccount().path("discordId").asString());
+            var reauthentication = first.beginDiscord("reauthenticate");
+            assertEquals("consent", parameter(reauthentication, "prompt"));
+            assertEquals("/dashboard/", location(first.getPath(discordCallback(reauthentication, "101"))));
+
+            var conflict = first.proveReplacement("202");
+            assertEquals(409, first.confirmReplacement(conflict).statusCode());
+            assertEquals("101", first.dashboardAccount().path("discordId").asString());
+            assertEquals("202", other.dashboardAccount().path("discordId").asString());
+            assertEquals(410, first.confirmReplacement(conflict).statusCode());
+
+            var pending = first.proveReplacement("303");
+            var oldReauthentication = oldSession.beginDiscord("reauthenticate");
+            assertEquals("/dashboard/", location(oldSession.getPath(discordCallback(oldReauthentication, "101"))));
+            var stale = oldSession.proveReplacement("404");
+            var reviewed = JSON.readTree(first.getPath("/dashboard/api/replacement").body());
+            assertEquals("101", reviewed.path("current").path("id").asString());
+            assertEquals("303", reviewed.path("proposed").path("id").asString());
+            assertEquals(410, other.confirmReplacement(pending).statusCode());
+            assertEquals(204, first.confirmReplacement(pending).statusCode());
+            assertEquals("303", first.dashboardAccount().path("discordId").asString());
+            assertEquals(original.path("id"), newSession.signInAs("303").path("id"));
+            assertAccountLinksPreserved(accountId);
+            assertEquals(401, oldSession.getPath("/dashboard/api/account").statusCode());
+            assertEquals(401, oldSession.confirmReplacement(stale).statusCode());
+        }
+    }
+
+    @Test
+    void competingSignupAndReplacementRespectTheUniqueDiscordBinding() throws Exception {
+        try (var application = startApplication(); var admin = new Browser(adminPort(webServer(application)));
+             var first = new Browser(webServer(application).getPort()); var second = new Browser(first.port);
+             var third = new Browser(first.port); var fourth = new Browser(first.port)) {
+            saveDiscordOAuth(admin, first.port);
+            first.signInAs("101");
+            second.signInAs("202");
+            var firstProof = first.proveReplacement("303");
+            var secondProof = second.proveReplacement("303");
+            var firstConfirm = first.sendDashboard("confirm-replacement", firstProof, first.dashboardCsrf());
+            var secondConfirm = second.sendDashboard("confirm-replacement", secondProof, second.dashboardCsrf());
+            var statuses = List.of(firstConfirm.get(10, TimeUnit.SECONDS).statusCode(),
+                    secondConfirm.get(10, TimeUnit.SECONDS).statusCode()).stream().sorted().toList();
+            assertEquals(List.of(204, 409), statuses);
+            assertEquals(1, List.of(first.dashboardAccount(), second.dashboardAccount()).stream()
+                    .filter(account -> account.path("discordId").asString().equals("303")).count());
+
+            var thirdAuthorization = third.beginDiscord("sign-in");
+            var fourthAuthorization = fourth.beginDiscord("sign-in");
+            var thirdCallback = third.getPathAsync(discordCallback(thirdAuthorization, "404"));
+            var fourthCallback = fourth.getPathAsync(discordCallback(fourthAuthorization, "404"));
+            assertEquals("/dashboard/", location(thirdCallback.get(10, TimeUnit.SECONDS)));
+            assertEquals("/dashboard/", location(fourthCallback.get(10, TimeUnit.SECONDS)));
+            assertEquals(third.dashboardAccount().path("id"), fourth.dashboardAccount().path("id"));
+        }
+    }
+
+    @Test
+    void expiringOrSameIdentityProofKeepsTheWorkingDiscordLogin() throws Exception {
+        try (var application = startApplication(); var admin = new Browser(adminPort(webServer(application)));
+             var first = new Browser(webServer(application).getPort()); var otherSession = new Browser(first.port)) {
+            saveDiscordOAuth(admin, first.port);
+            var original = first.signInAs("101");
+            otherSession.signInAs("101");
+            var noChange = first.proveReplacement("101");
+            assertEquals(204, first.confirmReplacement(noChange).statusCode());
+            assertEquals(original.path("id"), otherSession.dashboardAccount().path("id"));
+            var pending = first.proveReplacement("202");
+            clock.advance(Duration.ofMinutes(6));
+            assertEquals(410, first.confirmReplacement(pending).statusCode());
+            assertEquals("101", first.dashboardAccount().path("discordId").asString());
+        }
+    }
+
+    @Test
+    void discordSignInResolvesOneAccountAndLogoutRevokesTheSession() throws Exception {
+        try (var application = startApplication(); var admin = new Browser(adminPort(webServer(application)));
+             var first = new Browser(webServer(application).getPort()); var second = new Browser(first.port)) {
+            saveDiscordOAuth(admin, first.port);
+            assertEquals(200, first.getPath("/dashboard/").statusCode());
+            assertEquals(404, admin.getPath("/dashboard/").statusCode());
+            assertEquals(401, first.getPath("/dashboard/api/account").statusCode());
+
+            var authorization = first.beginDiscord("sign-in");
+            assertEquals("none", parameter(authorization, "prompt"));
+            assertEquals("identify", parameter(authorization, "scope"));
+            assertEquals("S256", parameter(authorization, "code_challenge_method"));
+            providers.expectDiscordChallenge("101", parameter(authorization, "code_challenge"));
+            assertEquals(uri(first.port, "/dashboard/oauth/discord/callback").toString(),
+                    parameter(authorization, "redirect_uri"));
+            var callback = discordCallback(authorization, "101");
+            assertEquals("/dashboard/?oauth=expired", location(second.getPath(callback)));
+            assertEquals("/dashboard/", location(first.getPath(callback)));
+            var account = first.dashboardAccount();
+            assertEquals("101", account.path("discordId").asString());
+            assertEquals("/dashboard/?oauth=expired", location(first.getPath(callback)));
+            var secondAuthorization = second.beginDiscord("sign-in");
+            assertEquals("none", parameter(secondAuthorization, "prompt"));
+            providers.expectDiscordChallenge("101", parameter(secondAuthorization, "code_challenge"));
+            assertEquals("/dashboard/", location(second.getPath(discordCallback(secondAuthorization, "101"))));
+            assertEquals(account.path("id"), second.dashboardAccount().path("id"));
+
+            assertEquals(403, first.dashboardPost("logout", null).statusCode());
+            var oldCookie = first.cookies.getCookieStore().getCookies().stream()
+                    .filter(cookie -> cookie.getName().equals("DISCORD_BOT_DASHBOARD")).findFirst().orElseThrow();
+            assertEquals(204, first.dashboardPost("logout", first.dashboardCsrf()).statusCode());
+            first.cookies.getCookieStore().add(uri(first.port, "/dashboard/"), oldCookie);
+            assertEquals(401, first.getPath("/dashboard/api/account").statusCode());
+            assertEquals(account.path("id"), second.dashboardAccount().path("id"));
+        }
+    }
+
+    @Test
+    void discordSignInRetriesWithConsentOnlyOnceWhenInteractionIsRequired() throws Exception {
+        try (var application = startApplication(); var admin = new Browser(adminPort(webServer(application)));
+             var first = new Browser(webServer(application).getPort()); var second = new Browser(first.port)) {
+            saveDiscordOAuth(admin, first.port);
+
+            var silent = first.beginDiscord("sign-in");
+            var interactionRequired = discordError(silent, "interaction_required");
+            assertEquals("/dashboard/?oauth=expired", location(second.getPath(interactionRequired)));
+            var interactive = location(first.getPath(interactionRequired));
+            assertEquals("consent", parameter(interactive, "prompt"));
+            assertNotEquals(parameter(silent, "state"), parameter(interactive, "state"));
+            assertNotEquals(parameter(silent, "code_challenge"), parameter(interactive, "code_challenge"));
+            assertEquals("/dashboard/?oauth=expired", location(first.getPath(interactionRequired)));
+            assertEquals("/dashboard/?oauth=rejected", location(first.getPath(discordError(interactive, "access_denied"))));
+            assertEquals(401, first.getPath("/dashboard/api/account").statusCode());
+
+            var firstTimeConsent = location(second.getPath(discordError(second.beginDiscord("sign-in"), "access_denied")));
+            assertEquals("consent", parameter(firstTimeConsent, "prompt"));
+            providers.expectDiscordChallenge("101", parameter(firstTimeConsent, "code_challenge"));
+            assertEquals("/dashboard/", location(second.getPath(discordCallback(firstTimeConsent, "101"))));
+            assertEquals("101", second.dashboardAccount().path("discordId").asString());
+        }
+    }
+
+    @Test
+    void serverSettingsDeriveBothCallbacksAndDriveDiscordAuthorization() throws Exception {
+        try (var application = startApplication(); var admin = new Browser(adminPort(webServer(application)));
+             var dashboard = new Browser(webServer(application).getPort())) {
+            admin.claim();
+            var initial = JSON.readTree(admin.get("configuration").body());
+            assertEquals("SERVER", initial.path("setupStep").asString());
+            assertTrue(initial.path("discord").path("callbackUrl").isNull());
+            var providers = Map.of("discord", discordOAuth("test-discord-secret"), "twitch", Map.of("enabled", true,
+                    "clientId", "twitch-client", "clientSecret", Map.of("action", "REPLACE", "value", "test-twitch-secret")));
+            var missingUrl = admin.post("setup/providers", providers);
+            assertEquals(400, missingUrl.statusCode(), missingUrl::body);
+            assertTrue(JSON.readTree(missingUrl.body()).path("errors").has("discord.callbackUrl"));
+            assertTrue(JSON.readTree(missingUrl.body()).path("errors").has("twitch.callbackUrl"));
+
+            for (String invalid : List.of("https://bot.example/dashboard/", "https://bot.example?extra=true",
+                    "https://bot.example#fragment", "http://bot.example", "https://user@bot.example")) {
+                var rejected = admin.post("setup/deployment", Map.of("publicUrl", invalid));
+                assertEquals(400, rejected.statusCode(), rejected::body);
+                assertTrue(JSON.readTree(rejected.body()).path("errors").has("publicUrl"));
+            }
+            var deployment = admin.post("setup/deployment", Map.of("publicUrl", "https://bot.example:8443/"));
+            assertEquals(200, deployment.statusCode(), deployment::body);
+            var config = JSON.readTree(deployment.body());
+            assertEquals("PROVIDERS", config.path("setupStep").asString());
+            assertEquals("https://bot.example:8443", config.path("publicUrl").asString());
+            assertEquals("https://bot.example:8443/dashboard/oauth/discord/callback", config.path("discord").path("callbackUrl").asString());
+            assertEquals("https://bot.example:8443/dashboard/oauth/twitch/callback", config.path("twitch").path("callbackUrl").asString());
+
+            var saved = admin.post("setup/providers", providers);
+            assertEquals(200, saved.statusCode(), saved::body);
+            assertEquals(200, admin.post("setup/storage", storageDisabled()).statusCode());
+            assertEquals(400, admin.post("configuration/deployment", Map.of("publicUrl", "")).statusCode());
+            var updated = admin.post("configuration/deployment", Map.of("publicUrl", uri(dashboard.port, "").toString()));
+            assertEquals(200, updated.statusCode(), updated::body);
+            var persisted = JSON.readTree(updated.body());
+            var redirect = uri(dashboard.port, "/dashboard/oauth/discord/callback").toString();
+            assertEquals(redirect, persisted.path("discord").path("callbackUrl").asString());
+            assertEquals(uri(dashboard.port, "/dashboard/oauth/twitch/callback").toString(),
+                    persisted.path("twitch").path("callbackUrl").asString());
+            assertEquals(3, persisted.path("discord").path("oauthRevision").asInt());
+            assertEquals(3, persisted.path("twitch").path("oauthRevision").asInt());
+            assertEquals(redirect, parameter(dashboard.beginDiscord("sign-in"), "redirect_uri"));
+        }
+    }
+
+    @Test
+    void dashboardAccountLoadKeepsTheCsrfTokenForReplacement() throws Exception {
+        try (var application = startApplication(); var admin = new Browser(adminPort(webServer(application)));
+             var browser = new Browser(webServer(application).getPort())) {
+            saveDiscordOAuth(admin, browser.port);
+            String beforeSignIn = browser.dashboardCsrf();
+            var signIn = location(browser.submitDiscord("sign-in", beforeSignIn));
+            assertEquals("/dashboard/", location(browser.getPath(discordCallback(signIn, "101"))));
+            assertEquals(403, browser.submitDiscord("replace-discord", beforeSignIn).statusCode());
+
+            String csrf = browser.dashboardCsrf();
+            assertEquals("101", browser.dashboardAccount().path("discordId").asString());
+            var replacement = browser.submitDiscord("replace-discord", csrf);
+            assertEquals(303, replacement.statusCode());
+            assertEquals("discord.com", URI.create(location(replacement)).getHost());
+        }
+    }
+
+    private static void saveDiscordOAuth(Browser admin, int publicPort) throws Exception {
+        admin.claim();
+        assertEquals(200, admin.post("setup/deployment", Map.of("publicUrl", uri(publicPort, "").toString())).statusCode());
+        var saved = admin.post("setup/providers", Map.of("discord", discordOAuth("test-discord-secret"),
+                "twitch", Map.of("enabled", false, "clientSecret", keep())));
+        assertEquals(200, saved.statusCode(), saved::body);
+    }
+
+    private static JsonNode discordOAuthVerification(Browser admin) throws Exception {
+        var configuration = admin.get("configuration");
+        assertEquals(200, configuration.statusCode(), configuration::body);
+        return JSON.readTree(configuration.body()).path("discord").path("oauthVerifiedAt");
+    }
+
+    private static Map<String, Object> discordOAuth(String secret) {
+        return Map.of("botEnabled", true, "botToken", Map.of("action", "REPLACE", "value", BOT_TOKEN),
+                "oauthEnabled", true, "clientId", "test-client", "clientSecret",
+                Map.of("action", "REPLACE", "value", secret));
+    }
+
+    private static void seedAccountLinks(UUID accountId) throws Exception {
+        try (var connection = DriverManager.getConnection(
+                postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+             var update = connection.prepareStatement("""
+                     UPDATE dashboard_account SET primary_twitch_id = '720', managed_guild_id = '820' WHERE id = ?
+                     """)) {
+            update.setObject(1, accountId);
+            assertEquals(1, update.executeUpdate());
+        }
+    }
+
+    private static void assertAccountLinksPreserved(UUID accountId) throws Exception {
+        try (var connection = DriverManager.getConnection(
+                postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+             var select = connection.prepareStatement("""
+                     SELECT primary_twitch_id, managed_guild_id FROM dashboard_account WHERE id = ?
+                     """)) {
+            select.setObject(1, accountId);
+            try (var links = select.executeQuery()) {
+                assertTrue(links.next());
+                assertEquals("720", links.getString("primary_twitch_id"));
+                assertEquals("820", links.getString("managed_guild_id"));
+            }
+        }
+    }
+
+    private static String location(HttpResponse<String> response) {
+        assertTrue(response.statusCode() == 302 || response.statusCode() == 303,
+                () -> response.statusCode() + " " + response.body());
+        return response.headers().firstValue("Location").orElseThrow();
+    }
+
+    private static String parameter(String target, String name) {
+        return Arrays.stream(URI.create(target).getRawQuery().split("&"))
+                .filter(part -> part.startsWith(name + "=")).findFirst()
+                .map(part -> URLDecoder.decode(part.substring(name.length() + 1), StandardCharsets.UTF_8))
+                .orElseThrow();
+    }
+
+    private static String discordCallback(String authorization, String code) {
+        return "/dashboard/oauth/discord/callback?state=" + parameter(authorization, "state") + "&code=" + code;
+    }
+
+    private static String discordError(String authorization, String error) {
+        return "/dashboard/oauth/discord/callback?state=" + parameter(authorization, "state") + "&error=" + error;
+    }
 
     @BeforeEach
     void resetDatabase() throws Exception {
@@ -86,27 +600,39 @@ class LocalAdminHttpTest {
              var second = new Browser(first.port)) {
             assertEquals(401, first.get("configuration").statusCode());
             assertEquals(403, first.send("claim", CREDENTIALS, null).get().statusCode());
-            var firstClaim = first.send("claim", CREDENTIALS, first.csrf());
-            var secondClaim = second.send("claim",
-                    Map.of("username", "other-admin", "password", PASSWORD), second.csrf());
+            String firstCsrf = first.csrf();
+            String secondCsrf = second.csrf();
+            String firstSession = first.sessionId();
+            String secondSession = second.sessionId();
+            var otherCredentials = Map.of("username", "other-admin", "password", PASSWORD);
+            var firstClaim = first.send("claim", CREDENTIALS, firstCsrf);
+            var secondClaim = second.send("claim", otherCredentials, secondCsrf);
             var statuses = List.of(firstClaim.get(10, TimeUnit.SECONDS).statusCode(),
                     secondClaim.get(10, TimeUnit.SECONDS).statusCode()).stream().sorted().toList();
             assertEquals(List.of(204, 409), statuses);
-            assertFalse(JSON.readTree(first.get("session").body()).get("claimAvailable").asBoolean());
+            boolean firstWon = firstClaim.get().statusCode() == 204;
+            var winner = firstWon ? first : second;
+            var loser = firstWon ? second : first;
+            var winningCredentials = firstWon ? CREDENTIALS : otherCredentials;
+            var configuration = winner.get("configuration");
+            assertEquals(200, configuration.statusCode());
+            assertEquals("SERVER", JSON.readTree(configuration.body()).path("setupStep").asString());
+            var session = JSON.readTree(winner.get("session").body());
+            assertFalse(session.path("claimAvailable").asBoolean());
+            assertTrue(session.path("authenticated").asBoolean());
+            assertEquals(winningCredentials.get("username"), session.path("username").asString());
+            assertNotEquals(firstWon ? firstSession : secondSession, winner.sessionId());
+            assertEquals(403, winner.send("logout", Map.of(), firstWon ? firstCsrf : secondCsrf).get().statusCode());
+            assertEquals(401, loser.get("configuration").statusCode());
 
-            if (firstClaim.get().statusCode() == 204) {
-                assertLocalLogin(first, CREDENTIALS, webServer(application).getPort());
-            } else {
-                assertLocalLogin(second, Map.of("username", "other-admin", "password", PASSWORD),
-                        webServer(application).getPort());
-            }
+            assertLocalLogin(loser, winningCredentials, webServer(application).getPort());
         }
     }
 
     @Test
     void discordOnlySetupResumesAfterRestartAndCanFinishDuringAProviderOutage() throws Exception {
         try (var application = startApplication(); var browser = new Browser(adminPort(webServer(application)))) {
-            browser.claimAndLogin();
+            browser.claim();
             assertEquals(409, browser.post("setup/storage", storageDisabled()).statusCode());
             var discord = Map.of("botEnabled", true, "botToken", Map.of("action", "REPLACE", "value", BOT_TOKEN),
                     "oauthEnabled", false, "clientSecret", keep());
@@ -115,16 +641,25 @@ class LocalAdminHttpTest {
             assertEquals(400, invalid.statusCode());
             assertTrue(invalid.body().contains("twitch.clientId"));
             var unchanged = JSON.readTree(browser.get("configuration").body());
-            assertEquals("PROVIDERS", unchanged.get("setupStep").asString());
+            assertEquals("SERVER", unchanged.get("setupStep").asString());
             assertFalse(unchanged.get("discord").get("botTokenConfigured").asBoolean());
             var saved = browser.post("setup/providers", Map.of("discord", discord,
                     "twitch", Map.of("enabled", false, "clientSecret", keep())));
             assertEquals(200, saved.statusCode(), saved::body);
             var result = JSON.readTree(saved.body());
-            assertEquals("DEPLOYMENT", result.get("setupStep").asString());
+            assertEquals("STORAGE", result.get("setupStep").asString());
             assertEquals("SUCCEEDED", result.path("providerChecks").path("discord.botToken").asString());
             assertEquals(1, result.path("providerChecks").size());
             assertFalse(saved.body().contains(BOT_TOKEN));
+
+            var server = browser.post("setup/deployment", Map.of("publicUrl", "https://bot.example"));
+            assertEquals(200, server.statusCode(), server::body);
+            assertEquals("STORAGE", JSON.readTree(server.body()).path("setupStep").asString());
+            var providers = browser.post("setup/providers", Map.of("discord", Map.of("botEnabled", true,
+                    "botToken", keep(), "oauthEnabled", false, "clientSecret", keep()),
+                    "twitch", Map.of("enabled", false, "clientSecret", keep())));
+            assertEquals(200, providers.statusCode(), providers::body);
+            assertEquals("STORAGE", JSON.readTree(providers.body()).path("setupStep").asString());
         }
 
         Instant storageVerifiedAt;
@@ -132,10 +667,9 @@ class LocalAdminHttpTest {
             assertFalse(JSON.readTree(browser.get("session").body()).get("claimAvailable").asBoolean());
             browser.login(CREDENTIALS);
             var persisted = JSON.readTree(browser.get("configuration").body());
-            assertEquals("DEPLOYMENT", persisted.get("setupStep").asString());
+            assertEquals("STORAGE", persisted.get("setupStep").asString());
             assertTrue(persisted.get("discord").get("botTokenConfigured").asBoolean());
-            var deployment = browser.post("setup/deployment", Map.of("publicUrl", ""));
-            assertEquals(200, deployment.statusCode(), deployment::body);
+            assertEquals("https://bot.example", persisted.path("publicUrl").asString());
             var complete = browser.post("setup/storage", storageDisabled());
             assertEquals(200, complete.statusCode(), complete::body);
             assertEquals("COMPLETE", JSON.readTree(complete.body()).get("setupStep").asString());
@@ -150,7 +684,6 @@ class LocalAdminHttpTest {
             assertEquals("UNAVAILABLE", settings.path("discord").path("status").path("state").asString());
             assertFalse(configuration.body().contains(BOT_TOKEN), configuration::body);
             var enabled = browser.post("configuration/twitch", Map.of("enabled", true, "clientId", "twitch-client",
-                    "callbackUrl", "https://bot.example/twitch/callback",
                     "clientSecret", Map.of("action", "REPLACE", "value", "test-twitch-secret")));
             assertEquals(200, enabled.statusCode(), enabled::body);
             var saved = JSON.readTree(enabled.body());
@@ -159,7 +692,7 @@ class LocalAdminHttpTest {
             assertFalse(enabled.body().contains("test-twitch-secret"), enabled::body);
 
             var changedTwitch = Map.of("enabled", true, "clientId", "changed-twitch-client",
-                    "callbackUrl", "https://bot.example/twitch/callback", "clientSecret", keep());
+                    "clientSecret", keep());
             providers.status("/twitch/oauth2/token", 401);
             var rejected = browser.post("configuration/twitch", changedTwitch);
             assertEquals(422, rejected.statusCode(), rejected::body);
@@ -174,15 +707,19 @@ class LocalAdminHttpTest {
             assertEquals("twitch-client", stillSaved.path("twitch").path("clientId").asString());
             assertEquals(saved.path("twitch").path("oauthRevision"), stillSaved.path("twitch").path("oauthRevision"));
 
-            var storage = Map.of("enabled", true, "endpoint", providers.endpoint(), "bucket", "attachments", "region", "auto",
+            var storage = Map.of("enabled", true, "endpoint", providers.endpoint(), "bucket", "attachments", "region", "",
                     "accessKey", Map.of("action", "REPLACE", "value", "test-storage-access-key"),
                     "secretKey", Map.of("action", "REPLACE", "value", "test-storage-secret-key"));
             var storageSaved = browser.post("configuration/storage", storage);
             assertEquals(200, storageSaved.statusCode(), storageSaved::body);
             var storageResult = JSON.readTree(storageSaved.body());
             assertEquals("SUCCEEDED", storageResult.path("providerChecks").path("storage.endpoint").asString());
+            assertEquals("auto", storageResult.path("storage").path("region").asString());
             storageVerifiedAt = Instant.parse(storageResult.path("storage").path("verifiedAt").asString());
             assertFalse(storageSaved.body().contains("test-storage-secret-key"));
+            var initialRequests = providers.storageRequests();
+            assertEquals(3, initialRequests.size());
+            assertTrue(initialRequests.stream().allMatch(request -> request.authorization().contains("/auto/s3/aws4_request")));
 
             providers.registerStorageBucket("new-attachments");
             providers.storageError("DELETE", 403, "AccessDenied");
@@ -196,7 +733,8 @@ class LocalAdminHttpTest {
             assertEquals(List.of("PUT", "GET", "DELETE"), attemptedReplacement.stream()
                     .map(ProviderTestServer.Received::method).toList());
             assertTrue(attemptedReplacement.stream().allMatch(request -> request.path().startsWith("/new-attachments/")
-                    && request.authorization().contains("Credential=new-storage-access-key/")));
+                    && request.authorization().contains("Credential=new-storage-access-key/")
+                    && request.authorization().contains("/us-east-1/s3/aws4_request")));
             var cleanupError = JSON.readTree(invalidStorage.body()).path("errors").path("storage.endpoint").asString();
             assertTrue(cleanupError.startsWith("Storage test cleanup failed: access denied for this operation."));
             assertTrue(cleanupError.contains("Test object: s3://new-attachments/discord-bot/validation/"), cleanupError);
@@ -224,8 +762,9 @@ class LocalAdminHttpTest {
     void passwordChangeAndHostResetInvalidateOtherBrowserSessions() throws Exception {
         try (var application = startApplication(); var first = new Browser(adminPort(webServer(application)));
              var second = new Browser(first.port)) {
-            first.claimAndLogin();
+            first.claim();
             second.login(CREDENTIALS);
+            assertEquals(200, first.post("setup/deployment", Map.of("publicUrl", "")).statusCode());
             var providerSave = first.post("setup/providers", Map.of("discord", Map.of("botEnabled", true,
                             "botToken", Map.of("action", "REPLACE", "value", BOT_TOKEN),
                             "oauthEnabled", false, "clientSecret", keep()),
@@ -246,15 +785,16 @@ class LocalAdminHttpTest {
                     "password", change.get("newPassword")), first.csrf()).get().statusCode());
             first.login(Map.of("username", "local-admin", "password", "recovered test passphrase"));
             var saved = JSON.readTree(first.get("configuration").body());
-            assertEquals("DEPLOYMENT", saved.get("setupStep").asString());
+            assertEquals("STORAGE", saved.get("setupStep").asString());
             assertTrue(saved.get("discord").get("botTokenConfigured").asBoolean());
         }
     }
 
     @Test
     void loginAttemptsAreBoundedAcrossUsernames() throws Exception {
-        try (var application = startApplication(); var browser = new Browser(adminPort(webServer(application)))) {
-            assertEquals(204, browser.send("claim", CREDENTIALS, browser.csrf()).get().statusCode());
+        try (var application = startApplication(); var owner = new Browser(adminPort(webServer(application)));
+             var browser = new Browser(owner.port)) {
+            owner.claim();
             for (int attempt = 0; attempt < 8; attempt++) {
                 assertEquals(401, browser.send("login", Map.of("username", "other-" + attempt, "password", PASSWORD),
                         browser.csrf()).get().statusCode());
@@ -305,14 +845,17 @@ class LocalAdminHttpTest {
         var application = new SpringApplication(DiscordBotApplication.class);
         application.addInitializers(context -> providers.register((GenericApplicationContext) context));
         application.addInitializers(context -> ((GenericApplicationContext) context).registerBean(
+                "testClock", Clock.class, () -> clock, bean -> bean.setPrimary(true)));
+        application.addInitializers(context -> ((GenericApplicationContext) context).registerBean(
                 "testGatewayFactory", DiscordGatewayFactory.class, () -> (token, _) -> {
                     throw new IllegalArgumentException("Provider unavailable: " + token);
                 }));
         return application.run(databaseArguments());
     }
 
-    private static String[] databaseArguments() {
+    private String[] databaseArguments() {
         return new String[]{"--server.port=0", "--installation.admin.port=0",
+                "--dashboard.discord.api-base=" + providers.endpoint() + "/discord",
                 "--spring.datasource.url=" + postgres.getJdbcUrl(),
                 "--spring.datasource.username=" + postgres.getUsername(),
                 "--spring.datasource.password=" + postgres.getPassword(),
@@ -348,7 +891,113 @@ class LocalAdminHttpTest {
         }
 
         HttpResponse<String> get(String endpoint) throws Exception {
-            return LocalAdminHttpTest.get(http, port, "/admin/api/" + endpoint);
+            return getPath("/admin/api/" + endpoint);
+        }
+
+        HttpResponse<String> getPath(String path) throws Exception {
+            return LocalAdminHttpTest.get(http, port, path);
+        }
+
+        CompletableFuture<HttpResponse<String>> getPathAsync(String path) {
+            return http.sendAsync(HttpRequest.newBuilder(uri(port, path)).timeout(Duration.ofSeconds(8))
+                    .GET().build(), HttpResponse.BodyHandlers.ofString());
+        }
+
+        JsonNode signInAs(String id) throws Exception {
+            assertEquals("/dashboard/", location(getPath(discordCallback(beginDiscord("sign-in"), id))));
+            return dashboardAccount();
+        }
+
+        String proveReplacement(String id) throws Exception {
+            var authorization = beginDiscord("replace-discord");
+            assertEquals("consent", parameter(authorization, "prompt"));
+            assertEquals("/dashboard/?oauth=confirm", location(getPath(discordCallback(authorization, id))));
+            return JSON.readTree(getPath("/dashboard/api/replacement").body()).path("confirmation").asString();
+        }
+
+        String recoveryCode() throws Exception {
+            var response = dashboardPost("recovery-code", dashboardCsrf());
+            assertEquals(200, response.statusCode(), response::body);
+            return JSON.readTree(response.body()).path("code").asString();
+        }
+
+        HttpResponse<String> recoveryRequest(String credential) throws Exception {
+            String body = "credential=" + URLEncoder.encode(credential, StandardCharsets.UTF_8)
+                    + "&_csrf=" + URLEncoder.encode(dashboardCsrf(), StandardCharsets.UTF_8);
+            var request = HttpRequest.newBuilder(uri(port, "/dashboard/api/recover"))
+                    .header("Content-Type", "application/x-www-form-urlencoded").timeout(Duration.ofSeconds(8))
+                    .POST(HttpRequest.BodyPublishers.ofString(body));
+            return http.send(request.build(), HttpResponse.BodyHandlers.ofString());
+        }
+
+        String beginRecovery(String credential) throws Exception {
+            return location(recoveryRequest(credential));
+        }
+
+        String recoveryLink(String accountPath, long loginVersion) throws Exception {
+            var response = post(accountPath + "recovery-link",
+                    Map.of("password", PASSWORD, "reason", "Reviewed prior ownership", "loginVersion", loginVersion));
+            assertEquals(200, response.statusCode(), response::body);
+            var link = URI.create(JSON.readTree(response.body()).path("url").asString());
+            assertEquals("/dashboard/", link.getPath());
+            assertTrue(link.getFragment().startsWith("recovery="));
+            return link.getFragment().substring("recovery=".length());
+        }
+
+        JsonNode proveRecovery(String credential, String id) throws Exception {
+            var authorization = beginRecovery(credential);
+            assertEquals("/dashboard/?oauth=recovery_confirm", location(getPath(discordCallback(authorization, id))));
+            return recoveryProof();
+        }
+
+        JsonNode recoveryProof() throws Exception {
+            var proof = getPath("/dashboard/api/recovery");
+            assertEquals(200, proof.statusCode(), proof::body);
+            return JSON.readTree(proof.body());
+        }
+
+        HttpResponse<String> confirmRecovery(JsonNode proof) throws Exception {
+            return sendDashboard("confirm-recovery", proof.path("confirmation").asString(), dashboardCsrf())
+                    .get(10, TimeUnit.SECONDS);
+        }
+
+        HttpResponse<String> confirmReplacement(String proof) throws Exception {
+            return sendDashboard("confirm-replacement", proof, dashboardCsrf()).get(10, TimeUnit.SECONDS);
+        }
+
+        String dashboardCsrf() throws Exception {
+            return JSON.readTree(getPath("/dashboard/api/session").body()).path("csrfToken").asString();
+        }
+
+        String beginDiscord(String operation) throws Exception {
+            return location(submitDiscord(operation, dashboardCsrf()));
+        }
+
+        HttpResponse<String> submitDiscord(String operation, String csrf) throws Exception {
+            String body = "_csrf=" + URLEncoder.encode(csrf, StandardCharsets.UTF_8);
+            var request = HttpRequest.newBuilder(uri(port, "/dashboard/api/" + operation))
+                    .header("Content-Type", "application/x-www-form-urlencoded").timeout(Duration.ofSeconds(8))
+                    .POST(HttpRequest.BodyPublishers.ofString(body));
+            return http.send(request.build(), HttpResponse.BodyHandlers.ofString());
+        }
+
+        JsonNode dashboardAccount() throws Exception {
+            var account = getPath("/dashboard/api/account");
+            assertEquals(200, account.statusCode(), account::body);
+            return JSON.readTree(account.body());
+        }
+
+        HttpResponse<String> dashboardPost(String endpoint, String csrf) throws Exception {
+            return sendDashboard(endpoint, null, csrf).get(10, TimeUnit.SECONDS);
+        }
+
+        CompletableFuture<HttpResponse<String>> sendDashboard(String endpoint, String proof, String csrf) {
+            var request = HttpRequest.newBuilder(uri(port, "/dashboard/api/" + endpoint))
+                    .timeout(Duration.ofSeconds(8)).POST(proof == null ? HttpRequest.BodyPublishers.noBody()
+                            : HttpRequest.BodyPublishers.ofString("confirmation=" + proof));
+            if (csrf != null) request.header("X-CSRF-TOKEN", csrf);
+            if (proof != null) request.header("Content-Type", "application/x-www-form-urlencoded");
+            return http.sendAsync(request.build(), HttpResponse.BodyHandlers.ofString());
         }
 
         String csrf() throws Exception {
@@ -371,9 +1020,19 @@ class LocalAdminHttpTest {
             return send(endpoint, JSON.writeValueAsString(body), "application/json", csrf()).get();
         }
 
-        void claimAndLogin() throws Exception {
+        String beginAuthorizationTest() throws Exception {
+            var response = post("discord-authorization-test", Map.of());
+            assertEquals(200, response.statusCode(), response::body);
+            var url = URI.create(JSON.readTree(response.body()).path("launchUrl").asString());
+            return url.getRawPath() + "?" + url.getRawQuery();
+        }
+
+        String authorizationTestStatus() throws Exception {
+            return JSON.readTree(get("discord-authorization-test").body()).path("status").asString();
+        }
+
+        void claim() throws Exception {
             assertEquals(204, send("claim", CREDENTIALS, csrf()).get().statusCode());
-            login(CREDENTIALS);
         }
 
         void login(Map<String, String> credentials) throws Exception {
@@ -393,6 +1052,29 @@ class LocalAdminHttpTest {
         @Override
         public void close() {
             http.close();
+        }
+    }
+
+    private static final class TestClock extends Clock {
+        private volatile Instant now = Instant.parse("2026-11-21T12:00:00Z");
+
+        void advance(Duration duration) {
+            now = now.plus(duration);
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(ZoneId zone) {
+            return Clock.fixed(now, zone);
+        }
+
+        @Override
+        public Instant instant() {
+            return now;
         }
     }
 }

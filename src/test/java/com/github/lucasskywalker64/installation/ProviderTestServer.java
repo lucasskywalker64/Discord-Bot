@@ -6,7 +6,12 @@ import org.springframework.context.support.GenericApplicationContext;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.Arrays;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -16,6 +21,7 @@ public final class ProviderTestServer implements AutoCloseable {
     private final HttpServer server;
     private final Map<String, Integer> statuses = new ConcurrentHashMap<>();
     private final Map<String, Received> requests = new ConcurrentHashMap<>();
+    private final Map<String, String> discordChallenges = new ConcurrentHashMap<>();
     private final List<Received> storageRequests = new CopyOnWriteArrayList<>();
     private final Map<String, String> storageObjects = new ConcurrentHashMap<>();
     private final Map<String, StorageError> storageErrors = new ConcurrentHashMap<>();
@@ -25,8 +31,8 @@ public final class ProviderTestServer implements AutoCloseable {
 
     public ProviderTestServer() throws IOException {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        server.createContext("/discord/users/@me", request -> respond(request, "{\"bot\":true}"));
-        server.createContext("/discord/oauth2/token", request -> respond(request, "{\"access_token\":\"discord-test\"}"));
+        server.createContext("/discord/users/@me", this::discordUser);
+        server.createContext("/discord/oauth2/token", this::discordToken);
         server.createContext("/twitch/oauth2/token", request -> respond(request, "{\"access_token\":\"twitch-test\"}"));
         registerStorageBucket("attachments");
         server.start();
@@ -47,6 +53,10 @@ public final class ProviderTestServer implements AutoCloseable {
 
     public void status(String path, int status) {
         statuses.put(path, status);
+    }
+
+    public void expectDiscordChallenge(String code, String challenge) {
+        discordChallenges.put(code, challenge);
     }
 
     public void storageError(String method, int status, String code) {
@@ -85,8 +95,52 @@ public final class ProviderTestServer implements AutoCloseable {
         try (request) {
             var received = receive(request);
             requests.put(received.path(), received);
+            request.getResponseHeaders().set("Content-Type", "application/json");
             send(request, json, statuses.getOrDefault(received.path(), 200));
         }
+    }
+
+    private void discordToken(HttpExchange request) throws IOException {
+        try (request) {
+            var received = receive(request);
+            requests.put(received.path(), received);
+            String code = formField(received.body(), "code");
+            String expectedChallenge = discordChallenges.get(code);
+            boolean rejected = code.equals("rejected") || (expectedChallenge != null
+                    && !expectedChallenge.equals(challenge(formField(received.body(), "code_verifier"))));
+            int status = statuses.getOrDefault(received.path(), rejected ? 400 : 200);
+            String token = code.matches("[0-9]+") ? "dashboard-user-" + code : "discord-test";
+            request.getResponseHeaders().set("Content-Type", "application/json");
+            send(request, "{\"access_token\":\"" + token + "\",\"token_type\":\"Bearer\"}", status);
+        }
+    }
+
+    private static String formField(String body, String name) {
+        return Arrays.stream(body.split("&")).filter(field -> field.startsWith(name + "=")).findFirst()
+                .map(field -> URLDecoder.decode(field.substring(name.length() + 1), StandardCharsets.UTF_8))
+                .orElse("");
+    }
+
+    private static String challenge(String verifier) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(verifier.getBytes(StandardCharsets.US_ASCII));
+            return Base64.getUrlEncoder().withoutPadding().encodeToString(digest);
+        } catch (NoSuchAlgorithmException exception) {
+            throw new AssertionError(exception);
+        }
+    }
+
+    private void discordUser(HttpExchange request) throws IOException {
+        String authorization = request.getRequestHeaders().getFirst("Authorization");
+        String prefix = "Bearer dashboard-user-";
+        if (authorization != null && authorization.startsWith(prefix)) {
+            String id = authorization.substring(prefix.length());
+            if (id.matches("[0-9]+")) {
+                respond(request, "{\"id\":\"" + id + "\",\"username\":\"person-" + id + "\"}");
+                return;
+            }
+        }
+        respond(request, "{\"bot\":true}");
     }
 
     private void storage(HttpExchange request) throws IOException {

@@ -15,10 +15,12 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Supplier;
 
 @Service
 public class InstallationSetup {
+    private static final Set<SetupStep> IN_PROGRESS = Set.of(SetupStep.SERVER, SetupStep.PROVIDERS, SetupStep.STORAGE);
     private final InstallationConfigurationRepository repository;
     private final InstallationConfigurationService configuration;
     private final ProviderConfigurationChecks providers;
@@ -40,18 +42,20 @@ public class InstallationSetup {
         if (!discord.botEnabled()) {
             throw new Rejected(Map.of("discord.botEnabled", "Enable the Discord bot to complete setup."));
         }
-        return saveVerified(SetupStep.PROVIDERS, discord, twitch, null, () -> {
+        return saveVerified(IN_PROGRESS, discord, twitch, null, () -> {
             accept(configuration.updateDiscord(discord));
             accept(configuration.updateTwitch(twitch));
-            return configuration.updateSetupStep(SetupStep.DEPLOYMENT).configuration();
+            return configuration.updateSetupStep(SetupStep.STORAGE).configuration();
         });
     }
 
     public Snapshot saveDeployment(String publicUrl) {
         return transactions.execute(_ -> {
-            requireStep(repository.lock(), SetupStep.DEPLOYMENT);
-            accept(configuration.updatePublicUrl(publicUrl));
-            return configuration.updateSetupStep(SetupStep.STORAGE).configuration();
+            var saved = repository.lock();
+            requireStep(saved, IN_PROGRESS);
+            var snapshot = accept(configuration.updatePublicUrl(publicUrl));
+            return saved.setupStep == SetupStep.SERVER
+                    ? configuration.updateSetupStep(SetupStep.PROVIDERS).configuration() : snapshot;
         });
     }
 
@@ -60,16 +64,16 @@ public class InstallationSetup {
     }
 
     public Snapshot updateDiscord(DiscordUpdate update) {
-        return saveVerified(SetupStep.COMPLETE, update, null, null, () -> accept(configuration.updateDiscord(update)));
+        return saveVerified(Set.of(SetupStep.COMPLETE), update, null, null, () -> accept(configuration.updateDiscord(update)));
     }
 
     public Snapshot updateTwitch(TwitchUpdate update) {
-        return saveVerified(SetupStep.COMPLETE, null, update, null, () -> accept(configuration.updateTwitch(update)));
+        return saveVerified(Set.of(SetupStep.COMPLETE), null, update, null, () -> accept(configuration.updateTwitch(update)));
     }
 
     public Snapshot updatePublicUrl(String publicUrl) {
         return transactions.execute(_ -> {
-            requireStep(repository.lock(), SetupStep.COMPLETE);
+            requireStep(repository.lock(), Set.of(SetupStep.COMPLETE));
             return accept(configuration.updatePublicUrl(publicUrl));
         });
     }
@@ -79,17 +83,17 @@ public class InstallationSetup {
     }
 
     private Snapshot saveStorage(SetupStep step, StorageUpdate update) {
-        return saveVerified(step, null, null, update, () -> {
+        return saveVerified(Set.of(step), null, null, update, () -> {
             var verifiedAt = update.enabled() ? Instant.now().truncatedTo(ChronoUnit.MILLIS) : null;
             var snapshot = accept(configuration.updateStorage(update, verifiedAt));
             return step == SetupStep.STORAGE ? configuration.updateSetupStep(SetupStep.COMPLETE).configuration() : snapshot;
         });
     }
 
-    private Snapshot saveVerified(SetupStep step, DiscordUpdate discord, TwitchUpdate twitch, StorageUpdate storage,
+    private Snapshot saveVerified(Set<SetupStep> allowedSteps, DiscordUpdate discord, TwitchUpdate twitch, StorageUpdate storage,
                                   Supplier<Snapshot> save) {
         var current = repository.findById(1).orElseThrow();
-        requireStep(current, step);
+        requireStep(current, allowedSteps);
         var inputs = providerInputs(current, discord, twitch, storage);
         var verification = providers.verify(inputs);
         if (!verification.errors().isEmpty()) {
@@ -99,7 +103,7 @@ public class InstallationSetup {
         // A concurrent save can change a credential referenced by KEEP while the provider is checking it.
         return transactions.execute(_ -> {
             var saved = repository.lock();
-            requireStep(saved, step);
+            requireStep(saved, allowedSteps);
             if (!inputs.equals(providerInputs(saved, discord, twitch, storage))) {
                 throw new ChangedDuringVerification();
             }
@@ -128,8 +132,8 @@ public class InstallationSetup {
         return result.configuration();
     }
 
-    private static void requireStep(InstallationConfigurationEntity saved, SetupStep step) {
-        if (saved.setupStep != step) {
+    private static void requireStep(InstallationConfigurationEntity saved, Set<SetupStep> allowedSteps) {
+        if (!allowedSteps.contains(saved.setupStep)) {
             throw new WrongStep();
         }
     }

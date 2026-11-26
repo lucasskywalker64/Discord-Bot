@@ -772,7 +772,7 @@ class DiscordAdapterTest {
                 "--spring.main.banner-mode=off",
                 "--logging.level.root=OFF");
         activeApplication.getBean(InstallationConfigurationService.class).updateDiscord(new DiscordUpdate(
-                true, SecretUpdate.replace("test-token"), false, null, SecretUpdate.keep(), null));
+                true, SecretUpdate.replace("test-token"), false, null, SecretUpdate.keep()));
         verify(builder, timeout(5_000).atLeastOnce()).build();
         awaitLifecycle(activeApplication);
         return activeApplication;

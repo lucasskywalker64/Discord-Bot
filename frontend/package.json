@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "check": "tsc --noEmit",
-    "build": "npm run check && vite build --emptyOutDir"
+    "build": "npm run check && vite build --emptyOutDir && vite build --mode dashboard --emptyOutDir"
   },
   "dependencies": {
     "react": "19.3.1",
