@@ -106,10 +106,11 @@ function SignIn({ session, submit }: {
       : "Use your local administrator credentials."}</p>
     <SaveForm label={session.claimAvailable ? "Create account" : "Sign in"} submit={submit}>
       {errors => <>
-        <Field name="username" label="Username" autoComplete="username" maxLength={64} error={errors.username} required />
+        <Field name="username" label="Username" autoComplete="username" maxLength={64} error={errors.username}
+          required showRequiredLabel={session.claimAvailable} />
         <Field name="password" label="Password" type="password" maxLength={256} required error={errors.password}
           autoComplete={session.claimAvailable ? "new-password" : "current-password"}
-          minLength={session.claimAvailable ? 12 : undefined} />
+          minLength={session.claimAvailable ? 12 : undefined} showRequiredLabel={session.claimAvailable} />
       </>}
     </SaveForm>
   </div>;

@@ -71,13 +71,14 @@ export function Panel({ title, description, children }: {
 
 export type FieldErrors = Record<string, string>;
 
-export function Field({ label, error, name, required, ...input }: ComponentPropsWithoutRef<"input"> & {
+export function Field({ label, error, name, required, showRequiredLabel = true, ...input }: ComponentPropsWithoutRef<"input"> & {
   label: string;
   name: string;
   error?: string;
+  showRequiredLabel?: boolean;
 }) {
   return <label className="field" htmlFor={name}>
-    <span>{label}{required && <span className="field-required" aria-hidden="true"> (required)</span>}</span>
+    <span>{label}{required && showRequiredLabel && <span className="field-required" aria-hidden="true"> (required)</span>}</span>
     <input {...input} id={name} name={name} required={required} aria-invalid={error ? true : undefined}
       aria-describedby={error ? `${name}-error` : undefined} />
     {error && <span className="field-error" id={`${name}-error`}>{error}</span>}
