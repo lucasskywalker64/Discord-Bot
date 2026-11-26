@@ -41,22 +41,31 @@ function feedback(error: unknown): FieldErrors {
   return { form: "The private console could not complete the request. Try again." };
 }
 
-function SaveForm({ label, submit, children, showSaved, submitDisabled = false }: {
+function hasUnsavedChanges(form: HTMLFormElement) {
+  const fields = form.querySelectorAll<HTMLInputElement>('input[name]:not([readonly]):not([type="hidden"])');
+  return Array.from(fields).some(field => field.type === "checkbox"
+    ? field.checked !== field.defaultChecked
+    : field.value !== field.defaultValue);
+}
+
+function SaveForm({ label, submit, children, showSaved, submitDisabled = false, requireChanges = false }: {
   label: string;
   submit: (form: FormData) => Promise<boolean | void>;
   children: (errors: FieldErrors) => ReactNode;
   showSaved?: boolean;
   submitDisabled?: boolean;
+  requireChanges?: boolean;
 }) {
   const [errors, setErrors] = useState<FieldErrors>({});
   const [pending, setPending] = useState(false);
   const [saves, setSaves] = useState(0);
   const [saved, setSaved] = useState("");
+  const [changed, setChanged] = useState(false);
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (submitDisabled) return;
     const form = event.currentTarget;
+    if (submitDisabled || (requireChanges && !hasUnsavedChanges(form))) return;
     const submitted = new FormData(form);
     form.querySelectorAll<HTMLInputElement>('input[type="password"]:not([data-provider-secret])')
       .forEach(input => { input.value = ""; });
@@ -65,6 +74,7 @@ function SaveForm({ label, submit, children, showSaved, submitDisabled = false }
     setErrors({});
     try {
       const verified = await submit(submitted);
+      setChanged(false);
       setSaves(value => value + 1);
       setSaved(verified ? "Settings saved. Provider checks passed." : "Settings saved");
     } catch (error) {
@@ -79,14 +89,16 @@ function SaveForm({ label, submit, children, showSaved, submitDisabled = false }
   }
 
   const hasErrors = Object.keys(errors).length > 0;
-  return <form onSubmit={save}>
+  const disabled = submitDisabled || (requireChanges && !changed);
+  return <form onSubmit={save}
+    onChange={requireChanges ? event => setChanged(hasUnsavedChanges(event.currentTarget)) : undefined}>
     <fieldset key={saves} disabled={pending}>
       {children(errors)}
       {hasErrors && <p role="alert" tabIndex={-1} className="form-error">
         {errors.form ?? errors.setupStep ?? errors.providers ?? "Check the marked fields."}
       </p>}
       <div className="form-actions">
-        <button className="primary" type="submit" disabled={submitDisabled}>{pending ? "Working…" : label}</button>
+        <button className="primary" type="submit" disabled={disabled}>{pending ? "Working…" : label}</button>
         {saved && showSaved && <span role="status" className="saved">{saved}</span>}
       </div>
     </fieldset>
@@ -251,23 +263,27 @@ function Settings({ configuration, save, csrf }: {
 }) {
   return <>
     <Panel title="Server" description={serverGuide + " If you change this URL, update the redirects in each enabled provider."}>
-      <SaveForm label="Save public base URL" showSaved submit={form => save("configuration/deployment", serverUpdate(form))}>
+      <SaveForm label="Save public base URL" showSaved requireChanges
+        submit={form => save("configuration/deployment", serverUpdate(form))}>
         {errors => <ServerFields value={configuration} errors={errors} />}
       </SaveForm>
     </Panel>
     <Panel title="Discord" description={discordGuide}>
-      <SaveForm label="Save Discord settings" showSaved submit={form => save("configuration/discord", discordUpdate(form))}>
+      <SaveForm label="Save Discord settings" showSaved requireChanges
+        submit={form => save("configuration/discord", discordUpdate(form))}>
         {errors => <DiscordFields value={configuration.discord} errors={errors} />}
       </SaveForm>
       {configuration.discord.oauthEnabled && <DiscordAuthorizationTest csrf={csrf} />}
     </Panel>
     <Panel title="Twitch" description={twitchGuide}>
-      <SaveForm label="Save Twitch settings" showSaved submit={form => save("configuration/twitch", twitchUpdate(form))}>
+      <SaveForm label="Save Twitch settings" showSaved requireChanges
+        submit={form => save("configuration/twitch", twitchUpdate(form))}>
         {errors => <TwitchFields value={configuration.twitch} errors={errors} />}
       </SaveForm>
     </Panel>
     <Panel title="Attachment storage" description={storageGuide}>
-      <SaveForm label="Save storage settings" showSaved submit={form => save("configuration/storage", storageUpdate(form))}>
+      <SaveForm label="Save storage settings" showSaved requireChanges
+        submit={form => save("configuration/storage", storageUpdate(form))}>
         {errors => <StorageFields value={configuration.storage} errors={errors} />}
       </SaveForm>
     </Panel>
