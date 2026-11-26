@@ -91,8 +91,7 @@ export function StorageFields({ value, errors }: { value: Configuration["storage
     <div className="field-grid">
       <Field name="storage.bucket" label="Bucket" defaultValue={value.bucket ?? ""}
         required={enabled} error={errors["storage.bucket"]} />
-      <Field name="storage.region" label="Region" defaultValue={value.region ?? ""}
-        required={enabled} error={errors["storage.region"]} />
+      <Field name="storage.region" label="Region" defaultValue={value.region ?? ""} placeholder="auto" />
       <SecretField name="storage.accessKey" label="Access key" configured={value.accessKeyConfigured}
         required={enabled} error={errors["storage.accessKey"]} />
       <SecretField name="storage.secretKey" label="Secret key" configured={value.secretKeyConfigured}

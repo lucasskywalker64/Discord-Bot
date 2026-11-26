@@ -257,7 +257,6 @@ public class InstallationConfigurationService {
         if (update.enabled()) {
             url("storage.endpoint", update.endpoint(), errors);
             required("storage.bucket", update.bucket(), errors);
-            required("storage.region", update.region(), errors);
             required("storage.accessKey", accessKey, errors);
             required("storage.secretKey", secretKey, errors);
         }

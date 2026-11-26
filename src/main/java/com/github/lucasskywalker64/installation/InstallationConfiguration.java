@@ -47,6 +47,9 @@ public final class InstallationConfiguration {
 
     public record StorageUpdate(boolean enabled, String endpoint, String bucket, String region,
                                 SecretUpdate accessKey, SecretUpdate secretKey) {
+        public StorageUpdate {
+            region = region == null || region.isBlank() ? "auto" : region.strip();
+        }
     }
 
     public record Status(State state, String message, String lastFailure) {

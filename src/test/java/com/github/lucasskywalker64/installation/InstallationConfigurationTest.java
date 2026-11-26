@@ -120,7 +120,7 @@ class InstallationConfigurationTest {
 
             var storage = settings.updateStorage(new StorageUpdate(true, "file:///tmp/files", "", "",
                     SecretUpdate.keep(), SecretUpdate.keep()), null);
-            assertEquals(java.util.Set.of("storage.endpoint", "storage.bucket", "storage.region",
+            assertEquals(java.util.Set.of("storage.endpoint", "storage.bucket",
                     "storage.accessKey", "storage.secretKey"), storage.errors().keySet());
             assertFalse(settings.read().storage().enabled());
         }

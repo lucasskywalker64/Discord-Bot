@@ -674,15 +674,19 @@ class LocalAdminHttpTest {
             assertEquals("twitch-client", stillSaved.path("twitch").path("clientId").asString());
             assertEquals(saved.path("twitch").path("oauthRevision"), stillSaved.path("twitch").path("oauthRevision"));
 
-            var storage = Map.of("enabled", true, "endpoint", providers.endpoint(), "bucket", "attachments", "region", "auto",
+            var storage = Map.of("enabled", true, "endpoint", providers.endpoint(), "bucket", "attachments", "region", "",
                     "accessKey", Map.of("action", "REPLACE", "value", "test-storage-access-key"),
                     "secretKey", Map.of("action", "REPLACE", "value", "test-storage-secret-key"));
             var storageSaved = browser.post("configuration/storage", storage);
             assertEquals(200, storageSaved.statusCode(), storageSaved::body);
             var storageResult = JSON.readTree(storageSaved.body());
             assertEquals("SUCCEEDED", storageResult.path("providerChecks").path("storage.endpoint").asString());
+            assertEquals("auto", storageResult.path("storage").path("region").asString());
             storageVerifiedAt = Instant.parse(storageResult.path("storage").path("verifiedAt").asString());
             assertFalse(storageSaved.body().contains("test-storage-secret-key"));
+            var initialRequests = providers.storageRequests();
+            assertEquals(3, initialRequests.size());
+            assertTrue(initialRequests.stream().allMatch(request -> request.authorization().contains("/auto/s3/aws4_request")));
 
             providers.registerStorageBucket("new-attachments");
             providers.storageError("DELETE", 403, "AccessDenied");
@@ -696,7 +700,8 @@ class LocalAdminHttpTest {
             assertEquals(List.of("PUT", "GET", "DELETE"), attemptedReplacement.stream()
                     .map(ProviderTestServer.Received::method).toList());
             assertTrue(attemptedReplacement.stream().allMatch(request -> request.path().startsWith("/new-attachments/")
-                    && request.authorization().contains("Credential=new-storage-access-key/")));
+                    && request.authorization().contains("Credential=new-storage-access-key/")
+                    && request.authorization().contains("/us-east-1/s3/aws4_request")));
             var cleanupError = JSON.readTree(invalidStorage.body()).path("errors").path("storage.endpoint").asString();
             assertTrue(cleanupError.startsWith("Storage test cleanup failed: access denied for this operation."));
             assertTrue(cleanupError.contains("Test object: s3://new-attachments/discord-bot/validation/"), cleanupError);

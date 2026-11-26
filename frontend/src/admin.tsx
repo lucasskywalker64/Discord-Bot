@@ -27,6 +27,7 @@ const twitchGuide = <>Open your application in the <a href="https://dev.twitch.t
   target="_blank" rel="noreferrer">Twitch Developer Console</a>. Add the exact callback URL below under
   {" "}<strong>OAuth Redirect URLs</strong>, then enter its client ID and secret here.</>;
 const storageGuide = "Enter the endpoint and credentials from your S3-compatible provider. "
+  + "Leave the region blank to use auto. "
   + "Saving enabled storage uploads, reads and deletes a temporary test object. You can enable storage later.";
 
 function feedback(error: unknown): FieldErrors {
