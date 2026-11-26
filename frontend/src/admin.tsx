@@ -40,11 +40,12 @@ function feedback(error: unknown): FieldErrors {
   return { form: "The private console could not complete the request. Try again." };
 }
 
-function SaveForm({ label, submit, children, showSaved }: {
+function SaveForm({ label, submit, children, showSaved, submitDisabled = false }: {
   label: string;
   submit: (form: FormData) => Promise<boolean | void>;
   children: (errors: FieldErrors) => ReactNode;
   showSaved?: boolean;
+  submitDisabled?: boolean;
 }) {
   const [errors, setErrors] = useState<FieldErrors>({});
   const [pending, setPending] = useState(false);
@@ -53,6 +54,7 @@ function SaveForm({ label, submit, children, showSaved }: {
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (submitDisabled) return;
     const form = event.currentTarget;
     const submitted = new FormData(form);
     form.querySelectorAll<HTMLInputElement>('input[type="password"]:not([data-provider-secret])')
@@ -83,7 +85,7 @@ function SaveForm({ label, submit, children, showSaved }: {
         {errors.form ?? errors.setupStep ?? errors.providers ?? "Check the marked fields."}
       </p>}
       <div className="form-actions">
-        <button className="primary" type="submit">{pending ? "Working…" : label}</button>
+        <button className="primary" type="submit" disabled={submitDisabled}>{pending ? "Working…" : label}</button>
         {saved && showSaved && <span role="status" className="saved">{saved}</span>}
       </div>
     </fieldset>
@@ -117,29 +119,37 @@ function Wizard({ configuration, save }: {
   configuration: Configuration;
   save: (route: string, body: object) => Promise<boolean>;
 }) {
-  const [editingServer, setEditingServer] = useState(false);
-  const currentStep = editingServer && configuration.setupStep === "PROVIDERS" ? "SERVER" : configuration.setupStep;
-  const activeStep = steps.findIndex(({ step }) => step === currentStep);
+  const [currentStep, setCurrentStep] = useState(configuration.setupStep);
+  const nextRequiredStep = steps.findIndex(({ step }) => step === configuration.setupStep);
+  const canFinish = configuration.setupStep === "STORAGE";
+
+  async function saveAndContinue(route: string, body: object, nextStep: "PROVIDERS" | "STORAGE") {
+    const verified = await save(route, body);
+    setCurrentStep(step => step === currentStep ? nextStep : step);
+    return verified;
+  }
+
   return <>
     <ol className="steps" aria-label="Setup progress">
-      {steps.map(({ step, label }, index) => <li key={step} data-done={index < activeStep}
-        aria-current={index === activeStep ? "step" : undefined}>
-        <span className="step-number" aria-hidden="true">{index + 1}</span>{label}
+      {steps.map(({ step, label }, index) => <li key={step} data-done={index < nextRequiredStep}>
+        <button type="button" aria-current={step === currentStep ? "step" : undefined}
+          onClick={() => setCurrentStep(step)}>
+          <span className="step-number" aria-hidden="true">{index + 1}</span>{label}
+        </button>
       </li>)}
     </ol>
-    {currentStep === "SERVER" && <Panel title="Server" description={serverGuide}>
-      <SaveForm label="Save and continue" submit={async form => {
-        const verified = await save("setup/deployment", serverUpdate(form));
-        setEditingServer(false);
-        return verified;
-      }}>
-        {errors => <ServerFields value={configuration} errors={errors} />}
-      </SaveForm>
-    </Panel>}
-    {configuration.setupStep === "PROVIDERS" && <div hidden={editingServer}>
-      <button className="secondary" type="button" onClick={() => setEditingServer(true)}>Edit server settings</button>
+    <div hidden={currentStep !== "SERVER"}>
+      <Panel title="Server" description={serverGuide}>
+        <SaveForm label="Save and continue"
+          submit={form => saveAndContinue("setup/deployment", serverUpdate(form), "PROVIDERS")}>
+          {errors => <ServerFields value={configuration} errors={errors} />}
+        </SaveForm>
+      </Panel>
+    </div>
+    <div hidden={currentStep !== "PROVIDERS"}>
       <SaveForm label="Save and continue"
-        submit={form => save("setup/providers", { discord: discordUpdate(form, true), twitch: twitchUpdate(form) })}>
+        submit={form => saveAndContinue("setup/providers",
+          { discord: discordUpdate(form, true), twitch: twitchUpdate(form) }, "STORAGE")}>
         {errors => <>
           <Panel title="Discord" description={discordGuide}>
             <DiscordFields value={configuration.discord} errors={errors} setup />
@@ -149,12 +159,18 @@ function Wizard({ configuration, save }: {
           </Panel>
         </>}
       </SaveForm>
-    </div>}
-    {currentStep === "STORAGE" && <Panel title="Attachment storage (optional)" description={storageGuide}>
-      <SaveForm label="Finish setup" submit={form => save("setup/storage", storageUpdate(form))}>
-        {errors => <StorageFields value={configuration.storage} errors={errors} />}
-      </SaveForm>
-    </Panel>}
+    </div>
+    <div hidden={currentStep !== "STORAGE"}>
+      <Panel title="Attachment storage (optional)" description={storageGuide}>
+        <SaveForm label="Finish setup" submitDisabled={!canFinish}
+          submit={form => save("setup/storage", storageUpdate(form))}>
+          {errors => <>
+            <StorageFields value={configuration.storage} errors={errors} />
+            {!canFinish && <p className="muted">Save the required provider settings before finishing setup.</p>}
+          </>}
+        </SaveForm>
+      </Panel>
+    </div>
   </>;
 }
 

@@ -418,8 +418,6 @@ class LocalAdminHttpTest {
             assertTrue(initial.path("discord").path("callbackUrl").isNull());
             var providers = Map.of("discord", discordOAuth("test-discord-secret"), "twitch", Map.of("enabled", true,
                     "clientId", "twitch-client", "clientSecret", Map.of("action", "REPLACE", "value", "test-twitch-secret")));
-            assertEquals(409, admin.post("setup/providers", providers).statusCode());
-            assertEquals(200, admin.post("setup/deployment", Map.of("publicUrl", "")).statusCode());
             var missingUrl = admin.post("setup/providers", providers);
             assertEquals(400, missingUrl.statusCode(), missingUrl::body);
             assertTrue(JSON.readTree(missingUrl.body()).path("errors").has("discord.callbackUrl"));
@@ -603,7 +601,6 @@ class LocalAdminHttpTest {
         try (var application = startApplication(); var browser = new Browser(adminPort(webServer(application)))) {
             browser.claim();
             assertEquals(409, browser.post("setup/storage", storageDisabled()).statusCode());
-            assertEquals(200, browser.post("setup/deployment", Map.of("publicUrl", "")).statusCode());
             var discord = Map.of("botEnabled", true, "botToken", Map.of("action", "REPLACE", "value", BOT_TOKEN),
                     "oauthEnabled", false, "clientSecret", keep());
             var invalid = browser.post("setup/providers", Map.of("discord", discord,
@@ -611,7 +608,7 @@ class LocalAdminHttpTest {
             assertEquals(400, invalid.statusCode());
             assertTrue(invalid.body().contains("twitch.clientId"));
             var unchanged = JSON.readTree(browser.get("configuration").body());
-            assertEquals("PROVIDERS", unchanged.get("setupStep").asString());
+            assertEquals("SERVER", unchanged.get("setupStep").asString());
             assertFalse(unchanged.get("discord").get("botTokenConfigured").asBoolean());
             var saved = browser.post("setup/providers", Map.of("discord", discord,
                     "twitch", Map.of("enabled", false, "clientSecret", keep())));
@@ -621,6 +618,15 @@ class LocalAdminHttpTest {
             assertEquals("SUCCEEDED", result.path("providerChecks").path("discord.botToken").asString());
             assertEquals(1, result.path("providerChecks").size());
             assertFalse(saved.body().contains(BOT_TOKEN));
+
+            var server = browser.post("setup/deployment", Map.of("publicUrl", "https://bot.example"));
+            assertEquals(200, server.statusCode(), server::body);
+            assertEquals("STORAGE", JSON.readTree(server.body()).path("setupStep").asString());
+            var providers = browser.post("setup/providers", Map.of("discord", Map.of("botEnabled", true,
+                    "botToken", keep(), "oauthEnabled", false, "clientSecret", keep()),
+                    "twitch", Map.of("enabled", false, "clientSecret", keep())));
+            assertEquals(200, providers.statusCode(), providers::body);
+            assertEquals("STORAGE", JSON.readTree(providers.body()).path("setupStep").asString());
         }
 
         Instant storageVerifiedAt;
@@ -630,6 +636,7 @@ class LocalAdminHttpTest {
             var persisted = JSON.readTree(browser.get("configuration").body());
             assertEquals("STORAGE", persisted.get("setupStep").asString());
             assertTrue(persisted.get("discord").get("botTokenConfigured").asBoolean());
+            assertEquals("https://bot.example", persisted.path("publicUrl").asString());
             var complete = browser.post("setup/storage", storageDisabled());
             assertEquals(200, complete.statusCode(), complete::body);
             assertEquals("COMPLETE", JSON.readTree(complete.body()).get("setupStep").asString());
@@ -643,7 +650,6 @@ class LocalAdminHttpTest {
                     && !settings.path("discord").path("status").path("state").asString().equals("UNAVAILABLE"));
             assertEquals("UNAVAILABLE", settings.path("discord").path("status").path("state").asString());
             assertFalse(configuration.body().contains(BOT_TOKEN), configuration::body);
-            assertEquals(200, browser.post("configuration/deployment", Map.of("publicUrl", "https://bot.example")).statusCode());
             var enabled = browser.post("configuration/twitch", Map.of("enabled", true, "clientId", "twitch-client",
                     "clientSecret", Map.of("action", "REPLACE", "value", "test-twitch-secret")));
             assertEquals(200, enabled.statusCode(), enabled::body);
