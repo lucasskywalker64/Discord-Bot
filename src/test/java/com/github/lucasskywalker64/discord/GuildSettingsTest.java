@@ -305,7 +305,7 @@ class GuildSettingsTest {
                 "--spring.datasource.password=" + postgres.getPassword(),
                 "--spring.main.banner-mode=off", "--logging.level.root=OFF");
         context.getBean(InstallationConfigurationService.class).updateDiscord(new DiscordUpdate(
-                true, SecretUpdate.replace("test-token"), false, null, SecretUpdate.keep(), null));
+                true, SecretUpdate.replace("test-token"), false, null, SecretUpdate.keep()));
         verify(builder, timeout(5_000)).build();
         var completed = new CompletableFuture<Void>();
         context.getBean("discordLifecycleExecutor", ExecutorService.class).execute(() -> completed.complete(null));

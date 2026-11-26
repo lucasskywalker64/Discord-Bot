@@ -99,11 +99,9 @@ class RuntimeConfigurationTest {
             assertEquals(State.CONNECTED, settings.read().discord().status().state());
 
             settings.updatePublicUrl("https://bot.example");
-            settings.updateTwitch(new TwitchUpdate(true, "client", SecretUpdate.replace("twitch-secret"),
-                    "https://bot.example/callback"));
+            settings.updateTwitch(new TwitchUpdate(true, "client", SecretUpdate.replace("twitch-secret")));
             assertTrue(settings.updateDiscord(new DiscordUpdate(true, SecretUpdate.keep(), true, "123",
-                    SecretUpdate.replace("oauth-secret"),
-                    "https://bot.example/dashboard/oauth/discord/callback")).errors().isEmpty());
+                    SecretUpdate.replace("oauth-secret"))).errors().isEmpty());
             updateToken(settings, "second-token");
             var second = nextConnection();
             verify(first.discord()).shutdown();
@@ -113,7 +111,7 @@ class RuntimeConfigurationTest {
             assertNull(settings.read().discord().status().lastFailure());
             assertTrue(connections.isEmpty());
             settings.updateDiscord(new DiscordUpdate(false, SecretUpdate.keep(), false, "123",
-                    SecretUpdate.keep(), "https://bot.example/dashboard/oauth/discord/callback"));
+                    SecretUpdate.keep()));
             awaitState(settings, State.DISABLED);
             verify(second.discord(), timeout(5_000)).shutdown();
         }
@@ -351,7 +349,7 @@ class RuntimeConfigurationTest {
 
     private static void updateToken(InstallationConfigurationService settings, String token) {
         var result = settings.updateDiscord(new DiscordUpdate(true, SecretUpdate.replace(token), false,
-                null, SecretUpdate.keep(), null));
+                null, SecretUpdate.keep()));
         assertTrue(result.errors().isEmpty());
     }
 

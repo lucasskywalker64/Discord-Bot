@@ -43,15 +43,19 @@ public class InstallationSetup {
         return saveVerified(SetupStep.PROVIDERS, discord, twitch, null, () -> {
             accept(configuration.updateDiscord(discord));
             accept(configuration.updateTwitch(twitch));
-            return configuration.updateSetupStep(SetupStep.DEPLOYMENT).configuration();
+            return configuration.updateSetupStep(SetupStep.STORAGE).configuration();
         });
     }
 
     public Snapshot saveDeployment(String publicUrl) {
         return transactions.execute(_ -> {
-            requireStep(repository.lock(), SetupStep.DEPLOYMENT);
+            var saved = repository.lock();
+            if (saved.setupStep == SetupStep.PROVIDERS) {
+                return accept(configuration.updatePublicUrl(publicUrl));
+            }
+            requireStep(saved, SetupStep.SERVER);
             accept(configuration.updatePublicUrl(publicUrl));
-            return configuration.updateSetupStep(SetupStep.STORAGE).configuration();
+            return configuration.updateSetupStep(SetupStep.PROVIDERS).configuration();
         });
     }
 

@@ -27,8 +27,6 @@ class InstallationConfigurationEntity {
     String discordClientId;
     @Column(columnDefinition = "text")
     String discordClientSecret;
-    @Column(columnDefinition = "text")
-    String discordCallbackUrl;
     long discordOauthRevision;
     long discordBotRevision;
     @Enumerated(EnumType.STRING)
@@ -40,8 +38,6 @@ class InstallationConfigurationEntity {
     String twitchClientId;
     @Column(columnDefinition = "text")
     String twitchClientSecret;
-    @Column(columnDefinition = "text")
-    String twitchCallbackUrl;
     long twitchOauthRevision;
     boolean storageEnabled;
     @Column(columnDefinition = "text")

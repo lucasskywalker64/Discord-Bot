@@ -47,8 +47,7 @@ export function DiscordFields({ value, errors, setup }: {
       <SecretField name="discord.clientSecret" label="Client secret" configured={value.clientSecretConfigured}
         error={errors["discord.clientSecret"]} />
     </div>
-    <Field name="discord.callbackUrl" label="OAuth callback URL" type="url" defaultValue={value.callbackUrl ?? ""}
-      error={errors["discord.callbackUrl"]} />
+    <CallbackField name="discord.callbackUrl" value={value.callbackUrl} error={errors["discord.callbackUrl"]} />
   </>;
 }
 
@@ -60,13 +59,18 @@ export function TwitchFields({ value, errors }: { value: Configuration["twitch"]
       <SecretField name="twitch.clientSecret" label="Client secret" configured={value.clientSecretConfigured}
         error={errors["twitch.clientSecret"]} />
     </div>
-    <Field name="twitch.callbackUrl" label="OAuth callback URL" type="url" defaultValue={value.callbackUrl ?? ""}
-      error={errors["twitch.callbackUrl"]} />
+    <CallbackField name="twitch.callbackUrl" value={value.callbackUrl} error={errors["twitch.callbackUrl"]} />
   </>;
 }
 
-export function DeploymentFields({ value, errors }: { value: Configuration; errors: FieldErrors }) {
-  return <Field name="publicUrl" label="Public URL" type="url" placeholder="https://bot.example.com"
+function CallbackField({ name, value, error }: { name: string; value: string | null; error?: string }) {
+  return <Field name={name} label="OAuth callback URL" value={value ?? ""} readOnly
+    placeholder="Set the public base URL in Server settings" error={error}
+    onFocus={({ currentTarget }) => currentTarget.select()} />;
+}
+
+export function ServerFields({ value, errors }: { value: Configuration; errors: FieldErrors }) {
+  return <Field name="publicUrl" label="Public base URL" type="url" placeholder="https://bot.example.com"
     defaultValue={value.publicUrl ?? ""} error={errors.publicUrl} />;
 }
 
@@ -176,18 +180,18 @@ export function discordUpdate(form: FormData, setup = false) {
   return {
     botEnabled: setup || form.has("discord.botEnabled"), botToken: secret(form, "discord.botToken"),
     oauthEnabled: form.has("discord.oauthEnabled"), clientId: value(form, "discord.clientId"),
-    clientSecret: secret(form, "discord.clientSecret"), callbackUrl: value(form, "discord.callbackUrl"),
+    clientSecret: secret(form, "discord.clientSecret"),
   };
 }
 
 export function twitchUpdate(form: FormData) {
   return {
     enabled: form.has("twitch.enabled"), clientId: value(form, "twitch.clientId"),
-    clientSecret: secret(form, "twitch.clientSecret"), callbackUrl: value(form, "twitch.callbackUrl"),
+    clientSecret: secret(form, "twitch.clientSecret"),
   };
 }
 
-export function deploymentUpdate(form: FormData) {
+export function serverUpdate(form: FormData) {
   return { publicUrl: value(form, "publicUrl") };
 }
 

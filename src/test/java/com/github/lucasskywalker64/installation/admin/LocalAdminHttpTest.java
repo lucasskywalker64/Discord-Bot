@@ -34,7 +34,6 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -243,11 +242,9 @@ class LocalAdminHttpTest {
             assertEquals(410, publicBrowser.getPath(discordCallback(expired, "test-success")).statusCode());
             assertEquals("EXPIRED", admin.authorizationTestStatus());
 
-            assertEquals(200, admin.post("setup/deployment", Map.of("publicUrl", "")).statusCode());
             assertEquals(200, admin.post("setup/storage", storageDisabled()).statusCode());
             var beforeSettingsChange = location(publicBrowser.getPath(admin.beginAuthorizationTest()));
-            assertEquals(200, admin.post("configuration/discord", discordOAuth(publicBrowser.port,
-                    "replacement-secret")).statusCode());
+            assertEquals(200, admin.post("configuration/discord", discordOAuth("replacement-secret")).statusCode());
             assertEquals(410, publicBrowser.getPath(discordCallback(beforeSettingsChange, "test-success")).statusCode());
             assertEquals("EXPIRED", admin.authorizationTestStatus());
 
@@ -412,43 +409,50 @@ class LocalAdminHttpTest {
     }
 
     @Test
-    void showsTheSuggestedDiscordCallbackAndRejectsInvalidUrlsOnSave() throws Exception {
-        try (var application = startApplication(); var admin = new Browser(adminPort(webServer(application)))) {
+    void serverSettingsDeriveBothCallbacksAndDriveDiscordAuthorization() throws Exception {
+        try (var application = startApplication(); var admin = new Browser(adminPort(webServer(application)));
+             var dashboard = new Browser(webServer(application).getPort())) {
             admin.claim();
-            var initial = JSON.readTree(admin.get("configuration").body()).path("discord");
-            assertEquals("https://<your-public-host>/dashboard/oauth/discord/callback",
-                    initial.path("suggestedCallbackUrl").asString());
+            var initial = JSON.readTree(admin.get("configuration").body());
+            assertEquals("SERVER", initial.path("setupStep").asString());
+            assertTrue(initial.path("discord").path("callbackUrl").isNull());
+            var providers = Map.of("discord", discordOAuth("test-discord-secret"), "twitch", Map.of("enabled", true,
+                    "clientId", "twitch-client", "clientSecret", Map.of("action", "REPLACE", "value", "test-twitch-secret")));
+            assertEquals(409, admin.post("setup/providers", providers).statusCode());
+            assertEquals(200, admin.post("setup/deployment", Map.of("publicUrl", "")).statusCode());
+            var missingUrl = admin.post("setup/providers", providers);
+            assertEquals(400, missingUrl.statusCode(), missingUrl::body);
+            assertTrue(JSON.readTree(missingUrl.body()).path("errors").has("discord.callbackUrl"));
+            assertTrue(JSON.readTree(missingUrl.body()).path("errors").has("twitch.callbackUrl"));
 
-            int publicPort = webServer(application).getPort();
-            var discord = new HashMap<>(discordOAuth(publicPort, "test-discord-secret"));
-            var twitch = Map.of("enabled", false, "clientSecret", keep());
-            var callback = (String) discord.get("callbackUrl");
-            discord.put("callbackUrl", uri(publicPort, "/api/auth/discord/callback").toString());
-            var rejectedSetup = admin.post("setup/providers", Map.of("discord", discord, "twitch", twitch));
-            assertEquals(400, rejectedSetup.statusCode(), rejectedSetup::body);
-            assertTrue(JSON.readTree(rejectedSetup.body()).path("errors").path("discord.callbackUrl").asString()
-                    .contains("/dashboard/oauth/discord/callback"));
-
-            discord.put("callbackUrl", callback);
-            var saved = admin.post("setup/providers", Map.of("discord", discord, "twitch", twitch));
-            assertEquals(200, saved.statusCode(), saved::body);
-            assertEquals(callback, JSON.readTree(saved.body()).path("discord").path("suggestedCallbackUrl").asString());
-            var deployment = admin.post("setup/deployment", Map.of("publicUrl", "https://bot.example:8443/dashboard/"));
-            assertEquals(200, deployment.statusCode(), deployment::body);
-            assertEquals("https://bot.example:8443/dashboard/oauth/discord/callback",
-                    JSON.readTree(deployment.body()).path("discord").path("suggestedCallbackUrl").asString());
-            assertEquals(200, admin.post("setup/storage", storageDisabled()).statusCode());
-
-            for (String invalid : List.of(callback + "?extra=true", callback + "#fragment",
-                    "http://bot.example/dashboard/oauth/discord/callback")) {
-                discord.put("callbackUrl", invalid);
-                var rejected = admin.post("configuration/discord", discord);
+            for (String invalid : List.of("https://bot.example/dashboard/", "https://bot.example?extra=true",
+                    "https://bot.example#fragment", "http://bot.example", "https://user@bot.example")) {
+                var rejected = admin.post("setup/deployment", Map.of("publicUrl", invalid));
                 assertEquals(400, rejected.statusCode(), rejected::body);
-                assertTrue(JSON.readTree(rejected.body()).path("errors").has("discord.callbackUrl"));
+                assertTrue(JSON.readTree(rejected.body()).path("errors").has("publicUrl"));
             }
-            var persisted = JSON.readTree(admin.get("configuration").body()).path("discord");
-            assertEquals(callback, persisted.path("callbackUrl").asString());
-            assertEquals(1, persisted.path("oauthRevision").asInt());
+            var deployment = admin.post("setup/deployment", Map.of("publicUrl", "https://bot.example:8443/"));
+            assertEquals(200, deployment.statusCode(), deployment::body);
+            var config = JSON.readTree(deployment.body());
+            assertEquals("PROVIDERS", config.path("setupStep").asString());
+            assertEquals("https://bot.example:8443", config.path("publicUrl").asString());
+            assertEquals("https://bot.example:8443/dashboard/oauth/discord/callback", config.path("discord").path("callbackUrl").asString());
+            assertEquals("https://bot.example:8443/dashboard/oauth/twitch/callback", config.path("twitch").path("callbackUrl").asString());
+
+            var saved = admin.post("setup/providers", providers);
+            assertEquals(200, saved.statusCode(), saved::body);
+            assertEquals(200, admin.post("setup/storage", storageDisabled()).statusCode());
+            assertEquals(400, admin.post("configuration/deployment", Map.of("publicUrl", "")).statusCode());
+            var updated = admin.post("configuration/deployment", Map.of("publicUrl", uri(dashboard.port, "").toString()));
+            assertEquals(200, updated.statusCode(), updated::body);
+            var persisted = JSON.readTree(updated.body());
+            var redirect = uri(dashboard.port, "/dashboard/oauth/discord/callback").toString();
+            assertEquals(redirect, persisted.path("discord").path("callbackUrl").asString());
+            assertEquals(uri(dashboard.port, "/dashboard/oauth/twitch/callback").toString(),
+                    persisted.path("twitch").path("callbackUrl").asString());
+            assertEquals(3, persisted.path("discord").path("oauthRevision").asInt());
+            assertEquals(3, persisted.path("twitch").path("oauthRevision").asInt());
+            assertEquals(redirect, parameter(dashboard.beginDiscord("sign-in"), "redirect_uri"));
         }
     }
 
@@ -472,16 +476,16 @@ class LocalAdminHttpTest {
 
     private static void saveDiscordOAuth(Browser admin, int publicPort) throws Exception {
         admin.claim();
-        var saved = admin.post("setup/providers", Map.of("discord", discordOAuth(publicPort, "test-discord-secret"),
+        assertEquals(200, admin.post("setup/deployment", Map.of("publicUrl", uri(publicPort, "").toString())).statusCode());
+        var saved = admin.post("setup/providers", Map.of("discord", discordOAuth("test-discord-secret"),
                 "twitch", Map.of("enabled", false, "clientSecret", keep())));
         assertEquals(200, saved.statusCode(), saved::body);
     }
 
-    private static Map<String, Object> discordOAuth(int publicPort, String secret) {
+    private static Map<String, Object> discordOAuth(String secret) {
         return Map.of("botEnabled", true, "botToken", Map.of("action", "REPLACE", "value", BOT_TOKEN),
                 "oauthEnabled", true, "clientId", "test-client", "clientSecret",
-                Map.of("action", "REPLACE", "value", secret), "callbackUrl",
-                uri(publicPort, "/dashboard/oauth/discord/callback").toString());
+                Map.of("action", "REPLACE", "value", secret));
     }
 
     private static void seedAccountLinks(UUID accountId) throws Exception {
@@ -581,7 +585,7 @@ class LocalAdminHttpTest {
             var winningCredentials = firstWon ? CREDENTIALS : otherCredentials;
             var configuration = winner.get("configuration");
             assertEquals(200, configuration.statusCode());
-            assertEquals("PROVIDERS", JSON.readTree(configuration.body()).path("setupStep").asString());
+            assertEquals("SERVER", JSON.readTree(configuration.body()).path("setupStep").asString());
             var session = JSON.readTree(winner.get("session").body());
             assertFalse(session.path("claimAvailable").asBoolean());
             assertTrue(session.path("authenticated").asBoolean());
@@ -599,6 +603,7 @@ class LocalAdminHttpTest {
         try (var application = startApplication(); var browser = new Browser(adminPort(webServer(application)))) {
             browser.claim();
             assertEquals(409, browser.post("setup/storage", storageDisabled()).statusCode());
+            assertEquals(200, browser.post("setup/deployment", Map.of("publicUrl", "")).statusCode());
             var discord = Map.of("botEnabled", true, "botToken", Map.of("action", "REPLACE", "value", BOT_TOKEN),
                     "oauthEnabled", false, "clientSecret", keep());
             var invalid = browser.post("setup/providers", Map.of("discord", discord,
@@ -612,7 +617,7 @@ class LocalAdminHttpTest {
                     "twitch", Map.of("enabled", false, "clientSecret", keep())));
             assertEquals(200, saved.statusCode(), saved::body);
             var result = JSON.readTree(saved.body());
-            assertEquals("DEPLOYMENT", result.get("setupStep").asString());
+            assertEquals("STORAGE", result.get("setupStep").asString());
             assertEquals("SUCCEEDED", result.path("providerChecks").path("discord.botToken").asString());
             assertEquals(1, result.path("providerChecks").size());
             assertFalse(saved.body().contains(BOT_TOKEN));
@@ -623,10 +628,8 @@ class LocalAdminHttpTest {
             assertFalse(JSON.readTree(browser.get("session").body()).get("claimAvailable").asBoolean());
             browser.login(CREDENTIALS);
             var persisted = JSON.readTree(browser.get("configuration").body());
-            assertEquals("DEPLOYMENT", persisted.get("setupStep").asString());
+            assertEquals("STORAGE", persisted.get("setupStep").asString());
             assertTrue(persisted.get("discord").get("botTokenConfigured").asBoolean());
-            var deployment = browser.post("setup/deployment", Map.of("publicUrl", ""));
-            assertEquals(200, deployment.statusCode(), deployment::body);
             var complete = browser.post("setup/storage", storageDisabled());
             assertEquals(200, complete.statusCode(), complete::body);
             assertEquals("COMPLETE", JSON.readTree(complete.body()).get("setupStep").asString());
@@ -640,8 +643,8 @@ class LocalAdminHttpTest {
                     && !settings.path("discord").path("status").path("state").asString().equals("UNAVAILABLE"));
             assertEquals("UNAVAILABLE", settings.path("discord").path("status").path("state").asString());
             assertFalse(configuration.body().contains(BOT_TOKEN), configuration::body);
+            assertEquals(200, browser.post("configuration/deployment", Map.of("publicUrl", "https://bot.example")).statusCode());
             var enabled = browser.post("configuration/twitch", Map.of("enabled", true, "clientId", "twitch-client",
-                    "callbackUrl", "https://bot.example/twitch/callback",
                     "clientSecret", Map.of("action", "REPLACE", "value", "test-twitch-secret")));
             assertEquals(200, enabled.statusCode(), enabled::body);
             var saved = JSON.readTree(enabled.body());
@@ -650,7 +653,7 @@ class LocalAdminHttpTest {
             assertFalse(enabled.body().contains("test-twitch-secret"), enabled::body);
 
             var changedTwitch = Map.of("enabled", true, "clientId", "changed-twitch-client",
-                    "callbackUrl", "https://bot.example/twitch/callback", "clientSecret", keep());
+                    "clientSecret", keep());
             providers.status("/twitch/oauth2/token", 401);
             var rejected = browser.post("configuration/twitch", changedTwitch);
             assertEquals(422, rejected.statusCode(), rejected::body);
@@ -717,6 +720,7 @@ class LocalAdminHttpTest {
              var second = new Browser(first.port)) {
             first.claim();
             second.login(CREDENTIALS);
+            assertEquals(200, first.post("setup/deployment", Map.of("publicUrl", "")).statusCode());
             var providerSave = first.post("setup/providers", Map.of("discord", Map.of("botEnabled", true,
                             "botToken", Map.of("action", "REPLACE", "value", BOT_TOKEN),
                             "oauthEnabled", false, "clientSecret", keep()),
@@ -737,7 +741,7 @@ class LocalAdminHttpTest {
                     "password", change.get("newPassword")), first.csrf()).get().statusCode());
             first.login(Map.of("username", "local-admin", "password", "recovered test passphrase"));
             var saved = JSON.readTree(first.get("configuration").body());
-            assertEquals("DEPLOYMENT", saved.get("setupStep").asString());
+            assertEquals("STORAGE", saved.get("setupStep").asString());
             assertTrue(saved.get("discord").get("botTokenConfigured").asBoolean());
         }
     }

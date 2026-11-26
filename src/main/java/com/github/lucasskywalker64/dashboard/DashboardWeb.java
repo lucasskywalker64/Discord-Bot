@@ -1,6 +1,6 @@
 package com.github.lucasskywalker64.dashboard;
 
-import com.github.lucasskywalker64.installation.DiscordCallbackUrl;
+import com.github.lucasskywalker64.installation.OAuthCallbackUrls;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.jspecify.annotations.Nullable;
@@ -82,7 +82,7 @@ class DashboardWeb implements WebMvcConfigurer {
                 .authorizeHttpRequests(requests -> requests
                         .requestMatchers(HttpMethod.GET, "/dashboard", "/dashboard/", "/dashboard/index.html",
                                 "/dashboard/assets/**", "/dashboard/api/session",
-                                "/dashboard/api/recovery", DiscordCallbackUrl.PATH).permitAll()
+                                "/dashboard/api/recovery", OAuthCallbackUrls.DISCORD_PATH).permitAll()
                         .requestMatchers(HttpMethod.POST, "/dashboard/api/sign-in", "/dashboard/api/recover",
                                 "/dashboard/api/confirm-recovery", "/dashboard/api/discard-recovery").permitAll()
                         .anyRequest().hasAuthority(DashboardAccounts.AUTHORITY))

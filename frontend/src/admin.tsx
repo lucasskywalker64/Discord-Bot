@@ -7,26 +7,25 @@ import type { Configuration, Session } from "./api";
 import { DashboardShell, Field, Panel } from "./dashboard";
 import type { FieldErrors } from "./dashboard";
 import {
-  DeploymentFields, DiscordFields, IntegrationStatus, StorageFields, TwitchFields,
-  deploymentUpdate, discordUpdate, storageUpdate, twitchUpdate,
+  DiscordFields, IntegrationStatus, ServerFields, StorageFields, TwitchFields,
+  discordUpdate, serverUpdate, storageUpdate, twitchUpdate,
 } from "./installation";
 import "./dashboard.css";
 
 const steps = [
+  { step: "SERVER", label: "Server" },
   { step: "PROVIDERS", label: "Providers" },
-  { step: "DEPLOYMENT", label: "Deployment" },
   { step: "STORAGE", label: "Storage" },
 ] as const;
-function discordGuide(callbackUrl: string) {
-  return <>Find the bot token in the <a href="https://discord.com/developers/applications"
-    target="_blank" rel="noreferrer">Discord Developer Portal</a>. For public sign-in, enter your application ID
-    and client secret. The callback URL must use your dashboard's public origin and the fixed path shown here.
-    <br /><code>{callbackUrl}</code><br />
-    Register the full URL under Redirects and enter that exact URL below.</>;
-}
-const twitchGuide = <>Register an application in the <a href="https://dev.twitch.tv/console/apps"
-  target="_blank" rel="noreferrer">Twitch Developer Console</a>. Add the OAuth callback URL there and copy its
-  client ID and secret here.</>;
+const serverGuide = "Use the address people open to reach your public dashboard, such as https://bot.example.com. "
+  + "Leave it blank for a bot-only installation.";
+const discordGuide = <>Find your token on your application's <strong>Bot</strong> page in the
+  {" "}<a href="https://discord.com/developers/applications" target="_blank" rel="noreferrer">Discord Developer Portal</a>.
+  For public sign-in, open <strong>OAuth2</strong>, register the exact callback URL below under <strong>Redirects</strong>,
+  and enter your application ID and client secret here.</>;
+const twitchGuide = <>Open your application in the <a href="https://dev.twitch.tv/console/apps"
+  target="_blank" rel="noreferrer">Twitch Developer Console</a>. Add the exact callback URL below under
+  {" "}<strong>OAuth Redirect URLs</strong>, then enter its client ID and secret here.</>;
 const storageGuide = "Enter the endpoint and credentials from your S3-compatible provider. "
   + "Saving enabled storage uploads, reads and deletes a temporary test object. You can enable storage later.";
 
@@ -118,7 +117,9 @@ function Wizard({ configuration, save }: {
   configuration: Configuration;
   save: (route: string, body: object) => Promise<boolean>;
 }) {
-  const activeStep = steps.findIndex(({ step }) => step === configuration.setupStep);
+  const [editingServer, setEditingServer] = useState(false);
+  const currentStep = editingServer && configuration.setupStep === "PROVIDERS" ? "SERVER" : configuration.setupStep;
+  const activeStep = steps.findIndex(({ step }) => step === currentStep);
   return <>
     <ol className="steps" aria-label="Setup progress">
       {steps.map(({ step, label }, index) => <li key={step} data-done={index < activeStep}
@@ -126,24 +127,30 @@ function Wizard({ configuration, save }: {
         <span className="step-number" aria-hidden="true">{index + 1}</span>{label}
       </li>)}
     </ol>
-    {configuration.setupStep === "PROVIDERS" && <SaveForm label="Save and continue"
-      submit={form => save("setup/providers", { discord: discordUpdate(form, true), twitch: twitchUpdate(form) })}>
-      {errors => <>
-        <Panel title="Discord" description={discordGuide(configuration.discord.suggestedCallbackUrl)}>
-          <DiscordFields value={configuration.discord} errors={errors} setup />
-        </Panel>
-        <Panel title="Twitch (optional)" description={twitchGuide}>
-          <TwitchFields value={configuration.twitch} errors={errors} />
-        </Panel>
-      </>}
-    </SaveForm>}
-    {configuration.setupStep === "DEPLOYMENT" && <Panel title="Deployment"
-      description="Enter the external address of your public dashboard if you have one. You can set it later.">
-      <SaveForm label="Save and continue" submit={form => save("setup/deployment", deploymentUpdate(form))}>
-        {errors => <DeploymentFields value={configuration} errors={errors} />}
+    {currentStep === "SERVER" && <Panel title="Server" description={serverGuide}>
+      <SaveForm label="Save and continue" submit={async form => {
+        const verified = await save("setup/deployment", serverUpdate(form));
+        setEditingServer(false);
+        return verified;
+      }}>
+        {errors => <ServerFields value={configuration} errors={errors} />}
       </SaveForm>
     </Panel>}
-    {configuration.setupStep === "STORAGE" && <Panel title="Attachment storage (optional)" description={storageGuide}>
+    {configuration.setupStep === "PROVIDERS" && <div hidden={editingServer}>
+      <button className="secondary" type="button" onClick={() => setEditingServer(true)}>Edit server settings</button>
+      <SaveForm label="Save and continue"
+        submit={form => save("setup/providers", { discord: discordUpdate(form, true), twitch: twitchUpdate(form) })}>
+        {errors => <>
+          <Panel title="Discord" description={discordGuide}>
+            <DiscordFields value={configuration.discord} errors={errors} setup />
+          </Panel>
+          <Panel title="Twitch (optional)" description={twitchGuide}>
+            <TwitchFields value={configuration.twitch} errors={errors} />
+          </Panel>
+        </>}
+      </SaveForm>
+    </div>}
+    {currentStep === "STORAGE" && <Panel title="Attachment storage (optional)" description={storageGuide}>
       <SaveForm label="Finish setup" submit={form => save("setup/storage", storageUpdate(form))}>
         {errors => <StorageFields value={configuration.storage} errors={errors} />}
       </SaveForm>
@@ -225,7 +232,12 @@ function Settings({ configuration, save, csrf }: {
   csrf: string;
 }) {
   return <>
-    <Panel title="Discord" description={discordGuide(configuration.discord.suggestedCallbackUrl)}>
+    <Panel title="Server" description={serverGuide + " If you change this URL, update the redirects in each enabled provider."}>
+      <SaveForm label="Save public base URL" showSaved submit={form => save("configuration/deployment", serverUpdate(form))}>
+        {errors => <ServerFields value={configuration} errors={errors} />}
+      </SaveForm>
+    </Panel>
+    <Panel title="Discord" description={discordGuide}>
       <SaveForm label="Save Discord settings" showSaved submit={form => save("configuration/discord", discordUpdate(form))}>
         {errors => <DiscordFields value={configuration.discord} errors={errors} />}
       </SaveForm>
@@ -234,11 +246,6 @@ function Settings({ configuration, save, csrf }: {
     <Panel title="Twitch" description={twitchGuide}>
       <SaveForm label="Save Twitch settings" showSaved submit={form => save("configuration/twitch", twitchUpdate(form))}>
         {errors => <TwitchFields value={configuration.twitch} errors={errors} />}
-      </SaveForm>
-    </Panel>
-    <Panel title="Deployment">
-      <SaveForm label="Save public URL" showSaved submit={form => save("configuration/deployment", deploymentUpdate(form))}>
-        {errors => <DeploymentFields value={configuration} errors={errors} />}
       </SaveForm>
     </Panel>
     <Panel title="Attachment storage" description={storageGuide}>

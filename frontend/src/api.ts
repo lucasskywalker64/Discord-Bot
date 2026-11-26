@@ -13,7 +13,7 @@ export type Status = {
 
 export type Configuration = {
   providerChecks?: Record<string, "SUCCEEDED" | "FAILED" | "UNAVAILABLE">;
-  setupStep: "PROVIDERS" | "DEPLOYMENT" | "STORAGE" | "COMPLETE";
+  setupStep: "SERVER" | "PROVIDERS" | "STORAGE" | "COMPLETE";
   publicUrl: string | null;
   discord: {
     botEnabled: boolean;
@@ -22,7 +22,6 @@ export type Configuration = {
     clientId: string | null;
     clientSecretConfigured: boolean;
     callbackUrl: string | null;
-    suggestedCallbackUrl: string;
     status: Status;
   };
   twitch: {

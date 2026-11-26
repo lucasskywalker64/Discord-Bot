@@ -1,7 +1,6 @@
 package com.github.lucasskywalker64.dashboard;
 
 import com.github.lucasskywalker64.dashboard.DashboardRecovery.Claim;
-import com.github.lucasskywalker64.installation.DiscordCallbackUrl;
 import com.github.lucasskywalker64.installation.InstallationConfigurationService;
 import com.github.lucasskywalker64.installation.InstallationConfigurationService.DiscordOAuthSettings;
 import org.jspecify.annotations.Nullable;
@@ -38,7 +37,7 @@ public class DiscordDashboardOAuth {
 
     @Nullable DiscordOAuthSettings settings() {
         var settings = installation.discordOAuthSettings();
-        return settings.enabled() && DiscordCallbackUrl.isValid(settings.callbackUrl()) ? settings : null;
+        return settings.enabled() && settings.callbackUrl() != null ? settings : null;
     }
 
     URI begin(DiscordOAuthSettings settings, String browser, Purpose purpose, @Nullable String sessionId) {

@@ -11,7 +11,7 @@ public final class InstallationConfiguration {
     private InstallationConfiguration() {
     }
 
-    public enum SetupStep { PROVIDERS, DEPLOYMENT, STORAGE, COMPLETE }
+    public enum SetupStep { SERVER, PROVIDERS, STORAGE, COMPLETE }
 
     public enum SecretAction { KEEP, REPLACE, CLEAR }
 
@@ -39,10 +39,10 @@ public final class InstallationConfiguration {
     }
 
     public record DiscordUpdate(boolean botEnabled, SecretUpdate botToken, boolean oauthEnabled,
-                                String clientId, SecretUpdate clientSecret, String callbackUrl) {
+                                String clientId, SecretUpdate clientSecret) {
     }
 
-    public record TwitchUpdate(boolean enabled, String clientId, SecretUpdate clientSecret, String callbackUrl) {
+    public record TwitchUpdate(boolean enabled, String clientId, SecretUpdate clientSecret) {
     }
 
     public record StorageUpdate(boolean enabled, String endpoint, String bucket, String region,
@@ -54,7 +54,7 @@ public final class InstallationConfiguration {
 
     public record DiscordView(boolean botEnabled, boolean botTokenConfigured, boolean oauthEnabled,
                               String clientId, boolean clientSecretConfigured, String callbackUrl,
-                              String suggestedCallbackUrl, long oauthRevision, Status status) {
+                              long oauthRevision, Status status) {
     }
 
     public record TwitchView(boolean enabled, String clientId, boolean clientSecretConfigured, String callbackUrl,
