@@ -13,15 +13,16 @@ function selectSavedSecret({ currentTarget }: { currentTarget: HTMLInputElement 
   if (currentTarget.value === SAVED_SECRET_MASK) currentTarget.select();
 }
 
-function SecretField({ name, label, configured, error }: {
+function SecretField({ name, label, configured, required, error }: {
   name: string;
   label: string;
   configured: boolean;
+  required: boolean;
   error?: string;
 }) {
   return <>
     {configured && <input type="hidden" name={`${name}.configured`} value="true" />}
-    <Field name={name} label={label} type="password" autoComplete="off" error={error}
+    <Field name={name} label={label} type="password" autoComplete="off" required={required} error={error}
       data-provider-secret defaultValue={configured ? SAVED_SECRET_MASK : ""}
       aria-description={configured ? "A value is saved. Type to replace it or delete it to clear it on save." : undefined}
       onFocus={selectSavedSecret} onClick={selectSavedSecret}
@@ -36,28 +37,34 @@ function SecretField({ name, label, configured, error }: {
 export function DiscordFields({ value, errors, setup }: {
   value: Configuration["discord"]; errors: FieldErrors; setup?: boolean;
 }) {
+  const [botEnabled, setBotEnabled] = useState(value.botEnabled);
+  const [oauthEnabled, setOauthEnabled] = useState(value.oauthEnabled);
   return <>
-    {!setup && <Toggle name="discord.botEnabled" label="Enable the Discord bot" checked={value.botEnabled} />}
+    {!setup && <Toggle name="discord.botEnabled" label="Enable the Discord bot"
+      checked={botEnabled} onChange={setBotEnabled} />}
     <SecretField name="discord.botToken" label="Bot token" configured={value.botTokenConfigured}
-      error={errors["discord.botToken"]} />
-    <Toggle name="discord.oauthEnabled" label="Enable public Discord sign-in" checked={value.oauthEnabled} />
+      required={setup || botEnabled} error={errors["discord.botToken"]} />
+    <Toggle name="discord.oauthEnabled" label="Enable public Discord sign-in"
+      checked={oauthEnabled} onChange={setOauthEnabled} />
     <div className="field-grid">
       <Field name="discord.clientId" label="Application ID" defaultValue={value.clientId ?? ""}
-        error={errors["discord.clientId"]} />
+        required={oauthEnabled} error={errors["discord.clientId"]} />
       <SecretField name="discord.clientSecret" label="Client secret" configured={value.clientSecretConfigured}
-        error={errors["discord.clientSecret"]} />
+        required={oauthEnabled} error={errors["discord.clientSecret"]} />
     </div>
     <CallbackField name="discord.callbackUrl" value={value.callbackUrl} error={errors["discord.callbackUrl"]} />
   </>;
 }
 
 export function TwitchFields({ value, errors }: { value: Configuration["twitch"]; errors: FieldErrors }) {
+  const [enabled, setEnabled] = useState(value.enabled);
   return <>
-    <Toggle name="twitch.enabled" label="Enable Twitch" checked={value.enabled} />
+    <Toggle name="twitch.enabled" label="Enable Twitch" checked={enabled} onChange={setEnabled} />
     <div className="field-grid">
-      <Field name="twitch.clientId" label="Client ID" defaultValue={value.clientId ?? ""} error={errors["twitch.clientId"]} />
+      <Field name="twitch.clientId" label="Client ID" defaultValue={value.clientId ?? ""}
+        required={enabled} error={errors["twitch.clientId"]} />
       <SecretField name="twitch.clientSecret" label="Client secret" configured={value.clientSecretConfigured}
-        error={errors["twitch.clientSecret"]} />
+        required={enabled} error={errors["twitch.clientSecret"]} />
     </div>
     <CallbackField name="twitch.callbackUrl" value={value.callbackUrl} error={errors["twitch.callbackUrl"]} />
   </>;
@@ -71,21 +78,25 @@ function CallbackField({ name, value, error }: { name: string; value: string | n
 
 export function ServerFields({ value, errors }: { value: Configuration; errors: FieldErrors }) {
   return <Field name="publicUrl" label="Public base URL" type="url" placeholder="https://bot.example.com"
-    defaultValue={value.publicUrl ?? ""} error={errors.publicUrl} />;
+    defaultValue={value.publicUrl ?? ""} required={value.discord.oauthEnabled || value.twitch.enabled}
+    error={errors.publicUrl} />;
 }
 
 export function StorageFields({ value, errors }: { value: Configuration["storage"]; errors: FieldErrors }) {
+  const [enabled, setEnabled] = useState(value.enabled);
   return <>
-    <Toggle name="storage.enabled" label="Enable attachment storage" checked={value.enabled} />
+    <Toggle name="storage.enabled" label="Enable attachment storage" checked={enabled} onChange={setEnabled} />
     <Field name="storage.endpoint" label="S3 endpoint URL" type="url" defaultValue={value.endpoint ?? ""}
-      error={errors["storage.endpoint"]} />
+      required={enabled} error={errors["storage.endpoint"]} />
     <div className="field-grid">
-      <Field name="storage.bucket" label="Bucket" defaultValue={value.bucket ?? ""} error={errors["storage.bucket"]} />
-      <Field name="storage.region" label="Region" defaultValue={value.region ?? ""} error={errors["storage.region"]} />
+      <Field name="storage.bucket" label="Bucket" defaultValue={value.bucket ?? ""}
+        required={enabled} error={errors["storage.bucket"]} />
+      <Field name="storage.region" label="Region" defaultValue={value.region ?? ""}
+        required={enabled} error={errors["storage.region"]} />
       <SecretField name="storage.accessKey" label="Access key" configured={value.accessKeyConfigured}
-        error={errors["storage.accessKey"]} />
+        required={enabled} error={errors["storage.accessKey"]} />
       <SecretField name="storage.secretKey" label="Secret key" configured={value.secretKeyConfigured}
-        error={errors["storage.secretKey"]} />
+        required={enabled} error={errors["storage.secretKey"]} />
     </div>
   </>;
 }

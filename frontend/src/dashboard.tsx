@@ -71,19 +71,24 @@ export function Panel({ title, description, children }: {
 
 export type FieldErrors = Record<string, string>;
 
-export function Field({ label, error, name, ...input }: ComponentPropsWithoutRef<"input"> & {
+export function Field({ label, error, name, required, ...input }: ComponentPropsWithoutRef<"input"> & {
   label: string;
   name: string;
   error?: string;
 }) {
   return <label className="field" htmlFor={name}>
-    <span>{label}</span>
-    <input {...input} id={name} name={name} aria-invalid={error ? true : undefined}
+    <span>{label}{required && <span className="field-required" aria-hidden="true"> (required)</span>}</span>
+    <input {...input} id={name} name={name} required={required} aria-invalid={error ? true : undefined}
       aria-describedby={error ? `${name}-error` : undefined} />
     {error && <span className="field-error" id={`${name}-error`}>{error}</span>}
   </label>;
 }
 
-export function Toggle({ name, label, checked }: { name: string; label: string; checked: boolean }) {
-  return <label className="toggle"><input type="checkbox" name={name} defaultChecked={checked} />{label}</label>;
+export function Toggle({ name, label, checked, onChange }: {
+  name: string; label: string; checked: boolean; onChange: (checked: boolean) => void;
+}) {
+  return <label className="toggle">
+    <input type="checkbox" name={name} checked={checked} onChange={({ currentTarget }) => onChange(currentTarget.checked)} />
+    {label}
+  </label>;
 }

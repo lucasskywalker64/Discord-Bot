@@ -18,7 +18,7 @@ const steps = [
   { step: "STORAGE", label: "Storage" },
 ] as const;
 const serverGuide = "Use the address people open to reach your public dashboard, such as https://bot.example.com. "
-  + "Leave it blank for a bot-only installation.";
+  + "Required for public Discord sign-in and Twitch. Leave it blank for a bot-only installation.";
 const discordGuide = <>Find your token on your application's <strong>Bot</strong> page in the
   {" "}<a href="https://discord.com/developers/applications" target="_blank" rel="noreferrer">Discord Developer Portal</a>.
   For public sign-in, open <strong>OAuth2</strong>, register the exact callback URL below under <strong>Redirects</strong>,
